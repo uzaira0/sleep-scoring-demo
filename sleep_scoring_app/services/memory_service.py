@@ -20,7 +20,7 @@ import contextlib
 from collections import OrderedDict
 from datetime import datetime, timedelta
 from threading import Lock
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from sleep_scoring_app.core.constants import MemoryConstants
 from sleep_scoring_app.core.exceptions import (
@@ -35,7 +35,7 @@ T = TypeVar("T")
 K = TypeVar("K")
 
 
-class BoundedCache[K, T]:
+class BoundedCache(Generic[K, T]):
     """Thread-safe LRU cache with size limits and memory monitoring."""
 
     def __init__(self, max_size: int = MemoryConstants.CACHE_MAX_SIZE, max_memory_mb: int = MemoryConstants.CACHE_MAX_MEMORY_MB) -> None:
