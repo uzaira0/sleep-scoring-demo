@@ -1,0 +1,454 @@
+#!/usr/bin/env python3
+"""
+Marker Table Manager for Sleep Scoring Application.
+
+Manages marker table display, updates, click handlers, and data fetching for marker tables.
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import date, datetime, timedelta
+from typing import TYPE_CHECKING, Any
+
+from PyQt6.QtGui import QColor
+
+from sleep_scoring_app.core.constants import ActivityDataPreference, TableDimensions
+from sleep_scoring_app.utils.table_helpers import update_marker_table
+
+if TYPE_CHECKING:
+    from sleep_scoring_app.ui.main_window import SleepScoringMainWindow
+
+logger = logging.getLogger(__name__)
+
+
+class MarkerTableManager:
+    """
+    Manages marker table operations for the main window.
+
+    Responsibilities:
+    - Update onset/offset marker tables with data
+    - Handle custom table colors
+    - Update pop-out windows when visible
+    - Manage table click handlers
+    """
+
+    def __init__(self, parent: SleepScoringMainWindow) -> None:
+        """
+        Initialize the marker table manager.
+
+        Args:
+            parent: Reference to main window for table and widget access
+
+        """
+        self.parent = parent
+        logger.info("MarkerTableManager initialized")
+
+    def update_marker_tables(self, onset_data: list, offset_data: list) -> None:
+        """Update the data tables with surrounding marker information."""
+        logger.debug(f"Updating marker tables: onset_data={len(onset_data)} rows, offset_data={len(offset_data)} rows")
+
+        # Store the data for use by click handlers
+        self.parent._onset_table_data = onset_data
+        self.parent._offset_table_data = offset_data
+
+        # Get custom table colors if they exist
+        custom_table_colors = getattr(self.parent.plot_widget, "custom_table_colors", None)
+
+        # Use custom colors if available, otherwise defaults
+        if custom_table_colors and "onset_bg" in custom_table_colors:
+            onset_bg = QColor(custom_table_colors["onset_bg"])
+        else:
+            onset_bg = QColor(TableDimensions.ONSET_MARKER_BACKGROUND)
+
+        if custom_table_colors and "onset_fg" in custom_table_colors:
+            onset_fg = QColor(custom_table_colors["onset_fg"])
+        else:
+            onset_fg = QColor(TableDimensions.ONSET_MARKER_FOREGROUND)
+
+        if custom_table_colors and "offset_bg" in custom_table_colors:
+            offset_bg = QColor(custom_table_colors["offset_bg"])
+        else:
+            offset_bg = QColor(TableDimensions.OFFSET_MARKER_BACKGROUND)
+
+        if custom_table_colors and "offset_fg" in custom_table_colors:
+            offset_fg = QColor(custom_table_colors["offset_fg"])
+        else:
+            offset_fg = QColor(TableDimensions.OFFSET_MARKER_FOREGROUND)
+
+        update_marker_table(self.parent.onset_table, onset_data, onset_bg, onset_fg, custom_table_colors)
+        update_marker_table(self.parent.offset_table, offset_data, offset_bg, offset_fg, custom_table_colors)
+
+        # Update pop-out windows if they exist and are visible
+        self._update_popout_windows()
+
+    def _update_popout_windows(self) -> None:
+        """Update pop-out windows with full 48-hour data if visible."""
+        if not hasattr(self.parent, "analysis_tab") or not self.parent.analysis_tab:
+            return
+
+        # Update onset pop-out window
+        if hasattr(self.parent.analysis_tab, "onset_popout_window") and self.parent.analysis_tab.onset_popout_window:
+            if self.parent.analysis_tab.onset_popout_window.isVisible():
+                self._update_onset_popout()
+
+        # Update offset pop-out window
+        if hasattr(self.parent.analysis_tab, "offset_popout_window") and self.parent.analysis_tab.offset_popout_window:
+            if self.parent.analysis_tab.offset_popout_window.isVisible():
+                self._update_offset_popout()
+
+    def _update_onset_popout(self) -> None:
+        """Update onset pop-out window with full 48-hour data."""
+        # Get the current onset marker timestamp for highlighting
+        onset_timestamp = None
+        if hasattr(self.parent, "plot_widget") and hasattr(self.parent.plot_widget, "get_selected_marker_period"):
+            selected_period = self.parent.plot_widget.get_selected_marker_period()
+            if selected_period and selected_period.onset_timestamp:
+                onset_timestamp = selected_period.onset_timestamp
+
+        # Reload full 2880 rows with updated marker position
+        full_onset_data = self.get_full_48h_data_for_popout(marker_timestamp=onset_timestamp)
+        self.parent.analysis_tab.onset_popout_window.update_table_data(full_onset_data)
+
+        # Scroll to the marker position
+        if onset_timestamp is not None:
+            for row_idx, row_data in enumerate(full_onset_data):
+                if row_data.get("is_marker", False):
+                    self.parent.analysis_tab.onset_popout_window.scroll_to_row(row_idx)
+                    break
+
+        logger.debug(f"Updated onset pop-out window with {len(full_onset_data)} rows (full 48h period)")
+
+    def _update_offset_popout(self) -> None:
+        """Update offset pop-out window with full 48-hour data."""
+        # Get the current offset marker timestamp for highlighting
+        offset_timestamp = None
+        if hasattr(self.parent, "plot_widget") and hasattr(self.parent.plot_widget, "get_selected_marker_period"):
+            selected_period = self.parent.plot_widget.get_selected_marker_period()
+            if selected_period and selected_period.offset_timestamp:
+                offset_timestamp = selected_period.offset_timestamp
+
+        # Reload full 2880 rows with updated marker position
+        full_offset_data = self.get_full_48h_data_for_popout(marker_timestamp=offset_timestamp)
+        self.parent.analysis_tab.offset_popout_window.update_table_data(full_offset_data)
+
+        # Scroll to the marker position
+        if offset_timestamp is not None:
+            for row_idx, row_data in enumerate(full_offset_data):
+                if row_data.get("is_marker", False):
+                    self.parent.analysis_tab.offset_popout_window.scroll_to_row(row_idx)
+                    break
+
+        logger.debug(f"Updated offset pop-out window with {len(full_offset_data)} rows (full 48h period)")
+
+    def move_marker_from_table_click(self, marker_type: str, row: int) -> None:
+        """
+        Move a marker based on table row click.
+
+        Args:
+            marker_type: "onset" or "offset"
+            row: The row index that was clicked
+
+        """
+        try:
+            # Check if we have plot widget and it's ready
+            if not hasattr(self.parent, "plot_widget") or not self.parent.plot_widget:
+                logger.warning("Plot widget not available for marker movement")
+                return
+
+            # Get the appropriate table data
+            if marker_type == "onset":
+                table_data = getattr(self.parent, "_onset_table_data", None)
+            else:
+                table_data = getattr(self.parent, "_offset_table_data", None)
+
+            if not table_data or row >= len(table_data):
+                logger.warning(f"No data available for row {row} in {marker_type} table")
+                return
+
+            # Get the row data
+            row_data = table_data[row]
+
+            # Check if this is the marker row itself (no-op)
+            if row_data.get("is_marker", False):
+                logger.debug(f"Clicked on current {marker_type} marker row - no movement needed")
+                return
+
+            # Extract timestamp from the row
+            if "timestamp" in row_data:
+                # Direct timestamp available
+                target_timestamp = row_data["timestamp"]
+            elif "time" in row_data:
+                # Need to parse time string and find corresponding timestamp
+                time_str = row_data["time"]
+
+                # Get current date and timestamps from plot
+                if not hasattr(self.parent.plot_widget, "timestamps") or not self.parent.plot_widget.timestamps:
+                    logger.warning("No timestamps available in plot widget")
+                    return
+
+                # Find matching timestamp by time string
+                target_timestamp = self.parent._find_timestamp_by_time_string(time_str)
+                if target_timestamp is None:
+                    logger.warning(f"Could not find timestamp for time {time_str}")
+                    return
+            else:
+                logger.warning(f"No timestamp information in row data: {row_data}")
+                return
+
+            # Get the currently selected period to determine which period to move
+            selected_period = None
+            period_slot = None
+
+            if hasattr(self.parent.plot_widget, "get_selected_marker_period"):
+                selected_period = self.parent.plot_widget.get_selected_marker_period()
+                if selected_period:
+                    # Use the marker_index from the selected period
+                    period_slot = selected_period.marker_index
+                    logger.debug(f"Moving {marker_type} marker for period {period_slot} ({selected_period.marker_type.value})")
+
+            # Move the marker to the target timestamp
+            success = self.parent.plot_widget.move_marker_to_timestamp(marker_type, target_timestamp, period_slot)
+
+            if success:
+                logger.info(f"Successfully moved {marker_type} marker for period {period_slot} to row {row}")
+                # Auto-save after successful movement
+                self.parent.auto_save_current_markers()
+            else:
+                logger.warning(f"Failed to move {marker_type} marker for period {period_slot} to row {row}")
+
+        except Exception as e:
+            logger.error(f"Error moving {marker_type} marker from table click: {e}", exc_info=True)
+
+    def get_marker_data_cached(self, marker_timestamp: float, cached_idx: int | None = None) -> list[dict[str, Any]]:
+        """Get marker surrounding data using cached index for better performance during drag operations."""
+        surrounding_data = []
+
+        # ALWAYS use full 48hr data for tables, not the filtered view data
+        full_48h_timestamps = getattr(self.parent.plot_widget, "main_48h_timestamps", None)
+        full_48h_activity = getattr(self.parent.plot_widget, "main_48h_activity", None)
+
+        # Get axis_y data (unified loader handles caching automatically)
+        full_48h_axis_y = None
+
+        # Check if plot widget has cached axis_y data
+        if hasattr(self.parent.plot_widget, "main_48h_axis_y_data") and self.parent.plot_widget.main_48h_axis_y_data:
+            full_48h_axis_y = self.parent.plot_widget.main_48h_axis_y_data
+            logger.info("TABLE: Using cached axis_y data: %d points", len(full_48h_axis_y))
+        else:
+            # Load axis_y data via unified loader
+            logger.info("TABLE: Loading fresh axis_y data via unified loader (cache was cleared or empty)")
+            full_48h_axis_y = self.parent._get_axis_y_data_for_sadeh()
+
+        if not full_48h_axis_y:
+            logger.error("TABLE: No axis_y data available!")
+
+        # Try to load Vector Magnitude data
+        full_48h_vm = self._load_vector_magnitude_data()
+
+        # Log VM data availability
+        logger.debug("Vector magnitude data length: %d", len(full_48h_vm) if full_48h_vm else 0)
+
+        # If no 48hr data, fall back to current view data (for compatibility)
+        if full_48h_timestamps is None or full_48h_activity is None:
+            full_48h_timestamps = self.parent.plot_widget.timestamps if hasattr(self.parent.plot_widget, "timestamps") else None
+            full_48h_activity = self.parent.plot_widget.activity_data if hasattr(self.parent.plot_widget, "activity_data") else None
+
+        if not full_48h_timestamps:
+            return surrounding_data
+
+        # Find index in full 48hr data directly
+        if cached_idx is not None and 0 <= cached_idx < len(full_48h_timestamps):
+            marker_idx = cached_idx
+        else:
+            marker_idx = self.parent._find_index_in_timestamps(full_48h_timestamps, marker_timestamp)
+            if marker_idx is not None:
+                self.parent._marker_index_cache[marker_timestamp] = marker_idx
+
+        if marker_idx is None:
+            return surrounding_data
+
+        # Log marker position
+        target_dt = datetime.fromtimestamp(marker_timestamp)
+        logger.debug("Marker at %s, index %d", target_dt.strftime("%Y-%m-%d %H:%M:%S"), marker_idx)
+
+        # Get various result arrays - use full 48hr results
+        sadeh_results = getattr(self.parent.plot_widget, "main_48h_sadeh_results", getattr(self.parent.plot_widget, "sadeh_results", []))
+
+        # If no Sadeh results available, trigger algorithm calculation
+        if not sadeh_results:
+            logger.debug("No Sadeh results available, triggering algorithm calculation")
+            if hasattr(self.parent.plot_widget, "plot_algorithms") and callable(self.parent.plot_widget.plot_algorithms):
+                try:
+                    self.parent.plot_widget.plot_algorithms()
+                    sadeh_results = getattr(self.parent.plot_widget, "main_48h_sadeh_results", getattr(self.parent.plot_widget, "sadeh_results", []))
+                except Exception as e:
+                    logger.exception("Failed to run algorithms for table: %s", e)
+
+        choi_results = (
+            self.parent.plot_widget.get_choi_results_per_minute() if hasattr(self.parent.plot_widget, "get_choi_results_per_minute") else []
+        )
+        nonwear_sensor_results = (
+            self.parent.plot_widget.get_nonwear_sensor_results_per_minute()
+            if hasattr(self.parent.plot_widget, "get_nonwear_sensor_results_per_minute")
+            else []
+        )
+
+        # Get 21 elements around marker (10 before + marker + 10 after)
+        start_idx = max(0, marker_idx - TableDimensions.ELEMENTS_AROUND_MARKER)
+        end_idx = min(len(full_48h_timestamps), marker_idx + TableDimensions.ELEMENTS_AROUND_MARKER + 1)
+
+        for i in range(start_idx, end_idx):
+            if i < len(full_48h_timestamps):
+                is_marker = i == marker_idx
+                sadeh_value = sadeh_results[i] if i < len(sadeh_results) else 0
+                choi_value = choi_results[i] if i < len(choi_results) else 0
+                nwt_value = nonwear_sensor_results[i] if i < len(nonwear_sensor_results) else 0
+
+                axis_y_value = int(full_48h_axis_y[i]) if full_48h_axis_y and i < len(full_48h_axis_y) else 0
+                vm_value = int(full_48h_vm[i]) if full_48h_vm and i < len(full_48h_vm) else 0
+
+                surrounding_data.append(
+                    {
+                        "time": full_48h_timestamps[i].strftime("%H:%M"),
+                        "timestamp": full_48h_timestamps[i].timestamp(),
+                        "axis_y": axis_y_value,
+                        "vm": vm_value,
+                        "sadeh": sadeh_value,
+                        "choi": choi_value,
+                        "nwt_sensor": nwt_value,
+                        "is_marker": is_marker,
+                    }
+                )
+
+        return surrounding_data
+
+    def get_full_48h_data_for_popout(self, marker_timestamp: float | None = None) -> list[dict[str, Any]]:
+        """
+        Get all 2880 rows of 48-hour data for pop-out tables (full day view).
+
+        Args:
+            marker_timestamp: Optional timestamp of the marker to highlight
+
+        Returns:
+            List of data dictionaries for all 2880 rows
+
+        """
+        full_data = []
+
+        # ALWAYS use full 48hr data for tables
+        full_48h_timestamps = getattr(self.parent.plot_widget, "main_48h_timestamps", None)
+        full_48h_activity = getattr(self.parent.plot_widget, "main_48h_activity", None)
+
+        # Get axis_y data
+        full_48h_axis_y = None
+        if hasattr(self.parent.plot_widget, "main_48h_axis_y_data") and self.parent.plot_widget.main_48h_axis_y_data:
+            full_48h_axis_y = self.parent.plot_widget.main_48h_axis_y_data
+        else:
+            full_48h_axis_y = self.parent._get_axis_y_data_for_sadeh()
+
+        if not full_48h_axis_y:
+            logger.error("POPOUT: No axis_y data available!")
+
+        # Load Vector Magnitude data
+        full_48h_vm = self._load_vector_magnitude_data()
+
+        # If no 48hr data, fall back to current view data
+        if full_48h_timestamps is None or full_48h_activity is None:
+            full_48h_timestamps = self.parent.plot_widget.timestamps if hasattr(self.parent.plot_widget, "timestamps") else None
+            full_48h_activity = self.parent.plot_widget.activity_data if hasattr(self.parent.plot_widget, "activity_data") else None
+
+        if not full_48h_timestamps:
+            return full_data
+
+        logger.debug("Loading %d rows for pop-out table", len(full_48h_timestamps))
+
+        # Get result arrays
+        sadeh_results = getattr(self.parent.plot_widget, "main_48h_sadeh_results", getattr(self.parent.plot_widget, "sadeh_results", []))
+
+        if not sadeh_results:
+            if hasattr(self.parent.plot_widget, "plot_algorithms") and callable(self.parent.plot_widget.plot_algorithms):
+                try:
+                    self.parent.plot_widget.plot_algorithms()
+                    sadeh_results = getattr(self.parent.plot_widget, "main_48h_sadeh_results", getattr(self.parent.plot_widget, "sadeh_results", []))
+                except Exception as e:
+                    logger.exception("Failed to run algorithms for popout table: %s", e)
+
+        choi_results = (
+            self.parent.plot_widget.get_choi_results_per_minute() if hasattr(self.parent.plot_widget, "get_choi_results_per_minute") else []
+        )
+        nonwear_sensor_results = (
+            self.parent.plot_widget.get_nonwear_sensor_results_per_minute()
+            if hasattr(self.parent.plot_widget, "get_nonwear_sensor_results_per_minute")
+            else []
+        )
+
+        # Get ALL rows
+        for i in range(len(full_48h_timestamps)):
+            sadeh_value = sadeh_results[i] if i < len(sadeh_results) else 0
+            choi_value = choi_results[i] if i < len(choi_results) else 0
+            nwt_value = nonwear_sensor_results[i] if i < len(nonwear_sensor_results) else 0
+
+            axis_y_value = int(full_48h_axis_y[i]) if full_48h_axis_y and i < len(full_48h_axis_y) else 0
+            vm_value = int(full_48h_vm[i]) if full_48h_vm and i < len(full_48h_vm) else 0
+
+            # Check if this row should be marked
+            is_marker = False
+            if marker_timestamp is not None:
+                row_timestamp = full_48h_timestamps[i].timestamp()
+                if abs(row_timestamp - marker_timestamp) < 30:
+                    is_marker = True
+
+            full_data.append(
+                {
+                    "time": full_48h_timestamps[i].strftime("%H:%M"),
+                    "timestamp": full_48h_timestamps[i].timestamp(),
+                    "axis_y": axis_y_value,
+                    "vm": vm_value,
+                    "sadeh": sadeh_value,
+                    "choi": choi_value,
+                    "nwt_sensor": nwt_value,
+                    "is_marker": is_marker,
+                }
+            )
+
+        return full_data
+
+    def _load_vector_magnitude_data(self) -> list[float] | None:
+        """Load vector magnitude data for table display."""
+        full_48h_vm = None
+        if hasattr(self.parent, "current_file_info") and self.parent.current_file_info:
+            current_filename = self.parent.current_file_info.get("filename")
+            current_date = (
+                self.parent.available_dates[self.parent.current_date_index]
+                if hasattr(self.parent, "current_date_index") and self.parent.available_dates
+                else None
+            )
+            if current_filename and current_date:
+                try:
+                    from sleep_scoring_app.core.constants import ActivityDataPreference, ViewHours
+
+                    # Handle both date and datetime objects
+                    if isinstance(current_date, date) and not isinstance(current_date, datetime):
+                        start_time = datetime.combine(current_date, datetime.min.time())
+                    else:
+                        start_time = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
+                    end_time = start_time + timedelta(hours=48)
+
+                    if self.parent.data_service.data_manager.use_database:
+                        _, full_48h_vm = self.parent.data_service.data_manager.db_manager.load_raw_activity_data(
+                            current_filename, start_time, end_time, activity_column=ActivityDataPreference.VECTOR_MAGNITUDE
+                        )
+                    else:
+                        _, full_48h_vm = self.parent.data_service.data_manager.load_real_data(
+                            current_date,
+                            ViewHours.HOURS_48,
+                            current_filename,
+                            activity_column=ActivityDataPreference.VECTOR_MAGNITUDE,
+                        )
+
+                except Exception as e:
+                    logger.exception("Failed to load vector magnitude data: %s", e)
+                    full_48h_vm = None
+
+        return full_48h_vm
