@@ -105,6 +105,9 @@ class DatabaseSchemaManager:
         # Migrate axis column names from numeric to directional (axis_1/2/3 -> axis_x/y/z)
         self._migrate_axis_column_names(conn, raw_activity_table)
 
+        # Add missing axis columns (for older databases that don't have them)
+        self._migrate_raw_activity_add_axis_columns(conn, raw_activity_table)
+
         # Create nonwear data tables
         self._create_nonwear_sensor_table(conn, nonwear_sensor_table)
         self._create_choi_periods_table(conn, choi_periods_table)
@@ -340,6 +343,37 @@ class DatabaseSchemaManager:
                     logger.info("Renamed column %s to %s in %s", old_name, new_name, table_name)
                 except sqlite3.OperationalError as e:
                     logger.warning("Failed to rename column %s to %s in %s: %s", old_name, new_name, table_name, e)
+
+    def _migrate_raw_activity_add_axis_columns(self, conn: sqlite3.Connection, table_name: str) -> None:
+        """
+        Add missing axis columns to raw_activity_data table.
+
+        This migration adds axis_x, axis_z, and vector_magnitude columns if they don't exist.
+        This handles databases created before these columns were added to the schema.
+        """
+        # Get existing columns
+        cursor = conn.execute(f"PRAGMA table_info({table_name})")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+
+        # Define columns that should exist
+        required_columns = [
+            (DatabaseColumn.AXIS_X, "REAL"),
+            (DatabaseColumn.AXIS_Z, "REAL"),
+            (DatabaseColumn.VECTOR_MAGNITUDE, "REAL"),
+        ]
+
+        for column_name, column_type in required_columns:
+            validated_column = self._validate_column_name(column_name)
+            if validated_column not in existing_columns:
+                try:
+                    conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {validated_column} {column_type}")
+                    logger.info("Added missing column %s to %s", validated_column, table_name)
+                except sqlite3.OperationalError as e:
+                    if "duplicate column name" in str(e).lower():
+                        # Column already exists, ignore
+                        pass
+                    else:
+                        logger.warning("Failed to add column %s to %s: %s", validated_column, table_name, e)
 
     def _create_nonwear_sensor_table(self, conn: sqlite3.Connection, table_name: str) -> None:
         """Create nonwear sensor periods table (sensor data has no indices, only timestamps)."""
