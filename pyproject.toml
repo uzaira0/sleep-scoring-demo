@@ -9,7 +9,7 @@ description = "Demo application for sleep scoring research using Sadeh and Choi 
 readme = "README.md"
 license = {text = "GPL-3.0-or-later"}
 authors = [{name = "Uzair Alam"}]
-requires-python = "==3.12"
+requires-python = ">=3.12"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
