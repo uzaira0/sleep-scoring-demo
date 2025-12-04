@@ -205,7 +205,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=datas,
-    hiddenimports=hidden_imports,
+    hiddenimports=hidden_imports + ['scipy'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -221,7 +221,7 @@ a = Analysis(
         'matplotlib.backends.backend_qt5',
         'matplotlib.backends._backend_qt5',
         # Exclude scipy to reduce size
-        'scipy',
+        # 'scipy',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
