@@ -9,15 +9,15 @@ description = "Demo application for sleep scoring research using Sadeh and Choi 
 readme = "README.md"
 license = {text = "GPL-3.0-or-later"}
 authors = [{name = "Uzair Alam"}]
-requires-python = ">=3.11"
+requires-python = "==3.12"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
+    #"Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
+    #"Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Medical Science Apps.",
     "scipy>=1.11.0",
 ]
@@ -25,7 +25,7 @@ classifiers = [
 dependencies = [
     "pandas>=2.0.0",
     "numpy>=1.24.0",
-    "pygt3x>=0.3.0",
+    "pygt3x>=1.26.1",
 ]
 
 [project.optional-dependencies]
