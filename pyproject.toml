@@ -45,6 +45,7 @@ dev = [
     "basedpyright>=1.18.0",
     "pre-commit>=3.0.0",
     "psutil>=5.9.0",
+    "scipy>=1.11.0",
 ]
 # Build dependencies - for creating distributable packages
 build = [
