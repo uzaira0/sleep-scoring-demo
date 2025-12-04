@@ -216,42 +216,51 @@ def calibrate(
             message=status,
         )
 
-    # Run optimization
+    # Run optimization or fallback if SciPy is unavailable
     input_data = stationary_points[:, 1:4]  # x, y, z means
 
-    # Initial guess
-    offset_init = np.zeros(3)
-    scale_init = np.ones(3)
-    x0 = np.concatenate([offset_init, scale_init])
+    if _scipy_available:
+        # Initial guess
+        offset_init = np.zeros(3)
+        scale_init = np.ones(3)
+        x0 = np.concatenate([offset_init, scale_init])
 
-    def residuals(params):
-        offset = params[:3]
-        scale = params[3:6]
-        calibrated = (input_data + offset) * scale
-        norms = np.sqrt(np.sum(calibrated**2, axis=1))
-        return norms - 1.0
+        def residuals(params):
+            offset = params[:3]
+            scale = params[3:6]
+            calibrated = (input_data + offset) * scale
+            norms = np.sqrt(np.sum(calibrated**2, axis=1))
+            return norms - 1.0
 
-    # Run optimizer with Levenberg-Marquardt
-    result = least_squares(
-        residuals,
-        x0=x0,
-        method="lm",
-        ftol=1.49e-8,
-        xtol=1.49e-8,
-        gtol=np.finfo(float).eps,
-    )
+        # Run optimizer with Levenberg-Marquardt
+        result = least_squares(
+            residuals,
+            x0=x0,
+            method="lm",
+            ftol=1.49e-8,
+            xtol=1.49e-8,
+            gtol=np.finfo(float).eps,
+        )
 
-    # Extract parameters
-    offset = result.x[:3]
-    scale = result.x[3:6]
+        # Extract parameters
+        offset = result.x[:3]
+        scale = result.x[3:6]
 
-    # Calculate errors
-    cal_error_start_vals = np.sqrt(np.sum(input_data**2, axis=1))
-    cal_error_start = np.round(np.mean(np.abs(cal_error_start_vals - 1)), 5)
+        # Calculate errors
+        cal_error_start_vals = np.sqrt(np.sum(input_data**2, axis=1))
+        cal_error_start = np.round(np.mean(np.abs(cal_error_start_vals - 1)), 5)
 
-    calibrated_data = (input_data + offset) * scale
-    cal_error_end_vals = np.sqrt(np.sum(calibrated_data**2, axis=1))
-    cal_error_end = np.round(np.mean(np.abs(cal_error_end_vals - 1)), 5)
+        calibrated_data = (input_data + offset) * scale
+        cal_error_end_vals = np.sqrt(np.sum(calibrated_data**2, axis=1))
+        cal_error_end = np.round(np.mean(np.abs(cal_error_end_vals - 1)), 5)
+    else:
+        # Simple approximation: assume scale ≈ 1 and offset ≈ mean of stationary points
+        scale = np.ones(3)
+        offset = np.mean(input_data, axis=0)
+
+        # Error estimates are not meaningful in the fallback; set to NaN
+        cal_error_start = np.nan
+        cal_error_end = np.nan
 
     return CalibrationResult(
         scale=scale,
