@@ -185,8 +185,15 @@ hidden_imports = [
     'importlib.metadata',
 ]
 
+
 # Initialize datas list
+
 datas = []
+# Add demo data folder to bundle
+demo_path = Path(__file__).parent / 'demo_data'
+if demo_path.exists():
+    datas.append((str(demo_path), 'demo_data'))
+
 
 # Add Qt platform plugins
 import PyQt6
