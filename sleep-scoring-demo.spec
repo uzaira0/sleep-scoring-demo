@@ -190,7 +190,9 @@ hidden_imports = [
 
 datas = []
 # Add demo data folder to bundle
-demo_path = Path(__file__).parent / 'demo_data'
+# Resolve the path to this spec file reliably
+spec_dir = Path(__file__).resolve().parent
+demo_path = spec_dir / 'demo_data'
 if demo_path.exists():
     datas.append((str(demo_path), 'demo_data'))
 
