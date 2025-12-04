@@ -55,7 +55,8 @@ class ColumnDefinition:
 
     # Behavior properties
     is_required: bool = False  # Required for data integrity
-    is_exportable: bool = True  # Include in exports
+    is_exportable: bool = True  # Show in export dialog and can be toggled
+    is_always_exported: bool = False  # Always exported, not toggleable in dialog
     is_autosaved: bool = True  # Include in autosave
     is_user_visible: bool = True  # Show in UI
 
@@ -154,13 +155,14 @@ class ColumnRegistry:
                 data_type=DataType.STRING,
                 database_column=DatabaseColumn.ANALYSIS_DATE,
                 export_column=ExportColumn.SLEEP_DATE,
+                is_always_exported=True,
                 ui_order=104,
                 ui_group="Participant Information",
                 description="The date/night being analyzed (from UI dropdown)",
             ),
         )
 
-        # Marker columns
+        # Marker columns - Unix timestamps are internal only, not exported
         self.register(
             ColumnDefinition(
                 name="onset_timestamp",
@@ -168,11 +170,12 @@ class ColumnRegistry:
                 column_type=ColumnType.MARKER,
                 data_type=DataType.FLOAT,
                 database_column=DatabaseColumn.ONSET_TIMESTAMP,
-                export_column=ExportColumn.ONSET_DATE,
+                export_column=None,
+                is_exportable=False,
                 is_required=False,
                 ui_order=200,
                 ui_group="Sleep Markers",
-                description="Unix timestamp of sleep onset",
+                description="Unix timestamp of sleep onset (internal use only)",
             ),
         )
 
@@ -183,11 +186,12 @@ class ColumnRegistry:
                 column_type=ColumnType.MARKER,
                 data_type=DataType.FLOAT,
                 database_column=DatabaseColumn.OFFSET_TIMESTAMP,
-                export_column=ExportColumn.OFFSET_DATE,
+                export_column=None,
+                is_exportable=False,
                 is_required=False,
                 ui_order=201,
                 ui_group="Sleep Markers",
-                description="Unix timestamp of sleep offset",
+                description="Unix timestamp of sleep offset (internal use only)",
             ),
         )
 
@@ -247,6 +251,23 @@ class ColumnRegistry:
                 ui_order=205,
                 ui_group="Sleep Markers",
                 description="Type of sleep marker (main_sleep, nap, nwt)",
+            ),
+        )
+
+        # Onset/offset rule column (NEW - for DI pattern)
+        self.register(
+            ColumnDefinition(
+                name="onset_offset_rule",
+                display_name="Onset/Offset Rule",
+                column_type=ColumnType.MARKER,
+                data_type=DataType.STRING,
+                database_column=DatabaseColumn.ONSET_OFFSET_RULE,
+                export_column=ExportColumn.ONSET_OFFSET_RULE,
+                is_always_exported=True,
+                ui_order=206,
+                ui_group="Sleep Markers",
+                default_value="consecutive_3_5",
+                description="Rule used to detect sleep onset and offset (e.g., Consecutive 3/5 Minutes, Tudor-Locke)",
             ),
         )
 
@@ -317,44 +338,96 @@ class ColumnRegistry:
         self.register(
             ColumnDefinition(
                 name="algorithm_type",
-                display_name="Sleep Algorithm",
+                display_name="Algorithm Type",
                 column_type=ColumnType.ALGORITHM,
                 data_type=DataType.STRING,
                 database_column=DatabaseColumn.ALGORITHM_TYPE,
                 export_column=ExportColumn.SLEEP_ALGORITHM,
                 ui_order=400,
                 ui_group="Algorithm Results",
-                default_value=AlgorithmType.COMBINED,
+                default_value=AlgorithmType.SADEH_1994_ACTILIFE,
+                description="Type of algorithm used (Manual, Combined, etc.)",
             ),
         )
 
+        # Generic sleep algorithm identifier (NEW - for DI pattern)
+        self.register(
+            ColumnDefinition(
+                name="sleep_algorithm_name",
+                display_name="Sleep Algorithm",
+                column_type=ColumnType.ALGORITHM,
+                data_type=DataType.STRING,
+                database_column=DatabaseColumn.SLEEP_ALGORITHM_NAME,
+                export_column=ExportColumn.SLEEP_ALGORITHM_NAME,
+                is_always_exported=True,
+                ui_order=401,
+                ui_group="Algorithm Results",
+                default_value="sadeh_1994",
+                description="Sleep scoring algorithm identifier (e.g., sadeh_1994, cole_kripke_1992)",
+            ),
+        )
+
+        # Legacy Sadeh columns (kept for backward compatibility)
         self.register(
             ColumnDefinition(
                 name="sadeh_onset",
-                display_name="Sadeh Algorithm Value at Sleep Onset",
+                display_name="Sleep Algorithm Value at Onset",
                 column_type=ColumnType.ALGORITHM,
                 data_type=DataType.INTEGER,
                 database_column=DatabaseColumn.SADEH_ONSET,
                 export_column=ExportColumn.SADEH_ONSET,
-                ui_order=401,
+                ui_order=402,
                 ui_group="Algorithm Results",
+                description="Sleep scoring algorithm value at onset marker (legacy column)",
             ),
         )
 
         self.register(
             ColumnDefinition(
                 name="sadeh_offset",
-                display_name="Sadeh Algorithm Value at Sleep Offset",
+                display_name="Sleep Algorithm Value at Offset",
                 column_type=ColumnType.ALGORITHM,
                 data_type=DataType.INTEGER,
                 database_column=DatabaseColumn.SADEH_OFFSET,
                 export_column=ExportColumn.SADEH_OFFSET,
-                ui_order=402,
+                ui_order=403,
                 ui_group="Algorithm Results",
+                description="Sleep scoring algorithm value at offset marker (legacy column)",
             ),
         )
 
-        # Add saved_date column for export
+        # Generic algorithm result columns (NEW - preferred for new code)
+        self.register(
+            ColumnDefinition(
+                name="sleep_algorithm_onset",
+                display_name="Sleep Algorithm Onset Value",
+                column_type=ColumnType.ALGORITHM,
+                data_type=DataType.INTEGER,
+                database_column=DatabaseColumn.SLEEP_ALGORITHM_ONSET,
+                export_column=ExportColumn.SLEEP_ALGORITHM_ONSET,
+                is_exportable=False,  # Hidden - use sadeh_onset for now (same data)
+                ui_order=404,
+                ui_group="Algorithm Results",
+                description="Sleep scoring algorithm value at onset marker (generic column)",
+            ),
+        )
+
+        self.register(
+            ColumnDefinition(
+                name="sleep_algorithm_offset",
+                display_name="Sleep Algorithm Offset Value",
+                column_type=ColumnType.ALGORITHM,
+                data_type=DataType.INTEGER,
+                database_column=DatabaseColumn.SLEEP_ALGORITHM_OFFSET,
+                export_column=ExportColumn.SLEEP_ALGORITHM_OFFSET,
+                is_exportable=False,  # Hidden - use sadeh_offset for now (same data)
+                ui_order=405,
+                ui_group="Algorithm Results",
+                description="Sleep scoring algorithm value at offset marker (generic column)",
+            ),
+        )
+
+        # Add saved_date column for export - always exported
         self.register(
             ColumnDefinition(
                 name="saved_date",
@@ -363,6 +436,7 @@ class ColumnRegistry:
                 data_type=DataType.STRING,
                 database_column=DatabaseColumn.UPDATED_AT,
                 export_column=ExportColumn.SAVED_AT,
+                is_always_exported=True,
                 ui_order=105,
                 ui_group="Metadata",
                 description="Date when record was saved",
@@ -465,7 +539,7 @@ class ColumnRegistry:
         self.register(
             ColumnDefinition(
                 name="choi_onset",
-                display_name="Choi Algorithm Onset",
+                display_name="Nonwear Algorithm Value at Onset",
                 column_type=ColumnType.ALGORITHM,
                 data_type=DataType.FLOAT,
                 database_column=DatabaseColumn.CHOI_ONSET,
@@ -479,7 +553,7 @@ class ColumnRegistry:
         self.register(
             ColumnDefinition(
                 name="choi_offset",
-                display_name="Choi Algorithm Offset",
+                display_name="Nonwear Algorithm Value at Offset",
                 column_type=ColumnType.ALGORITHM,
                 data_type=DataType.FLOAT,
                 database_column=DatabaseColumn.CHOI_OFFSET,
@@ -493,7 +567,7 @@ class ColumnRegistry:
         self.register(
             ColumnDefinition(
                 name="total_choi_counts",
-                display_name="Total Choi Counts",
+                display_name="Total Nonwear Algorithm Counts",
                 column_type=ColumnType.ALGORITHM,
                 data_type=DataType.FLOAT,
                 database_column=DatabaseColumn.TOTAL_CHOI_COUNTS,
@@ -508,7 +582,7 @@ class ColumnRegistry:
         self.register(
             ColumnDefinition(
                 name="nwt_onset",
-                display_name="NWT Sensor Onset",
+                display_name="Nonwear Sensor Value at Onset",
                 column_type=ColumnType.ALGORITHM,
                 data_type=DataType.FLOAT,
                 database_column=DatabaseColumn.NWT_ONSET,
@@ -522,7 +596,7 @@ class ColumnRegistry:
         self.register(
             ColumnDefinition(
                 name="nwt_offset",
-                display_name="NWT Sensor Offset",
+                display_name="Nonwear Sensor Value at Offset",
                 column_type=ColumnType.ALGORITHM,
                 data_type=DataType.FLOAT,
                 database_column=DatabaseColumn.NWT_OFFSET,
@@ -536,7 +610,7 @@ class ColumnRegistry:
         self.register(
             ColumnDefinition(
                 name="total_nwt_counts",
-                display_name="Total NWT Counts",
+                display_name="Total Nonwear Sensor Counts",
                 column_type=ColumnType.ALGORITHM,
                 data_type=DataType.FLOAT,
                 database_column=DatabaseColumn.TOTAL_NWT_COUNTS,
@@ -623,14 +697,14 @@ class ColumnRegistry:
         self.register(
             ColumnDefinition(
                 name="nap_occurred",
-                display_name="Nap Occurred",
+                display_name="Diary: Nap 1 Occurred",
                 column_type=ColumnType.MARKER,
                 data_type=DataType.BOOLEAN,
                 database_column=DatabaseColumn.NAP_OCCURRED,
                 export_column=ExportColumn.NAP_OCCURRED,
                 is_exportable=True,
                 ui_order=250,
-                ui_group="Nap Information",
+                ui_group="Diary: Nap Information",
                 default_value=False,
                 description="Whether a nap occurred during this period",
             ),
@@ -639,14 +713,14 @@ class ColumnRegistry:
         self.register(
             ColumnDefinition(
                 name="nap_onset_time",
-                display_name="Nap Onset Time",
+                display_name="Diary: Nap 1 Onset Time",
                 column_type=ColumnType.MARKER,
                 data_type=DataType.STRING,
                 database_column=DatabaseColumn.NAP_ONSET_TIME,
                 export_column=ExportColumn.NAP_ONSET_TIME,
                 is_exportable=True,
                 ui_order=251,
-                ui_group="Nap Information",
+                ui_group="Diary: Nap Information",
                 format_string="%H:%M",
                 description="Time when nap began",
             ),
@@ -655,14 +729,14 @@ class ColumnRegistry:
         self.register(
             ColumnDefinition(
                 name="nap_offset_time",
-                display_name="Nap Offset Time",
+                display_name="Diary: Nap 1 Offset Time",
                 column_type=ColumnType.MARKER,
                 data_type=DataType.STRING,
                 database_column=DatabaseColumn.NAP_OFFSET_TIME,
                 export_column=ExportColumn.NAP_OFFSET_TIME,
                 is_exportable=True,
                 ui_order=252,
-                ui_group="Nap Information",
+                ui_group="Diary: Nap Information",
                 format_string="%H:%M",
                 description="Time when nap ended",
             ),
@@ -672,14 +746,14 @@ class ColumnRegistry:
         self.register(
             ColumnDefinition(
                 name="nonwear_occurred",
-                display_name="Nonwear Occurred",
+                display_name="Diary: Nonwear Occurred",
                 column_type=ColumnType.MARKER,
                 data_type=DataType.BOOLEAN,
                 database_column=DatabaseColumn.NONWEAR_OCCURRED,
                 export_column=ExportColumn.NONWEAR_OCCURRED,
                 is_exportable=True,
                 ui_order=260,
-                ui_group="Nonwear Information",
+                ui_group="Diary: Nonwear Information",
                 default_value=False,
                 description="Whether device was not worn during this period",
             ),
@@ -688,14 +762,14 @@ class ColumnRegistry:
         self.register(
             ColumnDefinition(
                 name="nonwear_reason",
-                display_name="Nonwear Reason",
+                display_name="Diary: Nonwear Reason",
                 column_type=ColumnType.MARKER,
                 data_type=DataType.STRING,
                 database_column=DatabaseColumn.NONWEAR_REASON,
                 export_column=ExportColumn.NONWEAR_REASON,
                 is_exportable=True,
                 ui_order=261,
-                ui_group="Nonwear Information",
+                ui_group="Diary: Nonwear Information",
                 description="Reason for device not being worn",
             ),
         )
@@ -703,14 +777,14 @@ class ColumnRegistry:
         self.register(
             ColumnDefinition(
                 name="nonwear_start_time",
-                display_name="Nonwear Start Time",
+                display_name="Diary: Nonwear Start Time",
                 column_type=ColumnType.MARKER,
                 data_type=DataType.STRING,
                 database_column=DatabaseColumn.NONWEAR_START_TIME,
                 export_column=ExportColumn.NONWEAR_START_TIME,
                 is_exportable=True,
                 ui_order=262,
-                ui_group="Nonwear Information",
+                ui_group="Diary: Nonwear Information",
                 format_string="%H:%M",
                 description="Time when device was removed",
             ),
@@ -719,14 +793,14 @@ class ColumnRegistry:
         self.register(
             ColumnDefinition(
                 name="nonwear_end_time",
-                display_name="Nonwear End Time",
+                display_name="Diary: Nonwear End Time",
                 column_type=ColumnType.MARKER,
                 data_type=DataType.STRING,
                 database_column=DatabaseColumn.NONWEAR_END_TIME,
                 export_column=ExportColumn.NONWEAR_END_TIME,
                 is_exportable=True,
                 ui_order=263,
-                ui_group="Nonwear Information",
+                ui_group="Diary: Nonwear Information",
                 format_string="%H:%M",
                 description="Time when device was put back on",
             ),
@@ -736,14 +810,14 @@ class ColumnRegistry:
         self.register(
             ColumnDefinition(
                 name="nap_onset_time_2",
-                display_name="Nap 2 Onset Time",
+                display_name="Diary: Nap 2 Onset Time",
                 column_type=ColumnType.MARKER,
                 data_type=DataType.STRING,
                 database_column=DatabaseColumn.NAP_ONSET_TIME_2,
                 export_column=ExportColumn.NAP_ONSET_TIME_2,
                 is_exportable=True,
                 ui_order=253,
-                ui_group="Nap Information",
+                ui_group="Diary: Nap Information",
                 format_string="%H:%M",
                 description="Time when second nap began",
             ),
@@ -752,14 +826,14 @@ class ColumnRegistry:
         self.register(
             ColumnDefinition(
                 name="nap_offset_time_2",
-                display_name="Nap 2 Offset Time",
+                display_name="Diary: Nap 2 Offset Time",
                 column_type=ColumnType.MARKER,
                 data_type=DataType.STRING,
                 database_column=DatabaseColumn.NAP_OFFSET_TIME_2,
                 export_column=ExportColumn.NAP_OFFSET_TIME_2,
                 is_exportable=True,
                 ui_order=254,
-                ui_group="Nap Information",
+                ui_group="Diary: Nap Information",
                 format_string="%H:%M",
                 description="Time when second nap ended",
             ),
@@ -769,14 +843,14 @@ class ColumnRegistry:
         self.register(
             ColumnDefinition(
                 name="nap_onset_time_3",
-                display_name="Nap 3 Onset Time",
+                display_name="Diary: Nap 3 Onset Time",
                 column_type=ColumnType.MARKER,
                 data_type=DataType.STRING,
                 database_column=DatabaseColumn.NAP_ONSET_TIME_3,
                 export_column=ExportColumn.NAP_ONSET_TIME_3,
                 is_exportable=True,
                 ui_order=255,
-                ui_group="Nap Information",
+                ui_group="Diary: Nap Information",
                 format_string="%H:%M",
                 description="Time when third nap began",
             ),
@@ -785,14 +859,14 @@ class ColumnRegistry:
         self.register(
             ColumnDefinition(
                 name="nap_offset_time_3",
-                display_name="Nap 3 Offset Time",
+                display_name="Diary: Nap 3 Offset Time",
                 column_type=ColumnType.MARKER,
                 data_type=DataType.STRING,
                 database_column=DatabaseColumn.NAP_OFFSET_TIME_3,
                 export_column=ExportColumn.NAP_OFFSET_TIME_3,
                 is_exportable=True,
                 ui_order=256,
-                ui_group="Nap Information",
+                ui_group="Diary: Nap Information",
                 format_string="%H:%M",
                 description="Time when third nap ended",
             ),
@@ -802,14 +876,14 @@ class ColumnRegistry:
         self.register(
             ColumnDefinition(
                 name="nonwear_reason_2",
-                display_name="Nonwear 2 Reason",
+                display_name="Diary: Nonwear 2 Reason",
                 column_type=ColumnType.MARKER,
                 data_type=DataType.STRING,
                 database_column=DatabaseColumn.NONWEAR_REASON_2,
                 export_column=ExportColumn.NONWEAR_REASON_2,
                 is_exportable=True,
                 ui_order=264,
-                ui_group="Nonwear Information",
+                ui_group="Diary: Nonwear Information",
                 description="Reason for second nonwear period",
             ),
         )
@@ -817,14 +891,14 @@ class ColumnRegistry:
         self.register(
             ColumnDefinition(
                 name="nonwear_start_time_2",
-                display_name="Nonwear 2 Start Time",
+                display_name="Diary: Nonwear 2 Start Time",
                 column_type=ColumnType.MARKER,
                 data_type=DataType.STRING,
                 database_column=DatabaseColumn.NONWEAR_START_TIME_2,
                 export_column=ExportColumn.NONWEAR_START_TIME_2,
                 is_exportable=True,
                 ui_order=265,
-                ui_group="Nonwear Information",
+                ui_group="Diary: Nonwear Information",
                 format_string="%H:%M",
                 description="Time when device was removed (2nd period)",
             ),
@@ -833,14 +907,14 @@ class ColumnRegistry:
         self.register(
             ColumnDefinition(
                 name="nonwear_end_time_2",
-                display_name="Nonwear 2 End Time",
+                display_name="Diary: Nonwear 2 End Time",
                 column_type=ColumnType.MARKER,
                 data_type=DataType.STRING,
                 database_column=DatabaseColumn.NONWEAR_END_TIME_2,
                 export_column=ExportColumn.NONWEAR_END_TIME_2,
                 is_exportable=True,
                 ui_order=266,
-                ui_group="Nonwear Information",
+                ui_group="Diary: Nonwear Information",
                 format_string="%H:%M",
                 description="Time when device was put back on (2nd period)",
             ),
@@ -849,14 +923,14 @@ class ColumnRegistry:
         self.register(
             ColumnDefinition(
                 name="nonwear_reason_3",
-                display_name="Nonwear 3 Reason",
+                display_name="Diary: Nonwear 3 Reason",
                 column_type=ColumnType.MARKER,
                 data_type=DataType.STRING,
                 database_column=DatabaseColumn.NONWEAR_REASON_3,
                 export_column=ExportColumn.NONWEAR_REASON_3,
                 is_exportable=True,
                 ui_order=267,
-                ui_group="Nonwear Information",
+                ui_group="Diary: Nonwear Information",
                 description="Reason for third nonwear period",
             ),
         )
@@ -864,14 +938,14 @@ class ColumnRegistry:
         self.register(
             ColumnDefinition(
                 name="nonwear_start_time_3",
-                display_name="Nonwear 3 Start Time",
+                display_name="Diary: Nonwear 3 Start Time",
                 column_type=ColumnType.MARKER,
                 data_type=DataType.STRING,
                 database_column=DatabaseColumn.NONWEAR_START_TIME_3,
                 export_column=ExportColumn.NONWEAR_START_TIME_3,
                 is_exportable=True,
                 ui_order=268,
-                ui_group="Nonwear Information",
+                ui_group="Diary: Nonwear Information",
                 format_string="%H:%M",
                 description="Time when device was removed (3rd period)",
             ),
@@ -880,14 +954,14 @@ class ColumnRegistry:
         self.register(
             ColumnDefinition(
                 name="nonwear_end_time_3",
-                display_name="Nonwear 3 End Time",
+                display_name="Diary: Nonwear 3 End Time",
                 column_type=ColumnType.MARKER,
                 data_type=DataType.STRING,
                 database_column=DatabaseColumn.NONWEAR_END_TIME_3,
                 export_column=ExportColumn.NONWEAR_END_TIME_3,
                 is_exportable=True,
                 ui_order=269,
-                ui_group="Nonwear Information",
+                ui_group="Diary: Nonwear Information",
                 format_string="%H:%M",
                 description="Time when device was put back on (3rd period)",
             ),

@@ -257,3 +257,153 @@ def score_activity(activity_data: list[float] | np.ndarray, threshold: float = -
     logger.debug(f"Sadeh algorithm completed successfully for {len(capped_activity)} epochs")
 
     return sleep_wake_scores.tolist()
+
+
+class SadehAlgorithm:
+    """
+    Sadeh (1994) sleep scoring algorithm - Protocol implementation.
+
+    This class implements the SleepScoringAlgorithm protocol for dependency injection.
+    The original function-based API (sadeh_score, score_activity) is preserved for
+    backward compatibility.
+
+    The Sadeh algorithm uses an 11-minute sliding window to classify each epoch
+    as sleep or wake based on activity counts. It ALWAYS uses the vertical axis
+    (Axis1/axis_y) regardless of configuration.
+
+    Two variants are supported:
+        - Original (threshold=0.0): As published in Sadeh et al. (1994)
+        - ActiLife (threshold=-4.0): As implemented in ActiGraph's ActiLife software
+
+    Parameters:
+        threshold: Sleep/wake classification threshold
+            - 0.0: Original Sadeh (1994) paper threshold
+            - -4.0: ActiLife software threshold (default)
+        variant_name: Optional variant name override for display/identifier
+
+    Example:
+        >>> from sleep_scoring_app.core.algorithms import SadehAlgorithm
+        >>>
+        >>> # Create with ActiLife threshold (default)
+        >>> algorithm = SadehAlgorithm()
+        >>>
+        >>> # Create with original paper threshold
+        >>> algorithm = SadehAlgorithm(threshold=0.0, variant_name="original")
+        >>>
+        >>> # Score DataFrame
+        >>> df = algorithm.score(activity_df)
+        >>>
+        >>> # Score array (legacy API)
+        >>> scores = algorithm.score_array(activity_counts)
+
+    References:
+        Sadeh, A., Sharkey, M., & Carskadon, M. A. (1994).
+        Activity-based sleep-wake identification: An empirical test of
+        methodological issues. Sleep, 17(3), 201-207.
+
+    """
+
+    def __init__(self, threshold: float = -4.0, variant_name: str | None = None) -> None:
+        """
+        Initialize Sadeh algorithm with configurable threshold.
+
+        Args:
+            threshold: Sleep/wake classification threshold
+                - 0.0: Original Sadeh (1994) paper threshold
+                - -4.0: ActiLife software threshold (default)
+            variant_name: Optional variant name ("original" or "actilife") for display/identifier.
+                         If None, inferred from threshold value.
+
+        """
+        self._threshold = threshold
+        self._variant_name = variant_name
+        self._parameters = {
+            "threshold": threshold,
+            "window_size": WINDOW_SIZE,
+            "activity_cap": ACTIVITY_CAP,
+            "nats_min": NATS_MIN,
+            "nats_max": NATS_MAX,
+        }
+
+    @property
+    def name(self) -> str:
+        """Algorithm name for display."""
+        if self._variant_name == "original" or self._threshold == 0.0:
+            return "Sadeh (1994) Original"
+        return "Sadeh (1994) ActiLife"
+
+    @property
+    def identifier(self) -> str:
+        """Unique algorithm identifier."""
+        if self._variant_name == "original" or self._threshold == 0.0:
+            return "sadeh_1994_original"
+        return "sadeh_1994_actilife"
+
+    @property
+    def requires_axis(self) -> str:
+        """Required accelerometer axis - always axis_y (vertical) for Sadeh."""
+        return "axis_y"
+
+    def score(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Score sleep/wake using Sadeh algorithm.
+
+        Args:
+            df: DataFrame with datetime column and 'Axis1' activity column
+
+        Returns:
+            Original DataFrame with added 'Sleep Score' column (1=sleep, 0=wake)
+
+        """
+        return sadeh_score(df, threshold=self._threshold)
+
+    def score_array(
+        self,
+        activity_data: list[float] | np.ndarray,
+        timestamps: list | None = None,
+    ) -> list[int]:
+        """
+        Score sleep/wake from array (legacy API).
+
+        Args:
+            activity_data: List or array of activity count values
+            timestamps: Optional list of timestamps (for validation, not used)
+
+        Returns:
+            List of sleep/wake classifications (1=sleep, 0=wake)
+
+        """
+        return score_activity(activity_data, threshold=self._threshold)
+
+    def get_parameters(self) -> dict[str, float | int]:
+        """
+        Get current algorithm parameters.
+
+        Returns:
+            Dictionary of parameter names and values
+
+        """
+        return self._parameters.copy()
+
+    def set_parameters(self, **kwargs: float) -> None:
+        """
+        Update algorithm parameters.
+
+        Only 'threshold' is configurable for Sadeh. Other parameters are
+        validated constants from the published paper and cannot be changed.
+
+        Args:
+            **kwargs: Parameter name-value pairs (only 'threshold' accepted)
+
+        """
+        if "threshold" in kwargs:
+            self._threshold = float(kwargs["threshold"])
+            self._parameters["threshold"] = self._threshold
+
+        # Warn about ignored parameters (they're validated constants)
+        invalid_params = set(kwargs.keys()) - {"threshold"}
+        if invalid_params:
+            logger.warning(
+                "Sadeh algorithm parameters %s cannot be changed. They are validated constants from the published paper.",
+                invalid_params,
+            )

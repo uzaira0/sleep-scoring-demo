@@ -14,7 +14,7 @@ import pyqtgraph as pg
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QFont
 
-from sleep_scoring_app.core.algorithms import SleepScoringAlgorithms
+from sleep_scoring_app.core.algorithms import NonwearAlgorithmFactory
 from sleep_scoring_app.core.constants import MarkerLimits, NonwearDataSource, UIColors
 from sleep_scoring_app.core.dataclasses import DailySleepMarkers, SleepPeriod
 from sleep_scoring_app.ui.widgets.plot_algorithm_manager import PlotAlgorithmManager
@@ -1149,18 +1149,11 @@ class ActivityPlotWidget(pg.PlotWidget):
         if not hasattr(self, "axis_y_data"):
             return []
 
-        choi_per_minute = [0] * len(self.axis_y_data)
-        algorithms = SleepScoringAlgorithms()
-        choi_periods = algorithms.run_choi_algorithm(self.axis_y_data)
+        # Use NonwearAlgorithmFactory (DI pattern)
+        choi_algorithm = NonwearAlgorithmFactory.create("choi_2011")
+        choi_mask = choi_algorithm.detect_mask(self.axis_y_data)
 
-        # Convert periods to per-minute mask
-        for period in choi_periods:
-            start_idx = period["start_index"]
-            end_idx = period["end_index"]
-            for i in range(start_idx, min(end_idx + 1, len(choi_per_minute))):
-                choi_per_minute[i] = 1
-
-        return choi_per_minute
+        return choi_mask
 
     def get_nonwear_sensor_results_per_minute(self) -> list[int]:
         """Get nonwear sensor periods as per-minute results (1=nonwear, 0=wear)."""

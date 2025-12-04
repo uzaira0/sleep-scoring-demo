@@ -605,8 +605,33 @@ class DataSettingsTab(QWidget):
         # Global Settings Grid
         settings_grid = QGridLayout()
 
+        # Data Source Type dropdown (DI pattern)
+        settings_grid.addWidget(QLabel("Data Source Type:"), 0, 0)
+        self.data_source_combo = QComboBox()
+
+        # Populate from factory
+        from sleep_scoring_app.core.algorithms.datasource_factory import DataSourceFactory
+
+        available_loaders = DataSourceFactory.get_available_loaders()
+        for loader_id, display_name in available_loaders.items():
+            self.data_source_combo.addItem(display_name, loader_id)
+
+        # Set current value from config (block signals during initialization)
+        self.data_source_combo.blockSignals(True)
+        current_loader_id = self.parent.config_manager.config.data_source_type_id
+        for i in range(self.data_source_combo.count()):
+            if self.data_source_combo.itemData(i) == current_loader_id:
+                self.data_source_combo.setCurrentIndex(i)
+                break
+        self.data_source_combo.blockSignals(False)
+
+        self.data_source_combo.currentIndexChanged.connect(self._on_data_source_changed)
+        self.data_source_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.data_source_combo.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        settings_grid.addWidget(self.data_source_combo, 0, 1)
+
         # Device Preset dropdown with auto-detect
-        settings_grid.addWidget(QLabel("Device Preset:"), 0, 0)
+        settings_grid.addWidget(QLabel("Device Preset:"), 1, 0)
         self.device_preset_combo = QComboBox()
         device_display_names = {
             DevicePreset.ACTIGRAPH: "ActiGraph",
@@ -629,46 +654,46 @@ class DataSettingsTab(QWidget):
         self.device_preset_combo.currentIndexChanged.connect(self._on_device_preset_changed)
         self.device_preset_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.device_preset_combo.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        settings_grid.addWidget(self.device_preset_combo, 0, 1)
+        settings_grid.addWidget(self.device_preset_combo, 1, 1)
 
         # Auto-detect device button
         self.device_autodetect_btn = QPushButton("Auto-detect")
         self.device_autodetect_btn.clicked.connect(self._autodetect_device_format)
-        settings_grid.addWidget(self.device_autodetect_btn, 0, 2)
+        settings_grid.addWidget(self.device_autodetect_btn, 1, 2)
 
         # Configure Columns button (enabled only for Generic CSV)
         self.configure_columns_btn = QPushButton("Configure Columns...")
         self.configure_columns_btn.setEnabled(current_preset == DevicePreset.GENERIC_CSV.value)
         self.configure_columns_btn.clicked.connect(self._open_column_mapping_dialog)
-        settings_grid.addWidget(self.configure_columns_btn, 0, 3)
+        settings_grid.addWidget(self.configure_columns_btn, 1, 3)
 
         # Epoch length
-        settings_grid.addWidget(QLabel("Epoch Length (seconds):"), 1, 0)
+        settings_grid.addWidget(QLabel("Epoch Length (seconds):"), 2, 0)
         self.epoch_length_spin = QSpinBox()
         self.epoch_length_spin.setRange(1, 300)
         self.epoch_length_spin.setValue(self.parent.config_manager.config.epoch_length)
         self.epoch_length_spin.valueChanged.connect(self.parent.on_epoch_length_changed)
         self.epoch_length_spin.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        settings_grid.addWidget(self.epoch_length_spin, 1, 1)
+        settings_grid.addWidget(self.epoch_length_spin, 2, 1)
 
         # Auto-detect button for Epoch Length
         self.epoch_autodetect_btn = QPushButton("Auto-detect")
         self.epoch_autodetect_btn.clicked.connect(self._autodetect_epoch_length)
-        settings_grid.addWidget(self.epoch_autodetect_btn, 1, 2)
+        settings_grid.addWidget(self.epoch_autodetect_btn, 2, 2)
 
         # Skip rows
-        settings_grid.addWidget(QLabel("Skip Rows:"), 2, 0)
+        settings_grid.addWidget(QLabel("Skip Rows:"), 3, 0)
         self.skip_rows_spin = QSpinBox()
         self.skip_rows_spin.setRange(0, 100)
         self.skip_rows_spin.setValue(self.parent.config_manager.config.skip_rows)
         self.skip_rows_spin.valueChanged.connect(self.parent.on_skip_rows_changed)
         self.skip_rows_spin.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        settings_grid.addWidget(self.skip_rows_spin, 2, 1)
+        settings_grid.addWidget(self.skip_rows_spin, 3, 1)
 
         # Auto-detect button for Skip Rows
         self.skip_rows_autodetect_btn = QPushButton("Auto-detect")
         self.skip_rows_autodetect_btn.clicked.connect(self._autodetect_skip_rows)
-        settings_grid.addWidget(self.skip_rows_autodetect_btn, 2, 2)
+        settings_grid.addWidget(self.skip_rows_autodetect_btn, 3, 2)
 
         # Auto-detect all button
         self.autodetect_all_btn = QPushButton("Auto-detect All")
@@ -684,9 +709,59 @@ class DataSettingsTab(QWidget):
             }
         """)
         self.autodetect_all_btn.clicked.connect(self._autodetect_all)
-        settings_grid.addWidget(self.autodetect_all_btn, 2, 3)
+        settings_grid.addWidget(self.autodetect_all_btn, 3, 3)
 
         activity_layout.addLayout(settings_grid)
+
+        # CSV-specific options section
+        self.csv_options_widget = QWidget()
+        csv_options_layout = QGridLayout(self.csv_options_widget)
+        csv_options_layout.setContentsMargins(20, 10, 0, 10)
+
+        csv_options_layout.addWidget(QLabel("CSV Skip Rows:"), 0, 0)
+        self.csv_skip_rows_spin = QSpinBox()
+        self.csv_skip_rows_spin.setRange(0, 100)
+        self.csv_skip_rows_spin.blockSignals(True)
+        self.csv_skip_rows_spin.setValue(self.parent.config_manager.config.csv_skip_rows)
+        self.csv_skip_rows_spin.blockSignals(False)
+        self.csv_skip_rows_spin.valueChanged.connect(self._on_csv_skip_rows_changed)
+        self.csv_skip_rows_spin.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.csv_skip_rows_spin.setToolTip("Number of header rows to skip in CSV files")
+        csv_options_layout.addWidget(self.csv_skip_rows_spin, 0, 1)
+        csv_options_layout.setColumnStretch(2, 1)
+
+        activity_layout.addWidget(self.csv_options_widget)
+
+        # GT3X-specific options section
+        self.gt3x_options_widget = QWidget()
+        gt3x_options_layout = QGridLayout(self.gt3x_options_widget)
+        gt3x_options_layout.setContentsMargins(20, 10, 0, 10)
+
+        gt3x_options_layout.addWidget(QLabel("GT3X Epoch Length (seconds):"), 0, 0)
+        self.gt3x_epoch_length_spin = QSpinBox()
+        self.gt3x_epoch_length_spin.setRange(1, 300)
+        self.gt3x_epoch_length_spin.blockSignals(True)
+        self.gt3x_epoch_length_spin.setValue(self.parent.config_manager.config.gt3x_epoch_length)
+        self.gt3x_epoch_length_spin.blockSignals(False)
+        self.gt3x_epoch_length_spin.valueChanged.connect(self._on_gt3x_epoch_length_changed)
+        self.gt3x_epoch_length_spin.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.gt3x_epoch_length_spin.setToolTip("Epoch length for GT3X data processing")
+        gt3x_options_layout.addWidget(self.gt3x_epoch_length_spin, 0, 1)
+
+        gt3x_options_layout.addWidget(QLabel("Return Raw Data:"), 1, 0)
+        self.gt3x_return_raw_check = QCheckBox()
+        self.gt3x_return_raw_check.blockSignals(True)
+        self.gt3x_return_raw_check.setChecked(self.parent.config_manager.config.gt3x_return_raw)
+        self.gt3x_return_raw_check.blockSignals(False)
+        self.gt3x_return_raw_check.stateChanged.connect(self._on_gt3x_return_raw_changed)
+        self.gt3x_return_raw_check.setToolTip("Return raw acceleration data instead of activity counts")
+        gt3x_options_layout.addWidget(self.gt3x_return_raw_check, 1, 1)
+        gt3x_options_layout.setColumnStretch(2, 1)
+
+        activity_layout.addWidget(self.gt3x_options_widget)
+
+        # Update visibility based on current selection
+        self._update_data_source_visibility()
 
         # Column mapping status (for Generic CSV)
         self.column_mapping_status = QLabel()
@@ -973,6 +1048,49 @@ class DataSettingsTab(QWidget):
         self.parent.config_manager.config.device_preset = preset
         self.parent.config_manager.save_config()
         logger.info("Device preset changed to: %s", preset)
+
+    def _on_data_source_changed(self, index: int) -> None:
+        """Handle data source type selection change."""
+        loader_id = self.data_source_combo.itemData(index)
+        if self.parent and self.parent.config_manager:
+            self.parent.config_manager.config.data_source_type_id = loader_id
+            self.parent.config_manager.save_config()
+            logger.info("Data source type changed to: %s", loader_id)
+
+        # Update visibility of data source specific sections
+        self._update_data_source_visibility()
+
+    def _update_data_source_visibility(self) -> None:
+        """Update visibility of data source specific option sections."""
+        current_index = self.data_source_combo.currentIndex()
+        loader_id = self.data_source_combo.itemData(current_index)
+
+        is_csv = loader_id == "csv"
+        is_gt3x = loader_id == "gt3x"
+
+        self.csv_options_widget.setVisible(is_csv)
+        self.gt3x_options_widget.setVisible(is_gt3x)
+
+    def _on_csv_skip_rows_changed(self, value: int) -> None:
+        """Handle CSV skip rows spinner change."""
+        if self.parent and self.parent.config_manager:
+            self.parent.config_manager.config.csv_skip_rows = value
+            self.parent.config_manager.save_config()
+            logger.debug("CSV skip rows changed to: %s", value)
+
+    def _on_gt3x_epoch_length_changed(self, value: int) -> None:
+        """Handle GT3X epoch length spinner change."""
+        if self.parent and self.parent.config_manager:
+            self.parent.config_manager.config.gt3x_epoch_length = value
+            self.parent.config_manager.save_config()
+            logger.debug("GT3X epoch length changed to: %s", value)
+
+    def _on_gt3x_return_raw_changed(self, state: int) -> None:
+        """Handle GT3X return raw checkbox change."""
+        if self.parent and self.parent.config_manager:
+            self.parent.config_manager.config.gt3x_return_raw = bool(state)
+            self.parent.config_manager.save_config()
+            logger.debug("GT3X return raw changed to: %s", bool(state))
 
     def _open_column_mapping_dialog(self) -> None:
         """Open the column mapping configuration dialog."""

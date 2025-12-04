@@ -794,6 +794,10 @@ class DatabaseSchemaManager:
             (DatabaseColumn.DAILY_SLEEP_MARKERS, "TEXT"),  # JSON column for complete marker structure
             (DatabaseColumn.NAP_ONSET_TIME_3, "TEXT"),
             (DatabaseColumn.NAP_OFFSET_TIME_3, "TEXT"),
+            # Generic sleep algorithm columns for DI pattern
+            (DatabaseColumn.SLEEP_ALGORITHM_NAME, "TEXT DEFAULT 'sadeh_1994'"),
+            (DatabaseColumn.SLEEP_ALGORITHM_ONSET, "INTEGER"),
+            (DatabaseColumn.SLEEP_ALGORITHM_OFFSET, "INTEGER"),
         ]
 
         # Add missing columns
@@ -809,6 +813,71 @@ class DatabaseSchemaManager:
                         pass
                     else:
                         logger.warning(f"Failed to add column {validated_column} to {table_name}: {e}")
+
+        # Migrate existing sadeh_onset/sadeh_offset values to generic columns if not already done
+        sleep_algo_name_col = self._validate_column_name(DatabaseColumn.SLEEP_ALGORITHM_NAME)
+        sleep_algo_onset_col = self._validate_column_name(DatabaseColumn.SLEEP_ALGORITHM_ONSET)
+        sleep_algo_offset_col = self._validate_column_name(DatabaseColumn.SLEEP_ALGORITHM_OFFSET)
+        sadeh_onset_col = self._validate_column_name(DatabaseColumn.SADEH_ONSET)
+        sadeh_offset_col = self._validate_column_name(DatabaseColumn.SADEH_OFFSET)
+
+        try:
+            # Copy sadeh_onset to sleep_algorithm_onset where not already set
+            conn.execute(f"""
+                UPDATE {table_name}
+                SET {sleep_algo_onset_col} = {sadeh_onset_col}
+                WHERE {sleep_algo_onset_col} IS NULL AND {sadeh_onset_col} IS NOT NULL
+            """)
+
+            # Copy sadeh_offset to sleep_algorithm_offset where not already set
+            conn.execute(f"""
+                UPDATE {table_name}
+                SET {sleep_algo_offset_col} = {sadeh_offset_col}
+                WHERE {sleep_algo_offset_col} IS NULL AND {sadeh_offset_col} IS NOT NULL
+            """)
+
+            # Set algorithm name to sadeh_1994_actilife for all existing records without algorithm name
+            conn.execute(f"""
+                UPDATE {table_name}
+                SET {sleep_algo_name_col} = 'sadeh_1994_actilife'
+                WHERE {sleep_algo_name_col} IS NULL
+            """)
+
+            # Also update old 'sadeh_1994' to 'sadeh_1994_actilife' for consistency
+            conn.execute(f"""
+                UPDATE {table_name}
+                SET {sleep_algo_name_col} = 'sadeh_1994_actilife'
+                WHERE {sleep_algo_name_col} = 'sadeh_1994'
+            """)
+
+            logger.debug("Migrated existing Sadeh values to generic algorithm columns")
+        except sqlite3.OperationalError as e:
+            logger.debug(f"Could not migrate Sadeh values to generic columns: {e}")
+
+        # Migrate legacy algorithm_type values to new algorithm IDs
+        algorithm_type_col = self._validate_column_name(DatabaseColumn.ALGORITHM_TYPE)
+        try:
+            # Map legacy values to new algorithm IDs
+            legacy_migrations = [
+                ("'Sadeh'", "'sadeh_1994_actilife'"),
+                ("'Manual + Algorithm'", "'sadeh_1994_actilife'"),
+                ("'Manual + Sadeh'", "'sadeh_1994_actilife'"),
+                ("'Cole-Kripke'", "'cole_kripke_1992'"),
+                ("'Automatic'", "'sadeh_1994_actilife'"),
+                ("'Manual'", "'manual'"),
+                ("'Choi'", "'choi'"),
+            ]
+
+            for old_value, new_value in legacy_migrations:
+                conn.execute(f"""
+                    UPDATE {table_name}
+                    SET {algorithm_type_col} = {new_value}
+                    WHERE {algorithm_type_col} = {old_value}
+                """)
+
+            logger.info("Migrated legacy algorithm_type values to new algorithm IDs")
+        except sqlite3.OperationalError as e:
+            logger.debug(f"Could not migrate legacy algorithm_type values: {e}")
 
     def _create_extended_markers_indexes(
         self,

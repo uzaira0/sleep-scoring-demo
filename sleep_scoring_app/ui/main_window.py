@@ -26,7 +26,6 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from sleep_scoring_app.core.algorithms import SleepScoringAlgorithms
 from sleep_scoring_app.core.constants import (
     AlgorithmType,
     ButtonStyle,
@@ -136,7 +135,6 @@ class SleepScoringMainWindow(QMainWindow):
         self.data_manager = self.data_service.data_manager
 
         self.export_manager = EnhancedExportManager(self.db_manager)
-        self.algorithms = SleepScoringAlgorithms()
 
         # Initialize nonwear data service
         self.nonwear_service = NonwearDataService(self.db_manager)
@@ -578,7 +576,7 @@ class SleepScoringMainWindow(QMainWindow):
                 sleep_metrics.filename = Path(self.selected_file).name if self.selected_file else ""
 
                 # Autosave to database and backup
-                self.export_manager.autosave_sleep_metrics([sleep_metrics], AlgorithmType.COMBINED)
+                self.export_manager.autosave_sleep_metrics([sleep_metrics], AlgorithmType.SADEH_1994_ACTILIFE)
                 logger.debug("Auto-saved markers on change for %s", Path(self.selected_file).name if self.selected_file else "unknown")
 
                 # Invalidate marker status cache for this file
@@ -1260,7 +1258,7 @@ class SleepScoringMainWindow(QMainWindow):
 
                 # Use autosave instead of regular save (if enabled)
                 if FeatureFlags.ENABLE_AUTOSAVE:
-                    self.export_manager.autosave_sleep_metrics([sleep_metrics], AlgorithmType.COMBINED)
+                    self.export_manager.autosave_sleep_metrics([sleep_metrics], AlgorithmType.SADEH_1994_ACTILIFE)
 
                     # Invalidate marker status cache for this file after auto-save
                     if self.selected_file:

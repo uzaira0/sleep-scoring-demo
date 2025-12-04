@@ -9,7 +9,6 @@ and algorithm result caching.
 
 from __future__ import annotations
 
-import bisect
 import hashlib
 import logging
 from datetime import datetime
@@ -17,8 +16,10 @@ from typing import TYPE_CHECKING, Any
 
 import pyqtgraph as pg
 
-from sleep_scoring_app.core.algorithms import SleepScoringAlgorithms
-from sleep_scoring_app.core.constants import ActivityDataPreference, SadehVariant, UIColors
+from sleep_scoring_app.core.algorithms import AlgorithmFactory, NonwearAlgorithmFactory, SleepScoringAlgorithm
+from sleep_scoring_app.core.algorithms.onset_offset_factory import OnsetOffsetRuleFactory
+from sleep_scoring_app.core.algorithms.onset_offset_protocol import OnsetOffsetRule
+from sleep_scoring_app.core.constants import ActivityDataPreference, UIColors
 
 if TYPE_CHECKING:
     from sleep_scoring_app.core.dataclasses import SleepPeriod
@@ -41,6 +42,8 @@ class PlotAlgorithmManager:
         self.parent = parent
         self._algorithm_cache: dict[str, dict[str, Any]] = {}
         self._sleep_pattern_cache: dict[tuple, tuple] = {}
+        self._sleep_scoring_algorithm: SleepScoringAlgorithm | None = None
+        self._onset_offset_rule: OnsetOffsetRule | None = None
 
     # ========== Property Accessors ==========
 
@@ -64,23 +67,6 @@ class PlotAlgorithmManager:
         """Access parent's sadeh_results."""
         return getattr(self.parent, "sadeh_results", None)
 
-    def _get_sadeh_threshold(self) -> float:
-        """Get the Sadeh threshold from config. Original=0.0, ActiLife=-4.0."""
-        try:
-            # Try direct main_window attribute first (set by AnalysisTab)
-            main_window = getattr(self.parent, "main_window", None)
-            # Fallback to Qt parent() chain if needed
-            if main_window is None and hasattr(self.parent, "parent") and callable(self.parent.parent):
-                main_window = self.parent.parent()
-            if main_window and hasattr(main_window, "config_manager"):
-                variant = main_window.config_manager.config.sadeh_variant
-                if variant == SadehVariant.ORIGINAL:
-                    return 0.0
-                return -4.0  # ActiLife default
-        except Exception:
-            pass
-        return -4.0  # Default to ActiLife
-
     def _get_choi_activity_column(self) -> str:
         """
         Get the Choi activity column from config.
@@ -102,6 +88,97 @@ class PlotAlgorithmManager:
         except Exception as e:
             logger.debug("Exception getting Choi activity column: %s", e)
         return ActivityDataPreference.VECTOR_MAGNITUDE  # Default
+
+    def get_sleep_scoring_algorithm(self) -> SleepScoringAlgorithm:
+        """
+        Get the current sleep scoring algorithm instance.
+
+        Creates the algorithm from the factory if not already cached.
+        Uses configuration to determine which algorithm and parameters to use.
+
+        Returns:
+            SleepScoringAlgorithm instance (default: SadehAlgorithm)
+
+        """
+        if self._sleep_scoring_algorithm is None:
+            # Get config from main window
+            config = None
+            main_window = getattr(self.parent, "main_window", None)
+            if main_window is None and hasattr(self.parent, "parent") and callable(self.parent.parent):
+                main_window = self.parent.parent()
+            if main_window and hasattr(main_window, "config_manager"):
+                config = main_window.config_manager.config
+
+            # Get algorithm ID from config or use default
+            algorithm_id = AlgorithmFactory.get_default_algorithm_id()
+            if config and hasattr(config, "sleep_algorithm_id") and config.sleep_algorithm_id:
+                algorithm_id = config.sleep_algorithm_id
+
+            self._sleep_scoring_algorithm = AlgorithmFactory.create(algorithm_id, config)
+            logger.debug("Created sleep scoring algorithm: %s (id: %s)", self._sleep_scoring_algorithm.name, algorithm_id)
+
+        return self._sleep_scoring_algorithm
+
+    def set_sleep_scoring_algorithm(self, algorithm: SleepScoringAlgorithm) -> None:
+        """
+        Set the sleep scoring algorithm instance.
+
+        Clears caches when algorithm changes to ensure fresh results.
+
+        Args:
+            algorithm: SleepScoringAlgorithm instance to use
+
+        """
+        self._sleep_scoring_algorithm = algorithm
+        # Clear caches when algorithm changes
+        self._algorithm_cache.clear()
+        self._sleep_pattern_cache.clear()
+        logger.info("Sleep scoring algorithm changed to: %s", algorithm.name)
+
+    def get_onset_offset_rule(self) -> OnsetOffsetRule:
+        """
+        Get the current onset/offset rule instance.
+
+        Creates the rule from the factory if not already cached.
+        Uses configuration to determine which rule and parameters to use.
+
+        Returns:
+            OnsetOffsetRule instance (default: Consecutive 3/5 Minutes)
+
+        """
+        if self._onset_offset_rule is None:
+            # Get config from main window
+            config = None
+            main_window = getattr(self.parent, "main_window", None)
+            if main_window is None and hasattr(self.parent, "parent") and callable(self.parent.parent):
+                main_window = self.parent.parent()
+            if main_window and hasattr(main_window, "config_manager"):
+                config = main_window.config_manager.config
+
+            # Get rule ID from config or use default
+            rule_id = OnsetOffsetRuleFactory.get_default_rule_id()
+            if config and hasattr(config, "onset_offset_rule_id") and config.onset_offset_rule_id:
+                rule_id = config.onset_offset_rule_id
+
+            self._onset_offset_rule = OnsetOffsetRuleFactory.create(rule_id, config)
+            logger.debug("Created onset/offset rule: %s (id: %s)", self._onset_offset_rule.name, rule_id)
+
+        return self._onset_offset_rule
+
+    def set_onset_offset_rule(self, rule: OnsetOffsetRule) -> None:
+        """
+        Set the onset/offset rule instance.
+
+        Clears caches when rule changes to ensure fresh results.
+
+        Args:
+            rule: OnsetOffsetRule instance to use
+
+        """
+        self._onset_offset_rule = rule
+        # Clear caches when rule changes
+        self._sleep_pattern_cache.clear()
+        logger.info("Onset/offset rule changed to: %s", rule.name)
 
     @sadeh_results.setter
     def sadeh_results(self, value):
@@ -186,9 +263,10 @@ class PlotAlgorithmManager:
             timestamp_hash = hashlib.md5(timestamp_str.encode()).hexdigest()[:8]
 
         # Include algorithm parameters in cache key so changing settings invalidates cache
-        sadeh_threshold = self._get_sadeh_threshold()
+        algorithm = self.get_sleep_scoring_algorithm()
+        algorithm_id = algorithm.identifier
         choi_activity_col = self._get_choi_activity_column()
-        cache_key = f"48h_{column_type}_{data_type}_{len(algorithm_activity)}_{data_hash}_{timestamp_hash}_sadeh_{sadeh_axis_y_hash}_th{sadeh_threshold}_choi{choi_activity_col}"
+        cache_key = f"48h_{column_type}_{data_type}_{len(algorithm_activity)}_{data_hash}_{timestamp_hash}_sadeh_{sadeh_axis_y_hash}_algo{algorithm_id}_choi{choi_activity_col}"
 
         # Check if results are already cached
         if cache_key in self._algorithm_cache:
@@ -199,7 +277,6 @@ class PlotAlgorithmManager:
             return
 
         logger.debug("Running algorithms on 48hr main data")
-        algorithms = SleepScoringAlgorithms()
 
         # Get axis_y data specifically for Sadeh algorithm
         if self.main_48h_axis_y_data is not None:
@@ -210,11 +287,16 @@ class PlotAlgorithmManager:
             self.main_48h_axis_y_data = axis_y_data
             logger.debug("AXIS_Y CACHE MISS: Loaded fresh axis_y data with %d points for Sadeh", len(axis_y_data) if axis_y_data else 0)
 
-        # Run Choi algorithm (nonwear detection) with configured activity column
+        # Run Choi algorithm (nonwear detection) with configured activity column using DI pattern
         choi_activity_column = self._get_choi_activity_column()
         logger.debug("Running Choi algorithm with activity_column: %s", choi_activity_column)
-        choi_results = algorithms.run_choi_algorithm(algorithm_activity, activity_column=choi_activity_column)
-        logger.debug("Choi algorithm returned %d results", len(choi_results))
+        choi_algorithm = NonwearAlgorithmFactory.create("choi_2011")
+        choi_periods = choi_algorithm.detect(
+            activity_data=algorithm_activity,
+            timestamps=self.parent.timestamps if hasattr(self.parent, "timestamps") else [],
+            activity_column=choi_activity_column,
+        )
+        logger.debug("Choi algorithm returned %d periods", len(choi_periods))
         logger.debug("Choi algorithm completed - plotting handled by NonwearData system")
 
         # Validate Sadeh input data
@@ -243,10 +325,11 @@ class PlotAlgorithmManager:
             self._extract_view_subset_from_main_results()
             return
 
-        threshold = self._get_sadeh_threshold()
-        logger.debug("Running Sadeh algorithm with threshold: %s", threshold)
-        self.main_48h_sadeh_results = algorithms.run_sadeh_algorithm(axis_y_data, sadeh_timestamps, threshold=threshold)
-        logger.debug("Sadeh algorithm returned %d results", len(self.main_48h_sadeh_results) if self.main_48h_sadeh_results else 0)
+        # Use DI pattern to get sleep scoring algorithm
+        algorithm = self.get_sleep_scoring_algorithm()
+        logger.debug("Running sleep scoring algorithm: %s", algorithm.name)
+        self.main_48h_sadeh_results = algorithm.score_array(axis_y_data, sadeh_timestamps)
+        logger.debug("Sleep scoring algorithm returned %d results", len(self.main_48h_sadeh_results) if self.main_48h_sadeh_results else 0)
 
         self._extract_view_subset_from_main_results()
 
@@ -352,7 +435,7 @@ class PlotAlgorithmManager:
     # ========== Sleep Scoring Rule Methods ==========
 
     def apply_sleep_scoring_rules(self, main_sleep_period: SleepPeriod) -> None:
-        """Apply 3 minute rule for onset and 5 minute rule for offset to selected marker set."""
+        """Apply onset/offset detection rules to selected marker set using injected rule."""
         selected_period = self.parent.get_selected_marker_period()
         if not selected_period or not selected_period.is_complete or not hasattr(self.parent, "sadeh_results"):
             return
@@ -362,65 +445,32 @@ class PlotAlgorithmManager:
 
         self.clear_sleep_onset_offset_markers()
 
-        sleep_start_time = selected_period.onset_timestamp
-        sleep_end_time = selected_period.offset_timestamp
+        # Get onset/offset rule instance
+        rule = self.get_onset_offset_rule()
 
-        start_idx = bisect.bisect_left(self.x_data, sleep_start_time)
-        end_idx = bisect.bisect_right(self.x_data, sleep_end_time) - 1
+        # Convert period timestamps to datetime objects
+        sleep_start_time = datetime.fromtimestamp(selected_period.onset_timestamp)
+        sleep_end_time = datetime.fromtimestamp(selected_period.offset_timestamp)
 
-        if start_idx >= len(self.x_data) or end_idx < 0 or start_idx > end_idx:
-            return
+        # Convert x_data (Unix timestamps) to datetime objects
+        timestamps = [datetime.fromtimestamp(ts) for ts in self.x_data]
 
-        # Find sleep onset/offset with limited extension (5 minutes)
-        extended_start = max(0, start_idx - 5)
-        extended_end = min(len(self.sadeh_results) - 1, end_idx + 5)
+        # Apply rule via protocol
+        onset_idx, offset_idx = rule.apply_rules(
+            sleep_scores=self.sadeh_results,
+            sleep_start_marker=sleep_start_time,
+            sleep_end_marker=sleep_end_time,
+            timestamps=timestamps,
+        )
 
-        cache_key = (extended_start, extended_end, id(self.sadeh_results))
+        # Create visual markers
+        if onset_idx is not None:
+            self.create_sleep_onset_marker(self.x_data[onset_idx], rule)
 
-        if cache_key in self._sleep_pattern_cache:
-            sleep_onset_candidates, all_offset_candidates = self._sleep_pattern_cache[cache_key]
-        else:
-            # Find ALL instances of 3 consecutive sleep minutes
-            sleep_onset_candidates = []
-            for i in range(extended_start, min(extended_end + 1, len(self.sadeh_results) - 2)):
-                if self.sadeh_results[i] == 1 and self.sadeh_results[i + 1] == 1 and self.sadeh_results[i + 2] == 1:
-                    sleep_onset_candidates.append(i)
+        if offset_idx is not None:
+            self.create_sleep_offset_marker(self.x_data[offset_idx], rule)
 
-            # Pre-calculate ALL 5-minute offset candidates
-            all_offset_candidates = []
-            for i in range(extended_start, min(extended_end - 4, len(self.sadeh_results) - 5)):
-                if (
-                    self.sadeh_results[i] == 1
-                    and self.sadeh_results[i + 1] == 1
-                    and self.sadeh_results[i + 2] == 1
-                    and self.sadeh_results[i + 3] == 1
-                    and self.sadeh_results[i + 4] == 1
-                    and self.sadeh_results[i + 5] == 0
-                ):
-                    all_offset_candidates.append(i + 4)
-
-            # Cache results (limit to 10 entries)
-            if len(self._sleep_pattern_cache) > 10:
-                self._sleep_pattern_cache.clear()
-            self._sleep_pattern_cache[cache_key] = (sleep_onset_candidates, all_offset_candidates)
-
-        # Choose FIRST onset occurrence
-        sleep_onset_idx = min(sleep_onset_candidates) if sleep_onset_candidates else None
-
-        # Find LAST offset after onset
-        sleep_offset_idx = None
-        if sleep_onset_idx is not None and all_offset_candidates:
-            valid_offset_candidates = [c for c in all_offset_candidates if c > sleep_onset_idx + 5]
-            if valid_offset_candidates:
-                sleep_offset_idx = max(valid_offset_candidates)
-
-        if sleep_onset_idx is not None:
-            self.create_sleep_onset_marker(self.x_data[sleep_onset_idx])
-
-        if sleep_offset_idx is not None:
-            self.create_sleep_offset_marker(self.x_data[sleep_offset_idx])
-
-    def create_sleep_onset_marker(self, timestamp) -> None:
+    def create_sleep_onset_marker(self, timestamp, rule: OnsetOffsetRule | None = None) -> None:
         """Create sleep onset marker with arrow and axis label."""
         custom_arrow_colors = getattr(self.parent, "custom_arrow_colors", {})
         onset_arrow_color = custom_arrow_colors.get("onset", "#0066CC")
@@ -440,8 +490,15 @@ class PlotAlgorithmManager:
         self.plotItem.addItem(arrow)
 
         time_str = datetime.fromtimestamp(timestamp).strftime("%H:%M")
+
+        # Get label from rule protocol if available
+        if rule is not None:
+            onset_label, _ = rule.get_marker_labels(time_str, "")
+        else:
+            onset_label = f"Sleep Onset at {time_str}\n3-minute rule applied"
+
         onset_text = pg.TextItem(
-            text=f"Sleep Onset at {time_str}\n3-minute rule applied",
+            text=onset_label,
             color=onset_arrow_color,
             anchor=(0.5, 1.0),
         )
@@ -455,7 +512,7 @@ class PlotAlgorithmManager:
             self.parent.sleep_rule_markers = []
         self.parent.sleep_rule_markers.extend([arrow, onset_text])
 
-    def create_sleep_offset_marker(self, timestamp) -> None:
+    def create_sleep_offset_marker(self, timestamp, rule: OnsetOffsetRule | None = None) -> None:
         """Create sleep offset marker with arrow and axis label."""
         custom_arrow_colors = getattr(self.parent, "custom_arrow_colors", {})
         offset_arrow_color = custom_arrow_colors.get("offset", "#FFA500")
@@ -475,8 +532,15 @@ class PlotAlgorithmManager:
         self.plotItem.addItem(arrow)
 
         time_str = datetime.fromtimestamp(timestamp).strftime("%H:%M")
+
+        # Get label from rule protocol if available
+        if rule is not None:
+            _, offset_label = rule.get_marker_labels("", time_str)
+        else:
+            offset_label = f"Sleep Offset at {time_str}\n5-minute rule applied"
+
         offset_text = pg.TextItem(
-            text=f"Sleep Offset at {time_str}\n5-minute rule applied",
+            text=offset_label,
             color=offset_arrow_color,
             anchor=(0.5, 1.0),
         )

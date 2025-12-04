@@ -171,7 +171,7 @@ class WindowStateManager:
                 sleep_metrics.daily_sleep_markers = self.parent.plot_widget.daily_sleep_markers
 
                 # Save to database
-                self.parent.export_manager.save_comprehensive_sleep_metrics([sleep_metrics], AlgorithmType.COMBINED)
+                self.parent.export_manager.save_comprehensive_sleep_metrics([sleep_metrics], AlgorithmType.SADEH_1994_ACTILIFE)
 
                 # Update state
                 self.parent.plot_widget.markers_saved = True
@@ -360,7 +360,7 @@ class WindowStateManager:
                 participant=participant,
                 filename=Path(self.parent.selected_file).name,
                 analysis_date=date_str,
-                algorithm_type=AlgorithmType.COMBINED,
+                algorithm_type=AlgorithmType.SADEH_1994_ACTILIFE,
                 daily_sleep_markers=daily_markers,
                 onset_time=SleepStatusValue.NO_SLEEP,
                 offset_time=SleepStatusValue.NO_SLEEP,

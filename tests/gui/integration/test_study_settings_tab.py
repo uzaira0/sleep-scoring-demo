@@ -104,7 +104,7 @@ class TestStudySettingsTab:
         config.study_participant_id_patterns = [r"^(\d{4,})[_-]"]
         config.study_timepoint_pattern = r"([A-Z]\d)"
         config.study_group_pattern = r"(G\d)"
-        config.sadeh_variant = "actilife"
+        config.sleep_algorithm_id = "sadeh_1994_actilife"
         config.night_start_hour = 22
         config.night_end_hour = 7
         config.choi_axis = "vector_magnitude"
@@ -146,8 +146,7 @@ class TestStudySettingsTab:
 
     def test_algorithm_config_exists(self, study_settings_tab):
         """Test algorithm configuration widgets exist."""
-        assert hasattr(study_settings_tab, "sadeh_original_radio")
-        assert hasattr(study_settings_tab, "sadeh_actilife_radio")
+        assert hasattr(study_settings_tab, "sleep_algorithm_combo")  # New DI pattern
         assert hasattr(study_settings_tab, "night_start_time")
         assert hasattr(study_settings_tab, "night_end_time")
         assert hasattr(study_settings_tab, "choi_axis_combo")
@@ -286,17 +285,17 @@ class TestStudySettingsTab:
     # Algorithm Configuration Tests
     # ============================================================================
 
-    def test_sadeh_radio_buttons(self, study_settings_tab, qtbot):
-        """Test Sadeh variant radio buttons."""
-        # Click original radio
-        qtbot.mouseClick(study_settings_tab.sadeh_original_radio, Qt.MouseButton.LeftButton)
-        assert study_settings_tab.sadeh_original_radio.isChecked()
-        assert not study_settings_tab.sadeh_actilife_radio.isChecked()
+    def test_sleep_algorithm_combo(self, study_settings_tab, qtbot):
+        """Test sleep algorithm combo box (new DI pattern)."""
+        combo = study_settings_tab.sleep_algorithm_combo
+        assert combo.count() > 0  # Should have at least one algorithm available
 
-        # Click actilife radio
-        qtbot.mouseClick(study_settings_tab.sadeh_actilife_radio, Qt.MouseButton.LeftButton)
-        assert study_settings_tab.sadeh_actilife_radio.isChecked()
-        assert not study_settings_tab.sadeh_original_radio.isChecked()
+        # Change to different algorithm
+        initial_index = combo.currentIndex()
+        new_index = (initial_index + 1) % combo.count()
+        combo.setCurrentIndex(new_index)
+
+        assert combo.currentIndex() == new_index
 
     def test_night_start_time_change(self, study_settings_tab, qtbot):
         """Test changing night start time."""

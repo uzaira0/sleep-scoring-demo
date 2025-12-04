@@ -136,10 +136,6 @@ class ConfigManager:
                     self.config.study_unknown_value = unknown_value
 
                 # Load algorithm settings - only override if non-empty values exist
-                sadeh_variant = self.settings.value("sadeh_variant", "")
-                if sadeh_variant:
-                    self.config.sadeh_variant = sadeh_variant
-
                 # QSettings: only override defaults if key actually exists
                 if self.settings.contains("night_start_hour"):
                     self.config.night_start_hour = self.settings.value("night_start_hour", type=int)
@@ -150,6 +146,24 @@ class ConfigManager:
                 choi_axis = self.settings.value("choi_axis", "")
                 if choi_axis:
                     self.config.choi_axis = choi_axis
+
+                nonwear_algorithm_id = self.settings.value("nonwear_algorithm_id", "")
+                if nonwear_algorithm_id:
+                    self.config.nonwear_algorithm_id = nonwear_algorithm_id
+
+                # Load data source settings
+                data_source_type_id = self.settings.value("data_source_type_id", "")
+                if data_source_type_id:
+                    self.config.data_source_type_id = data_source_type_id
+
+                if self.settings.contains("csv_skip_rows"):
+                    self.config.csv_skip_rows = self.settings.value("csv_skip_rows", type=int)
+
+                if self.settings.contains("gt3x_epoch_length"):
+                    self.config.gt3x_epoch_length = self.settings.value("gt3x_epoch_length", type=int)
+
+                if self.settings.contains("gt3x_return_raw"):
+                    self.config.gt3x_return_raw = self.settings.value("gt3x_return_raw", type=bool)
 
                 logger.debug("Loaded configuration from QSettings")
                 return self.config
@@ -223,10 +237,16 @@ class ConfigManager:
                     self.settings.setValue("study_unknown_value", self.config.study_unknown_value)
 
                     # Algorithm settings
-                    self.settings.setValue("sadeh_variant", self.config.sadeh_variant)
                     self.settings.setValue("night_start_hour", self.config.night_start_hour)
                     self.settings.setValue("night_end_hour", self.config.night_end_hour)
                     self.settings.setValue("choi_axis", self.config.choi_axis)
+                    self.settings.setValue("nonwear_algorithm_id", self.config.nonwear_algorithm_id)
+
+                    # Data source settings
+                    self.settings.setValue("data_source_type_id", self.config.data_source_type_id)
+                    self.settings.setValue("csv_skip_rows", self.config.csv_skip_rows)
+                    self.settings.setValue("gt3x_epoch_length", self.config.gt3x_epoch_length)
+                    self.settings.setValue("gt3x_return_raw", self.config.gt3x_return_raw)
 
                     # Force sync to disk
                     self.settings.sync()
@@ -456,14 +476,14 @@ class ConfigManager:
             "# === Configuration Settings ===",
             f"# config_schema_version: {CONFIG_SCHEMA_VERSION}",
             f"# app_version: {app_version}",
-            f"# sadeh_variant: {self.config.sadeh_variant}",
+            f"# sleep_algorithm_id: {self.config.sleep_algorithm_id}",
             f"# night_start_hour: {self.config.night_start_hour}",
             f"# night_end_hour: {self.config.night_end_hour}",
             f"# epoch_length: {self.config.epoch_length}",
             f"# activity_file_skip_rows: {self.config.skip_rows}",
             f"# activity_column_to_plot: {self.config.preferred_activity_column}",
             f"# choi_axis: {self.config.choi_axis}",
-            f"# nonwear_algorithm: {self.config.nonwear_algorithm}",
+            f"# nonwear_algorithm_id: {self.config.nonwear_algorithm_id}",
             f"# use_actilife_sadeh: {self.config.use_actilife_sadeh}",
             f"# auto_place_diary_markers: {self.config.auto_place_diary_markers}",
             f"# auto_detect_nonwear_overlap: {self.config.auto_detect_nonwear_overlap}",

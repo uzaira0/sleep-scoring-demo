@@ -1,5 +1,10 @@
 """
-Convenience facade for sleep scoring algorithms.
+LEGACY facade for sleep scoring algorithms - FULLY DEPRECATED.
+
+⚠️ DEPRECATION WARNING:
+    - run_sadeh_algorithm() is DEPRECATED - Use AlgorithmFactory and SleepScoringAlgorithm protocol instead
+    - run_choi_algorithm() is DEPRECATED - Use NonwearAlgorithmFactory and NonwearDetectionAlgorithm protocol instead
+    - ChoiNonwearDetector is DEPRECATED - Use NonwearAlgorithmFactory.create("choi_2011") instead
 
 This module provides high-level wrapper classes that combine validation, error handling,
 and type conversion for the framework-agnostic algorithm implementations in the
@@ -9,20 +14,26 @@ Architecture:
     - Core algorithms in algorithms/ subpackage are pure functions (sadeh.py, choi.py)
     - This facade provides object-oriented wrappers with comprehensive validation
     - Handles list<->DataFrame conversion, input validation, and error messages
-    - Used throughout the GUI for consistent error handling and parameter management
+    - LEGACY: Used for Choi nonwear detection until Choi gets proper DI implementation
 
 Classes:
-    SleepScoringAlgorithms: Main facade for Sadeh scoring and Choi nonwear detection
-    ChoiNonwearDetector: Pandas-based wrapper for detailed nonwear analysis
+    SleepScoringAlgorithms: PARTIALLY DEPRECATED facade (Sadeh methods deprecated, Choi methods active)
+    ChoiNonwearDetector: Pandas-based wrapper for detailed nonwear analysis (active)
 
-Usage:
-    from sleep_scoring_app.core.algorithms import SleepScoringAlgorithms
+NEW CODE SHOULD USE:
+    from sleep_scoring_app.core.algorithms import AlgorithmFactory, NonwearAlgorithmFactory
 
+    # For sleep scoring (Sadeh, Cole-Kripke, etc.)
+    algorithm = AlgorithmFactory.create('sadeh_1994_actilife')
+    results = algorithm.score_array(counts, timestamps)
+
+    # For nonwear detection (Choi, van Hees, etc.)
+    nonwear_algorithm = NonwearAlgorithmFactory.create('choi_2011')
+    periods = nonwear_algorithm.detect(counts, times)
+
+LEGACY USAGE (DEPRECATED for Sadeh):
     algorithms = SleepScoringAlgorithms()
-    sadeh_results = algorithms.run_sadeh_algorithm(counts, times, threshold=-4.0)
-    choi_periods = algorithms.run_choi_algorithm(counts, times)
-
-    from sleep_scoring_app.core.algorithms import score_activity, detect_nonwear
+    sadeh_results = algorithms.run_sadeh_algorithm(counts, times, threshold=-4.0)  # DEPRECATED
 """
 
 from __future__ import annotations
@@ -35,6 +46,8 @@ import numpy as np
 import pandas as pd
 
 from sleep_scoring_app.core.algorithms.choi import detect_nonwear as _detect_nonwear_new
+from sleep_scoring_app.core.algorithms.onset_offset_factory import OnsetOffsetRuleFactory
+from sleep_scoring_app.core.algorithms.onset_offset_protocol import OnsetOffsetRule
 from sleep_scoring_app.core.algorithms.sadeh import score_activity as _score_activity_new
 from sleep_scoring_app.core.algorithms.sleep_rules import SleepRules as _SleepRulesNew
 from sleep_scoring_app.core.exceptions import ErrorCodes, ValidationError
@@ -44,7 +57,14 @@ logger = logging.getLogger(__name__)
 
 class ChoiNonwearDetector:
     """
-    Pandas-based wrapper for Choi nonwear detection algorithm.
+    DEPRECATED: Pandas-based wrapper for Choi nonwear detection algorithm.
+
+    ⚠️ DEPRECATED: This class is deprecated and will be removed in a future version.
+
+    NEW CODE SHOULD USE:
+        from sleep_scoring_app.core.algorithms import NonwearAlgorithmFactory
+        algorithm = NonwearAlgorithmFactory.create('choi_2011')
+        periods = algorithm.detect(activity_data, timestamps)
 
     This class provides a convenient interface for nonwear detection from pandas DataFrames
     with flexible column naming and summary statistics generation. It delegates to the
@@ -62,6 +82,8 @@ class ChoiNonwearDetector:
         """
         Initialize with pandas DataFrame (legacy API).
 
+        ⚠️ DEPRECATED: Use NonwearAlgorithmFactory.create('choi_2011') instead.
+
         Args:
             data: DataFrame containing accelerometer counts data
             count_column: Name of the column containing activity counts
@@ -70,6 +92,14 @@ class ChoiNonwearDetector:
             use_vector_magnitude: Whether to use vector magnitude for detection
 
         """
+        import warnings
+
+        warnings.warn(
+            "ChoiNonwearDetector is deprecated. Use NonwearAlgorithmFactory.create('choi_2011') instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         self.data = data.copy()
         self.count_column = count_column
         self.timestamp_column = timestamp_column
@@ -162,22 +192,27 @@ class ChoiNonwearDetector:
 
 class SleepScoringAlgorithms:
     """
-    Convenience facade for sleep scoring and nonwear detection algorithms.
+    FULLY DEPRECATED facade for sleep scoring and nonwear detection algorithms.
 
-    This class provides a unified interface for running sleep scoring algorithms with
-    comprehensive validation, error handling, and parameter management. Designed for
-    use in GUI contexts where user input validation and clear error messages are essential.
+    ⚠️ DEPRECATION WARNING:
+        - run_sadeh_algorithm() is DEPRECATED - Use AlgorithmFactory.create() instead
+        - apply_sleep_scoring_rules() is DEPRECATED - Use OnsetOffsetRuleFactory.create() instead
+        - run_choi_algorithm() is DEPRECATED - Use NonwearAlgorithmFactory.create() instead
+
+    This class provides a unified interface for running algorithms with comprehensive
+    validation, error handling, and parameter management. Designed for use in GUI
+    contexts where user input validation and clear error messages are essential.
 
     Key Features:
         - Comprehensive input validation with ValidationError exceptions
         - Automatic type conversion (list/array/DataFrame)
-        - Parameter flow-through (threshold for Sadeh, activity_column for Choi)
+        - Parameter flow-through (activity_column for Choi)
         - Consistent error handling across algorithms
 
-    Methods:
-        run_sadeh_algorithm: Run Sadeh (1994) sleep scoring with validation
-        run_choi_algorithm: Run Choi (2011) nonwear detection with validation
-        apply_sleep_scoring_rules: Apply onset/offset rules to scored data
+    DEPRECATED Methods:
+        run_sadeh_algorithm: DEPRECATED - Use AlgorithmFactory and SleepScoringAlgorithm protocol
+        apply_sleep_scoring_rules: DEPRECATED - Use OnsetOffsetRuleFactory and OnsetOffsetRule protocol
+        run_choi_algorithm: DEPRECATED - Use NonwearAlgorithmFactory and NonwearDetectionAlgorithm protocol
 
     """
 
@@ -194,7 +229,24 @@ class SleepScoringAlgorithms:
         use_vector_magnitude=False,
         activity_column="axis_y",
     ) -> list[dict[str, int]]:
-        """Run research-grade Choi nonwear detection algorithm."""
+        """
+        DEPRECATED: Run research-grade Choi nonwear detection algorithm.
+
+        ⚠️ DEPRECATED: This method is deprecated and will be removed in a future version.
+
+        NEW CODE SHOULD USE:
+            from sleep_scoring_app.core.algorithms import NonwearAlgorithmFactory
+            algorithm = NonwearAlgorithmFactory.create('choi_2011')
+            periods = algorithm.detect(activity_data, timestamps)
+
+        """
+        import warnings
+
+        warnings.warn(
+            "run_choi_algorithm() is deprecated. Use NonwearAlgorithmFactory.create('choi_2011') instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if timestamps is None:
             timestamps = [datetime.now() + timedelta(minutes=i) for i in range(len(activity_data))]
 
@@ -238,7 +290,14 @@ class SleepScoringAlgorithms:
 
     def run_sadeh_algorithm(self, axis_y_data, timestamps, threshold: float = -4.0) -> list[int]:
         """
-        Run Sadeh sleep scoring algorithm with comprehensive validation.
+        DEPRECATED: Run Sadeh sleep scoring algorithm with comprehensive validation.
+
+        ⚠️ DEPRECATED: This method is deprecated and will be removed in a future version.
+
+        NEW CODE SHOULD USE:
+            from sleep_scoring_app.core.algorithms import AlgorithmFactory
+            algorithm = AlgorithmFactory.create('sadeh_1994_actilife')  # or 'sadeh_1994_original'
+            results = algorithm.score_array(axis_y_data, timestamps)
 
         This method provides a validated interface to the Sadeh (1994) algorithm with
         extensive input validation and error handling.
@@ -257,6 +316,13 @@ class SleepScoringAlgorithms:
             ValidationError: If input data is invalid or malformed
 
         """
+        import warnings
+
+        warnings.warn(
+            "run_sadeh_algorithm() is deprecated. Use AlgorithmFactory.create('sadeh_1994_actilife') instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if axis_y_data is None:
             msg = "axis_y_data cannot be None"
             raise ValidationError(msg, ErrorCodes.MISSING_REQUIRED)
@@ -309,23 +375,43 @@ class SleepScoringAlgorithms:
             msg = str(e)
             raise ValidationError(msg, ErrorCodes.INVALID_INPUT) from e
 
-    def apply_sleep_scoring_rules(self, sleep_markers, sadeh_results, x_data) -> tuple[int | None, int | None]:
+    def apply_sleep_scoring_rules(
+        self,
+        sleep_markers,
+        sadeh_results,
+        x_data,
+        onset_offset_rule: OnsetOffsetRule | None = None,
+    ) -> tuple[int | None, int | None]:
         """
-        Apply sleep onset/offset rules to find actual sleep boundaries.
+        DEPRECATED: Apply sleep onset/offset rules to find actual sleep boundaries.
 
-        Uses the Sadeh scoring results and user-placed markers to identify the
-        precise onset (first 3 consecutive sleep minutes) and offset (last of
-        5 consecutive sleep minutes before wake).
+        ⚠️ DEPRECATED: This method is deprecated and will be removed in a future version.
+
+        NEW CODE SHOULD USE:
+            from sleep_scoring_app.core.algorithms.onset_offset_factory import OnsetOffsetRuleFactory
+            rule = OnsetOffsetRuleFactory.create('consecutive_3_5')  # or other rule ID
+            onset_idx, offset_idx = rule.apply_rules(sleep_scores, sleep_start_marker, sleep_end_marker, timestamps)
+
+        Uses the configured onset/offset rule and user-placed markers to identify
+        the precise onset and offset times from sleep scoring results.
 
         Args:
             sleep_markers: List of 2 datetime markers (start, end)
             sadeh_results: List of sleep/wake classifications (1=sleep, 0=wake)
             x_data: List of timestamps corresponding to sadeh_results
+            onset_offset_rule: Optional rule instance (defaults to Consecutive 3/5 if None)
 
         Returns:
             Tuple of (onset_index, offset_index), or (None, None) if not found
 
         """
+        import warnings
+
+        warnings.warn(
+            "apply_sleep_scoring_rules() is deprecated. Use OnsetOffsetRuleFactory.create() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if len(sleep_markers) != 2 or not sadeh_results:
             return None, None
 
@@ -333,9 +419,12 @@ class SleepScoringAlgorithms:
         sleep_start_time = sorted_markers[0]
         sleep_end_time = sorted_markers[1]
 
-        rules = _SleepRulesNew()
-        return rules.apply_rules(
-            sadeh_results=sadeh_results,
+        # Use provided rule or create default
+        if onset_offset_rule is None:
+            onset_offset_rule = OnsetOffsetRuleFactory.create(OnsetOffsetRuleFactory.get_default_rule_id())
+
+        return onset_offset_rule.apply_rules(
+            sleep_scores=sadeh_results,
             sleep_start_marker=sleep_start_time,
             sleep_end_marker=sleep_end_time,
             timestamps=x_data,

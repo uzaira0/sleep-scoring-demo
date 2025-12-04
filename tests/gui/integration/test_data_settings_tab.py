@@ -45,6 +45,12 @@ class TestDataSettingsTab:
         config.custom_vector_magnitude_column = ""
         config.custom_activity_column = ""
 
+        # Data source configuration (DI pattern)
+        config.data_source_type_id = "csv"
+        config.csv_skip_rows = 10
+        config.gt3x_epoch_length = 60
+        config.gt3x_return_raw = False
+
         # Mock methods
         parent.browse_activity_files = Mock()
         parent.browse_nonwear_files = Mock()

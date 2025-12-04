@@ -34,8 +34,12 @@ from sleep_scoring_app.utils.participant_extractor import extract_participant_in
 
 from .choi import choi_detect_nonwear
 from .config import SleepRulesConfig
+from .factory import AlgorithmFactory
+from .onset_offset_factory import OnsetOffsetRuleFactory
+from .onset_offset_protocol import OnsetOffsetRule
 from .sadeh import sadeh_score
 from .sleep_rules import SleepRules
+from .sleep_scoring_protocol import SleepScoringAlgorithm
 from .types import ActivityColumn
 
 logger = logging.getLogger(__name__)
@@ -46,6 +50,8 @@ def auto_score_activity_epoch_files(
     diary_file: str,
     nwt_folder: str | None = None,
     choi_activity_column: ActivityColumn = ActivityColumn.VECTOR_MAGNITUDE,
+    sleep_algorithm: SleepScoringAlgorithm | None = None,
+    onset_offset_rule: OnsetOffsetRule | None = None,
 ) -> list[SleepMetrics]:
     """
     Automatically score sleep for all activity epoch files in a folder.
@@ -60,6 +66,8 @@ def auto_score_activity_epoch_files(
         diary_file: Path to diary CSV file with sleep entries
         nwt_folder: Optional path to NWT sensor data folder (reserved for future use)
         choi_activity_column: Activity column for Choi nonwear detection (default: VECTOR_MAGNITUDE)
+        sleep_algorithm: Optional sleep scoring algorithm instance. If None, uses default Sadeh algorithm.
+        onset_offset_rule: Optional onset/offset rule instance. If None, uses default Consecutive 3/5 rule.
 
     Returns:
         List of SleepMetrics objects, one per successfully processed file
@@ -80,6 +88,16 @@ def auto_score_activity_epoch_files(
         ...     db.save_sleep_metrics(sleep_metrics, is_autosave=False)
 
     """
+    # 0. Initialize algorithm (use default Sadeh if none provided)
+    if sleep_algorithm is None:
+        sleep_algorithm = AlgorithmFactory.create(AlgorithmFactory.get_default_algorithm_id())
+    logger.info("Using sleep scoring algorithm: %s", sleep_algorithm.name)
+
+    # 0b. Initialize onset/offset rule (use default Consecutive 3/5 if none provided)
+    if onset_offset_rule is None:
+        onset_offset_rule = OnsetOffsetRuleFactory.create(OnsetOffsetRuleFactory.get_default_rule_id())
+    logger.info("Using onset/offset rule: %s", onset_offset_rule.name)
+
     # 1. Discover activity files
     activity_files = _discover_activity_files(activity_folder)
     logger.info("Found %d activity files", len(activity_files))
@@ -92,7 +110,7 @@ def auto_score_activity_epoch_files(
     results = []
     for activity_file in activity_files:
         try:
-            sleep_metrics = _process_activity_file(activity_file, diary_df, choi_activity_column)
+            sleep_metrics = _process_activity_file(activity_file, diary_df, choi_activity_column, sleep_algorithm, onset_offset_rule)
             if sleep_metrics:
                 results.append(sleep_metrics)
                 num_periods = len(sleep_metrics.daily_sleep_markers.get_complete_periods())
@@ -155,6 +173,8 @@ def _process_activity_file(
     activity_file: Path,
     diary_df: pd.DataFrame,
     choi_activity_column: ActivityColumn = ActivityColumn.VECTOR_MAGNITUDE,
+    sleep_algorithm: SleepScoringAlgorithm | None = None,
+    onset_offset_rule: OnsetOffsetRule | None = None,
 ) -> SleepMetrics | None:
     """
     Process a single activity file and return SleepMetrics.
@@ -163,6 +183,8 @@ def _process_activity_file(
         activity_file: Path to activity CSV file
         diary_df: DataFrame with diary entries
         choi_activity_column: Activity column for Choi nonwear detection
+        sleep_algorithm: Sleep scoring algorithm instance to use
+        onset_offset_rule: Onset/offset rule instance to use
 
     Returns:
         SleepMetrics object with calculated metrics, or None if processing fails
@@ -184,7 +206,10 @@ def _process_activity_file(
     activity_df["datetime"] = pd.to_datetime(activity_df["datetime"])
 
     # 3. Apply algorithms
-    activity_df = sadeh_score(activity_df)  # Adds 'Sadeh Score' column (always uses Axis1/axis_y)
+    # Use injected sleep algorithm (default: Sadeh) - adds score column based on algorithm
+    if sleep_algorithm is None:
+        sleep_algorithm = AlgorithmFactory.create(AlgorithmFactory.get_default_algorithm_id())
+    activity_df = sleep_algorithm.score(activity_df)  # Adds algorithm-specific score column
     activity_df = choi_detect_nonwear(activity_df, choi_activity_column)  # Adds 'Choi Nonwear' column
 
     # 4. Find diary entry for this participant/date
@@ -204,6 +229,7 @@ def _process_activity_file(
         activity_df=activity_df,
         diary_onset=diary_onset,
         diary_offset=diary_offset,
+        onset_offset_rule=onset_offset_rule,
     )
 
     # 6. Calculate metrics for main sleep period
@@ -213,12 +239,22 @@ def _process_activity_file(
     )
 
     # 7. Create SleepMetrics object
+    # Use the algorithm's identifier to determine the algorithm_type
+    algorithm_id = sleep_algorithm.identifier
+    try:
+        algorithm_type = AlgorithmType(algorithm_id)
+    except ValueError:
+        # Fallback if identifier doesn't match enum
+        algorithm_type = AlgorithmType.SADEH_1994_ACTILIFE
+
     return SleepMetrics(
         filename=activity_file.name,
         analysis_date=analysis_date,
-        algorithm_type=AlgorithmType.COMBINED,
+        algorithm_type=algorithm_type,
         daily_sleep_markers=daily_markers,
         participant=participant_info,
+        sleep_algorithm_name=algorithm_id,
+        onset_offset_rule=onset_offset_rule.identifier if onset_offset_rule else "consecutive_3_5",
         **metrics_dict,
     )
 
@@ -370,6 +406,7 @@ def _apply_sleep_rules(
     activity_df: pd.DataFrame,
     diary_onset: datetime | None,
     diary_offset: datetime | None,
+    onset_offset_rule: OnsetOffsetRule | None = None,
 ) -> DailySleepMarkers:
     """
     Apply sleep rules to find onset/offset markers.
@@ -378,12 +415,17 @@ def _apply_sleep_rules(
         activity_df: DataFrame with 'Sadeh Score' and 'datetime' columns
         diary_onset: Diary-reported onset time (or None)
         diary_offset: Diary-reported offset time (or None)
+        onset_offset_rule: Onset/offset rule instance to use
 
     Returns:
         DailySleepMarkers with identified sleep periods
 
     """
     daily_markers = DailySleepMarkers()
+
+    # Use provided rule or create default
+    if onset_offset_rule is None:
+        onset_offset_rule = OnsetOffsetRuleFactory.create(OnsetOffsetRuleFactory.get_default_rule_id())
 
     # Extract data from DataFrame
     sadeh_scores = activity_df["Sadeh Score"].tolist()
@@ -396,10 +438,9 @@ def _apply_sleep_rules(
         diary_offset = timestamps[-1] if timestamps else datetime.now()
         logger.info("No diary reference, searching entire dataset")
 
-    # Apply sleep rules
-    sleep_rules = SleepRules(config=SleepRulesConfig())
-    onset_idx, offset_idx = sleep_rules.apply_rules(
-        sadeh_results=sadeh_scores,
+    # Apply sleep rules via injected rule instance
+    onset_idx, offset_idx = onset_offset_rule.apply_rules(
+        sleep_scores=sadeh_scores,
         sleep_start_marker=diary_onset,
         sleep_end_marker=diary_offset,
         timestamps=timestamps,

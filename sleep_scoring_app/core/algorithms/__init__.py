@@ -7,8 +7,10 @@ dependencies.
 
 Algorithms Included:
     - Sadeh (1994): Sleep/wake classification from actigraphy
+    - Cole-Kripke (1992): Alternative sleep/wake classification algorithm
     - Choi (2011): Nonwear period detection
-    - Sleep Rules: Onset/offset identification
+    - Sleep Rules: Consecutive N/M onset/offset identification
+    - Tudor-Locke (2014): Alternative onset/offset detection rules
     - NWT Correlation: Nonwear sensor correlation analysis
 
 Example Usage (New DataFrame-based API):
@@ -46,8 +48,26 @@ Package Structure:
 from __future__ import annotations
 
 from sleep_scoring_app.core.algorithms.auto_score import auto_score_activity_epoch_files
+from sleep_scoring_app.core.algorithms.calibration import (
+    CalibrationConfig,
+    CalibrationResult,
+    apply_calibration,
+    calibrate,
+    extract_calibration_features,
+    select_stationary_points,
+)
 from sleep_scoring_app.core.algorithms.choi import NonwearPeriod, choi_detect_nonwear, detect_nonwear
+from sleep_scoring_app.core.algorithms.choi_algorithm import ChoiAlgorithm
+from sleep_scoring_app.core.algorithms.cole_kripke import ColeKripkeAlgorithm, cole_kripke_score, score_activity_cole_kripke
 from sleep_scoring_app.core.algorithms.config import SleepRulesConfig
+from sleep_scoring_app.core.algorithms.csv_datasource import CSVDataSourceLoader
+from sleep_scoring_app.core.algorithms.datasource_factory import DataSourceFactory
+from sleep_scoring_app.core.algorithms.datasource_protocol import DataSourceLoader
+from sleep_scoring_app.core.algorithms.factory import AlgorithmFactory
+from sleep_scoring_app.core.algorithms.gt3x_datasource import GT3XDataSourceLoader
+from sleep_scoring_app.core.algorithms.imputation import ImputationConfig, ImputationResult, impute_timegaps
+from sleep_scoring_app.core.algorithms.nonwear_detection_protocol import NonwearDetectionAlgorithm
+from sleep_scoring_app.core.algorithms.nonwear_factory import NonwearAlgorithmFactory
 from sleep_scoring_app.core.algorithms.nwt_correlation import (
     NWTCorrelationResult,
     TimeRange,
@@ -58,44 +78,87 @@ from sleep_scoring_app.core.algorithms.nwt_correlation import (
     correlate_sleep_with_nonwear,
     count_overlapping_periods,
 )
+from sleep_scoring_app.core.algorithms.onset_offset_factory import OnsetOffsetRuleFactory
+from sleep_scoring_app.core.algorithms.onset_offset_protocol import OnsetOffsetRule
 from sleep_scoring_app.core.algorithms.protocols import CancellationCheck, LogCallback, ProgressCallback
-from sleep_scoring_app.core.algorithms.sadeh import sadeh_score, score_activity
+from sleep_scoring_app.core.algorithms.sadeh import SadehAlgorithm, sadeh_score, score_activity
 from sleep_scoring_app.core.algorithms.sleep_rules import SleepRules, find_sleep_onset_offset
+from sleep_scoring_app.core.algorithms.sleep_scoring_protocol import SleepScoringAlgorithm
+from sleep_scoring_app.core.algorithms.tudor_locke import TudorLockeConfig, TudorLockeRule
 from sleep_scoring_app.core.algorithms.types import ActivityColumn
-from sleep_scoring_app.core.legacy_algorithms import ChoiNonwearDetector, SleepScoringAlgorithms
+
+# Note: ChoiNonwearDetector and SleepScoringAlgorithms are deprecated and moved to legacy_algorithms.py
+# Import them directly from sleep_scoring_app.core.legacy_algorithms if needed (but use new DI pattern instead)
 
 __all__ = [
     "ActivityColumn",
+    # === Algorithm Factory (Dependency Injection) ===
+    "AlgorithmFactory",
+    # === Calibration ===
+    "CalibrationConfig",
+    "CalibrationResult",
+    # === Data Source Protocol and Factory (Dependency Injection) ===
+    "CSVDataSourceLoader",
     "CancellationCheck",
-    "ChoiNonwearDetector",
+    # === Choi Algorithm (Nonwear Detection) ===
+    "ChoiAlgorithm",
+    # === Cole-Kripke Algorithm ===
+    "ColeKripkeAlgorithm",
+    "DataSourceFactory",
+    "DataSourceLoader",
+    "GT3XDataSourceLoader",
+    # === Imputation ===
+    "ImputationConfig",
+    "ImputationResult",
     "LogCallback",
     "NWTCorrelationResult",
     # === Algorithm Data Types ===
     "NonwearPeriod",
+    # === Nonwear Detection Protocol and Factory (Dependency Injection) ===
+    "NonwearAlgorithmFactory",
+    "NonwearDetectionAlgorithm",
+    # === Onset/Offset Rule Protocol and Factory (Dependency Injection) ===
+    "OnsetOffsetRule",
+    "OnsetOffsetRuleFactory",
     # === Callback Protocols ===
     "ProgressCallback",
+    # === Algorithm Protocol Implementation ===
+    "SadehAlgorithm",
     # === Sleep Rules ===
     "SleepRules",
     "SleepRulesConfig",
-    # === Facade Classes (Validated Wrappers) ===
-    "SleepScoringAlgorithms",
+    # === Algorithm Protocol ===
+    "SleepScoringAlgorithm",
+    # === Tudor-Locke Onset/Offset Rules ===
+    "TudorLockeConfig",
+    "TudorLockeRule",
     "TimeRange",
+    # === Calibration Functions ===
+    "apply_calibration",
     # === Auto-Scoring Orchestration ===
     "auto_score_activity_epoch_files",
     "calculate_nwt_offset",
     "calculate_nwt_onset",
     "calculate_total_nwt_overlaps",
+    "calibrate",
     "check_time_in_nonwear_periods",
     "choi_detect_nonwear",
+    # === Cole-Kripke Function-Based API ===
+    "cole_kripke_score",
     # === NWT Correlation Functions ===
     "correlate_sleep_with_nonwear",
     "count_overlapping_periods",
     "detect_nonwear",
+    "extract_calibration_features",
     "find_sleep_onset_offset",
-    # === New Function-Based API ===
+    # === Imputation Function-Based API ===
+    "impute_timegaps",
+    # === Sadeh Function-Based API ===
     "sadeh_score",
     # === Core Algorithm Functions ===
     "score_activity",
+    "score_activity_cole_kripke",
+    "select_stationary_points",
 ]
 
 __version__ = "2.0.0"

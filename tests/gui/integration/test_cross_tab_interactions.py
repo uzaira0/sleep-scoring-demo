@@ -38,7 +38,7 @@ class TestStudySettingsToAnalysisTab:
         config.study_participant_id_patterns = [r"^(\d{4,})[_-]"]
         config.study_timepoint_pattern = r"([A-Z]\d)"
         config.study_group_pattern = r"(G\d)"
-        config.sadeh_variant = "actilife"
+        config.sleep_algorithm_id = "sadeh_1994_actilife"
         config.night_start_hour = 22
         config.night_end_hour = 7
         config.choi_axis = "vector_magnitude"
@@ -66,11 +66,17 @@ class TestStudySettingsToAnalysisTab:
         qtbot.addWidget(tab)
         return tab
 
-    def test_sadeh_variant_change_affects_algorithm(self, study_settings_tab, qtbot):
-        """Test changing Sadeh variant in study settings updates algorithm configuration."""
-        # Change to original variant
-        qtbot.mouseClick(study_settings_tab.sadeh_original_radio, Qt.MouseButton.LeftButton)
-        assert study_settings_tab.sadeh_original_radio.isChecked()
+    def test_sleep_algorithm_change_affects_scoring(self, study_settings_tab, qtbot):
+        """Test changing sleep scoring algorithm in study settings updates algorithm configuration."""
+        # Change algorithm via combo box (new DI pattern - uses AlgorithmFactory)
+        combo = study_settings_tab.sleep_algorithm_combo
+        initial_index = combo.currentIndex()
+
+        # Change to different algorithm
+        new_index = (initial_index + 1) % combo.count()
+        combo.setCurrentIndex(new_index)
+
+        assert combo.currentIndex() == new_index
 
     def test_choi_axis_change_affects_nonwear_detection(self, study_settings_tab, qtbot):
         """Test changing Choi axis in study settings updates nonwear detection."""
@@ -123,6 +129,12 @@ class TestDataSettingsToAnalysisTab:
         config.custom_axis_z_column = ""
         config.custom_vector_magnitude_column = ""
         config.custom_activity_column = ""
+
+        # Data source configuration (DI pattern)
+        config.data_source_type_id = "csv"
+        config.csv_skip_rows = 10
+        config.gt3x_epoch_length = 60
+        config.gt3x_return_raw = False
 
         # Analysis tab config
         config.activity_source = "axis_y"

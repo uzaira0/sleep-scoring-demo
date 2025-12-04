@@ -71,7 +71,7 @@ class ExportManager:
     def autosave_sleep_metrics(
         self,
         sleep_metrics_list: list[SleepMetrics],
-        algorithm_name: AlgorithmType = AlgorithmType.COMBINED,
+        algorithm_name: AlgorithmType = AlgorithmType.SADEH_1994_ACTILIFE,
     ) -> str | None:
         """Autosave sleep metrics on marker change (temporary storage only, no permanent CSV)."""
         if not FeatureFlags.ENABLE_AUTOSAVE:
@@ -137,7 +137,7 @@ class ExportManager:
     def create_export_csv_only(
         self,
         sleep_metrics_list: list[SleepMetrics],
-        algorithm_name: AlgorithmType = AlgorithmType.COMBINED,
+        algorithm_name: AlgorithmType = AlgorithmType.SADEH_1994_ACTILIFE,
     ) -> str | None:
         """Create CSV file for export dialog WITHOUT saving to database (to avoid duplicates)."""
         if not sleep_metrics_list:
@@ -146,7 +146,7 @@ class ExportManager:
         # Sanitize algorithm name to prevent security issues
         safe_algorithm_name = sanitize_filename_component(algorithm_name)
         if not safe_algorithm_name:
-            safe_algorithm_name = sanitize_filename_component(AlgorithmType.COMBINED)
+            safe_algorithm_name = sanitize_filename_component(AlgorithmType.SADEH_1994_ACTILIFE)
 
         try:
             # CRITICAL: Ensure all metrics (including naps) are calculated before export
@@ -356,14 +356,14 @@ class ExportManager:
 
         import pandas as pd
 
-        from sleep_scoring_app.core.algorithms import ChoiNonwearDetector, SleepScoringAlgorithms
+        from sleep_scoring_app.core.algorithms.factory import AlgorithmFactory
+        from sleep_scoring_app.core.algorithms.nonwear_factory import NonwearAlgorithmFactory
         from sleep_scoring_app.core.constants import NonwearDataSource
         from sleep_scoring_app.services.data_service import DataManager
         from sleep_scoring_app.services.nonwear_service import NonwearDataService
 
         # Get service instances
         data_manager = DataManager(database_manager=self.db_manager)
-        algorithm_processor = SleepScoringAlgorithms()
         nonwear_service = NonwearDataService(database_manager=self.db_manager)
 
         for metrics in sleep_metrics_list:
@@ -404,8 +404,12 @@ class ExportManager:
                     # Convert datetime timestamps to Unix timestamps for compatibility
                     unix_timestamps = [ts.timestamp() if isinstance(ts, datetime) else ts for ts in timestamps]
 
-                    # Run Sadeh algorithm
-                    sadeh_results = algorithm_processor.run_sadeh_algorithm(axis_y_values, unix_timestamps)
+                    # Get the algorithm from metrics or use default
+                    algorithm_id = metrics.sleep_algorithm_name or AlgorithmFactory.get_default_algorithm_id()
+                    sleep_algorithm = AlgorithmFactory.create(algorithm_id)
+
+                    # Run sleep scoring algorithm using DI pattern
+                    sadeh_results = sleep_algorithm.score_array(axis_y_values)
 
                     # Run REAL Choi algorithm for nonwear detection
                     choi_results = []
@@ -419,20 +423,9 @@ class ExportManager:
                             }
                         )
 
-                        # Run Choi nonwear detection
-                        choi_detector = ChoiNonwearDetector(
-                            data=df, count_column=ActivityDataPreference.VECTOR_MAGNITUDE, timestamp_column="datetime", use_vector_magnitude=True
-                        )
-                        nonwear_periods = choi_detector.detect_nonwear_choi_algorithm()
-
-                        # Convert nonwear periods to per-minute results (1 = nonwear, 0 = wear)
-                        # nonwear_periods is list[tuple[datetime, datetime]] where tuple is (start_time, end_time)
-                        choi_results = [0] * len(timestamps)
-                        for nw_period in nonwear_periods:
-                            start_time, end_time = nw_period  # Unpack tuple
-                            for i, ts in enumerate(timestamps):
-                                if start_time <= ts <= end_time:
-                                    choi_results[i] = 1
+                        # Run Choi nonwear detection using DI pattern
+                        choi_algorithm = NonwearAlgorithmFactory.create("choi_2011")
+                        choi_results = choi_algorithm.detect_mask(vector_magnitude)
                     else:
                         choi_results = [0] * len(sadeh_results)
 
@@ -574,7 +567,7 @@ class ExportManager:
     def save_comprehensive_sleep_metrics(
         self,
         sleep_metrics_list: list[SleepMetrics],
-        algorithm_name: AlgorithmType = AlgorithmType.COMBINED,
+        algorithm_name: AlgorithmType = AlgorithmType.SADEH_1994_ACTILIFE,
     ) -> str | None:
         """Save comprehensive sleep metrics to ongoing backup file."""
         if not sleep_metrics_list:
@@ -583,7 +576,7 @@ class ExportManager:
         # Sanitize algorithm name to prevent security issues
         safe_algorithm_name = sanitize_filename_component(algorithm_name)
         if not safe_algorithm_name:
-            safe_algorithm_name = sanitize_filename_component(AlgorithmType.COMBINED)
+            safe_algorithm_name = sanitize_filename_component(AlgorithmType.SADEH_1994_ACTILIFE)
 
         try:
             # Save to database

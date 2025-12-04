@@ -11,7 +11,7 @@ import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from sleep_scoring_app.core.algorithms import SleepScoringAlgorithms
+from sleep_scoring_app.core.algorithms import NonwearAlgorithmFactory
 from sleep_scoring_app.core.constants import ActivityDataPreference, NonwearDataSource
 from sleep_scoring_app.core.dataclasses import NonwearPeriod
 
@@ -122,28 +122,13 @@ class NonwearData:
             return []
 
         try:
-            algorithms = SleepScoringAlgorithms()
-            choi_results = algorithms.run_choi_algorithm(
+            # Create Choi algorithm instance using factory
+            choi_algorithm = NonwearAlgorithmFactory.create("choi_2011")
+
+            # Use the detect method to get NonwearPeriod objects directly
+            periods = choi_algorithm.detect(
                 activity_data=list(activity_view.counts), timestamps=list(activity_view.timestamps), activity_column=activity_column
             )
-
-            periods = []
-            for result in choi_results:
-                start_idx = result.get("start_index", 0)
-                end_idx = result.get("end_index", 0)
-                duration_minutes = result.get("duration_minutes", end_idx - start_idx + 1)
-
-                if start_idx < len(activity_view.timestamps) and end_idx < len(activity_view.timestamps):
-                    period = NonwearPeriod(
-                        start_time=str(activity_view.timestamps[start_idx]),
-                        end_time=str(activity_view.timestamps[end_idx]),
-                        participant_id="",
-                        source=NonwearDataSource.CHOI_ALGORITHM,
-                        duration_minutes=duration_minutes,
-                        start_index=start_idx,
-                        end_index=end_idx,
-                    )
-                    periods.append(period)
 
             logger.debug("Computed %d Choi nonwear periods from %d activity points", len(periods), len(activity_view.counts))
             return periods

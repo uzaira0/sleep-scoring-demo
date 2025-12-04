@@ -2,19 +2,22 @@
 Sleep onset and offset rule application - Framework-agnostic implementation.
 
 This module implements the research-grade rules for identifying precise sleep onset
-and offset times based on consecutive sleep minutes detected by the Sadeh algorithm.
+and offset times based on consecutive sleep minutes detected by sleep scoring algorithms.
 
 Algorithm Details:
-    - Onset Rule: FIRST occurrence of 3 consecutive sleep minutes
-    - Offset Rule: LAST minute of 5 consecutive sleep minutes before wake
-    - Search Extension: Rules search ±5 minutes from user markers
+    - Onset Rule: FIRST occurrence of N consecutive sleep minutes (default: 3)
+    - Offset Rule: LAST minute of M consecutive sleep minutes before wake (default: 5)
+    - Search Extension: Rules search ±K minutes from user markers (default: 5)
     - Priority: Always selects FIRST onset and LAST offset occurrence
+
+This class implements the OnsetOffsetRule protocol for dependency injection.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -26,17 +29,26 @@ logger = logging.getLogger(__name__)
 
 class SleepRules:
     """
-    Framework-agnostic implementation of sleep onset and offset rules.
+    Consecutive N-minute onset/offset detection rules - Protocol implementation.
 
-    This class applies validated sleep research rules to identify precise
-    sleep onset and offset times from Sadeh algorithm results.
+    This class implements the OnsetOffsetRule protocol for dependency injection,
+    applying validated sleep research rules to identify precise sleep onset
+    and offset times from sleep scoring algorithm results.
+
+    Rules:
+        - Onset: FIRST occurrence of N consecutive sleep minutes
+        - Offset: LAST minute of M consecutive sleep minutes before wake
+        - Search Extension: ±K minutes from user markers
+
+    This is the original implementation used in the application and serves as
+    the default rule set.
 
     Example usage:
         ```python
         from sleep_scoring_app.core.algorithms import SleepRules, SleepRulesConfig
 
         # Prepare data
-        sadeh_results = [0, 0, 1, 1, 1, ...]  # Sadeh sleep/wake scores
+        sleep_scores = [0, 0, 1, 1, 1, ...]  # Sleep/wake scores (1=sleep, 0=wake)
         sleep_start_marker = datetime(2024, 1, 1, 22, 0)  # User marker
         sleep_end_marker = datetime(2024, 1, 2, 7, 0)    # User marker
         timestamps = [...]  # Corresponding timestamps
@@ -44,7 +56,7 @@ class SleepRules:
         # Apply rules
         rules = SleepRules(config=SleepRulesConfig())
         onset_idx, offset_idx = rules.apply_rules(
-            sadeh_results=sadeh_results,
+            sleep_scores=sleep_scores,
             sleep_start_marker=sleep_start_marker,
             sleep_end_marker=sleep_end_marker,
             timestamps=timestamps
@@ -64,9 +76,85 @@ class SleepRules:
 
         self.config = config or SleepRulesConfig()
 
+    # === Protocol Properties ===
+
+    @property
+    def name(self) -> str:
+        """Human-readable rule name."""
+        return f"Consecutive {self.config.onset_consecutive_minutes}/{self.config.offset_consecutive_minutes} Minutes"
+
+    @property
+    def identifier(self) -> str:
+        """Unique identifier for storage."""
+        return f"consecutive_{self.config.onset_consecutive_minutes}_{self.config.offset_consecutive_minutes}"
+
+    @property
+    def description(self) -> str:
+        """Brief description of rule logic."""
+        return (
+            f"Onset: First {self.config.onset_consecutive_minutes} consecutive S (Sleep) epochs. "
+            f"Offset: Last S epoch of {self.config.offset_consecutive_minutes} consecutive S epochs before W (Wake). "
+            f"Search extension: ±{self.config.search_extension_minutes} minutes."
+        )
+
+    # === Protocol Methods ===
+
+    def get_parameters(self) -> dict[str, Any]:
+        """Get current rule parameters."""
+        return {
+            "onset_consecutive_minutes": self.config.onset_consecutive_minutes,
+            "offset_consecutive_minutes": self.config.offset_consecutive_minutes,
+            "search_extension_minutes": self.config.search_extension_minutes,
+            "require_wake_after_offset": self.config.require_wake_after_offset,
+        }
+
+    def set_parameters(self, **kwargs: Any) -> None:
+        """
+        Update rule parameters.
+
+        Note: SleepRulesConfig is frozen, so this creates a new config instance.
+
+        Args:
+            **kwargs: Parameter name-value pairs
+
+        Raises:
+            ValueError: If parameter name is invalid
+        """
+        # Only accept valid parameters
+        valid_params = {
+            "onset_consecutive_minutes",
+            "offset_consecutive_minutes",
+            "search_extension_minutes",
+            "require_wake_after_offset",
+        }
+        invalid_params = set(kwargs.keys()) - valid_params
+        if invalid_params:
+            msg = f"Invalid parameters: {invalid_params}. Valid: {valid_params}"
+            raise ValueError(msg)
+
+        # Create new config with updated values
+        self.config = replace(self.config, **kwargs)
+
+    def get_marker_labels(self, onset_time: str, offset_time: str) -> tuple[str, str]:
+        """
+        Get UI marker label text.
+
+        Args:
+            onset_time: Onset time in HH:MM format
+            offset_time: Offset time in HH:MM format
+
+        Returns:
+            Tuple of (onset_label, offset_label) for display in UI
+        """
+        onset_label = f"Sleep Onset at {onset_time}\n{self.config.onset_consecutive_minutes} consecutive S epochs"
+        offset_label = f"Sleep Offset at {offset_time}\n{self.config.offset_consecutive_minutes} consecutive S before W"
+        return onset_label, offset_label
+
+    # === Core Rule Application ===
+
     def apply_rules(
         self,
-        sadeh_results: list[int],
+        sleep_scores: list[int],
         sleep_start_marker: datetime,
         sleep_end_marker: datetime,
         timestamps: list[datetime],
@@ -79,16 +167,16 @@ class SleepRules:
         window around the user-provided markers.
 
         Args:
-            sadeh_results: List of sleep/wake classifications (1=sleep, 0=wake)
+            sleep_scores: List of sleep/wake classifications (1=sleep, 0=wake)
             sleep_start_marker: User-provided approximate sleep start time
             sleep_end_marker: User-provided approximate sleep end time
-            timestamps: List of timestamps corresponding to sadeh_results
+            timestamps: List of timestamps corresponding to sleep_scores
 
         Returns:
             Tuple of (onset_index, offset_index), or (None, None) if not found
 
         """
-        if not sadeh_results or len(sadeh_results) == 0:
+        if not sleep_scores or len(sleep_scores) == 0:
             return None, None
 
         # Find corresponding indices for markers in the data
@@ -104,18 +192,18 @@ class SleepRules:
         if start_idx is None or end_idx is None:
             return None, None
 
-        # Find sleep onset: FIRST occurrence of 3 consecutive sleep minutes
+        # Find sleep onset: FIRST occurrence of N consecutive sleep minutes
         sleep_onset_idx = self._find_sleep_onset(
-            sadeh_results=sadeh_results,
+            sleep_scores=sleep_scores,
             start_idx=start_idx,
             end_idx=end_idx,
         )
 
-        # Find sleep offset: LAST minute of 5 consecutive sleep minutes before wake
+        # Find sleep offset: LAST minute of M consecutive sleep minutes before wake
         sleep_offset_idx = None
         if sleep_onset_idx is not None:
             sleep_offset_idx = self._find_sleep_offset(
-                sadeh_results=sadeh_results,
+                sleep_scores=sleep_scores,
                 start_idx=start_idx,
                 end_idx=end_idx,
                 onset_idx=sleep_onset_idx,
@@ -125,15 +213,15 @@ class SleepRules:
 
     def _find_sleep_onset(
         self,
-        sadeh_results: list[int],
+        sleep_scores: list[int],
         start_idx: int,
         end_idx: int,
     ) -> int | None:
         """
-        Find sleep onset: FIRST occurrence of 3 consecutive sleep minutes.
+        Find sleep onset: FIRST occurrence of N consecutive sleep minutes.
 
         Args:
-            sadeh_results: List of sleep/wake classifications
+            sleep_scores: List of sleep/wake classifications
             start_idx: Starting index from sleep start marker
             end_idx: Ending index from sleep end marker
 
@@ -143,17 +231,17 @@ class SleepRules:
         """
         # Extend search by configured minutes
         extended_start = max(0, start_idx - self.config.search_extension_minutes)
-        extended_end = min(len(sadeh_results) - 1, end_idx + self.config.search_extension_minutes)
+        extended_end = min(len(sleep_scores) - 1, end_idx + self.config.search_extension_minutes)
 
         # Find ALL instances of N consecutive sleep minutes, then choose the FIRST one
         sleep_onset_candidates = []
 
         # Ensure we don't go beyond available data - need space for consecutive minutes
-        safe_end = min(extended_end, len(sadeh_results) - self.config.onset_consecutive_minutes)
+        safe_end = min(extended_end, len(sleep_scores) - self.config.onset_consecutive_minutes)
 
         for i in range(extended_start, safe_end + 1):
             # Check if we have N consecutive sleep minutes starting at position i
-            if all(sadeh_results[i + offset] == 1 for offset in range(self.config.onset_consecutive_minutes)):
+            if all(sleep_scores[i + offset] == 1 for offset in range(self.config.onset_consecutive_minutes)):
                 sleep_onset_candidates.append(i)
 
         # Filter to unique values only
@@ -167,16 +255,16 @@ class SleepRules:
 
     def _find_sleep_offset(
         self,
-        sadeh_results: list[int],
+        sleep_scores: list[int],
         start_idx: int,
         end_idx: int,
         onset_idx: int,
     ) -> int | None:
         """
-        Find sleep offset: LAST minute of 5 consecutive sleep minutes before wake.
+        Find sleep offset: LAST minute of M consecutive sleep minutes before wake.
 
         Args:
-            sadeh_results: List of sleep/wake classifications
+            sleep_scores: List of sleep/wake classifications
             start_idx: Starting index from sleep start marker
             end_idx: Ending index from sleep end marker
             onset_idx: Index of identified sleep onset
@@ -187,7 +275,7 @@ class SleepRules:
         """
         # Extend search by configured minutes
         extended_start = max(0, start_idx - self.config.search_extension_minutes)
-        extended_end = min(len(sadeh_results) - 1, end_idx + self.config.search_extension_minutes)
+        extended_end = min(len(sleep_scores) - 1, end_idx + self.config.search_extension_minutes)
 
         # Search for patterns of N consecutive sleep minutes followed by wake
         sleep_offset_candidates = []
@@ -196,25 +284,25 @@ class SleepRules:
         consecutive_check = self.config.offset_consecutive_minutes
         if self.config.require_wake_after_offset:
             # Need space for N sleep minutes + 1 wake minute
-            safe_end = min(extended_end, len(sadeh_results) - (consecutive_check + 1))
+            safe_end = min(extended_end, len(sleep_scores) - (consecutive_check + 1))
         else:
             # Just need space for N sleep minutes
-            safe_end = min(extended_end, len(sadeh_results) - consecutive_check)
+            safe_end = min(extended_end, len(sleep_scores) - consecutive_check)
 
         # Start search from a safe position that allows for N minutes of history
         safe_start = max(onset_idx + consecutive_check, consecutive_check)
 
         for i in range(safe_start, safe_end + 1):
             # Check for N consecutive sleep minutes
-            consecutive_sleep = all(sadeh_results[i + offset] == 1 for offset in range(consecutive_check))
+            consecutive_sleep = all(sleep_scores[i + offset] == 1 for offset in range(consecutive_check))
 
             if not consecutive_sleep:
                 continue
 
             # Check if followed by wake (if required)
             if self.config.require_wake_after_offset:
-                if i + consecutive_check < len(sadeh_results):
-                    followed_by_wake = sadeh_results[i + consecutive_check] == 0
+                if i + consecutive_check < len(sleep_scores):
+                    followed_by_wake = sleep_scores[i + consecutive_check] == 0
                     if not followed_by_wake:
                         continue
                 else:
@@ -234,7 +322,7 @@ class SleepRules:
 
 
 def find_sleep_onset_offset(
-    sadeh_results: list[int],
+    sleep_scores: list[int],
     sleep_start_marker: datetime,
     sleep_end_marker: datetime,
     timestamps: list[datetime],
@@ -244,10 +332,10 @@ def find_sleep_onset_offset(
     Convenience function to apply sleep onset/offset rules.
 
     Args:
-        sadeh_results: List of sleep/wake classifications (1=sleep, 0=wake)
+        sleep_scores: List of sleep/wake classifications (1=sleep, 0=wake)
         sleep_start_marker: User-provided approximate sleep start time
         sleep_end_marker: User-provided approximate sleep end time
-        timestamps: List of timestamps corresponding to sadeh_results
+        timestamps: List of timestamps corresponding to sleep_scores
         config: Optional rules configuration
 
     Returns:
@@ -255,4 +343,4 @@ def find_sleep_onset_offset(
 
     """
     rules = SleepRules(config=config)
-    return rules.apply_rules(sadeh_results, sleep_start_marker, sleep_end_marker, timestamps)
+    return rules.apply_rules(sleep_scores, sleep_start_marker, sleep_end_marker, timestamps)

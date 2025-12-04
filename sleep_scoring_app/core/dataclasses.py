@@ -88,17 +88,35 @@ class ParticipantInfo:
 class ColumnMapping:
     """CSV column mapping configuration."""
 
-    date_column: str = DefaultColumn.DATE
-    time_column: str = DefaultColumn.TIME
-    activity_column: str = DefaultColumn.ACTIVITY
+    # Date/time columns
+    date_column: str | None = None
+    time_column: str | None = None
+    datetime_column: str | None = None
+
+    # Activity columns
+    activity_column: str | None = None
+    axis_x_column: str | None = None
+    axis_z_column: str | None = None
+    vector_magnitude_column: str | None = None
 
     def to_dict(self) -> dict[str, str]:
         """Convert to dictionary for config storage."""
-        return {
-            ConfigKey.DATE_COLUMN: self.date_column,
-            ConfigKey.TIME_COLUMN: self.time_column,
-            ConfigKey.ACTIVITY_COLUMN: self.activity_column,
-        }
+        result = {}
+        if self.date_column:
+            result[ConfigKey.DATE_COLUMN] = self.date_column
+        if self.time_column:
+            result[ConfigKey.TIME_COLUMN] = self.time_column
+        if self.datetime_column:
+            result["datetime_column"] = self.datetime_column
+        if self.activity_column:
+            result[ConfigKey.ACTIVITY_COLUMN] = self.activity_column
+        if self.axis_x_column:
+            result["axis_x_column"] = self.axis_x_column
+        if self.axis_z_column:
+            result["axis_z_column"] = self.axis_z_column
+        if self.vector_magnitude_column:
+            result["vector_magnitude_column"] = self.vector_magnitude_column
+        return result
 
 
 @dataclass
@@ -319,7 +337,7 @@ class SleepMetrics:
     # File and analysis information
     filename: str = ""
     analysis_date: str = ""
-    algorithm_type: AlgorithmType = AlgorithmType.COMBINED
+    algorithm_type: AlgorithmType = AlgorithmType.SADEH_1994_ACTILIFE
 
     # Daily sleep markers (up to 4 periods with main/nap classification)
     daily_sleep_markers: DailySleepMarkers = field(default_factory=DailySleepMarkers)
@@ -342,12 +360,22 @@ class SleepMetrics:
     fragmentation_index: float | None = None
     sleep_fragmentation_index: float | None = None
 
-    # Algorithm-specific values
+    # Sleep algorithm identifier (for DI pattern)
+    sleep_algorithm_name: str = "sadeh_1994_actilife"  # Default to Sadeh ActiLife version
+
+    # Onset/offset rule identifier (for DI pattern)
+    onset_offset_rule: str = "consecutive_3_5"  # Default to Consecutive 3/5 for backward compatibility
+
+    # Algorithm-specific values (legacy columns - kept for backward compatibility)
     sadeh_onset: int | None = None
     sadeh_offset: int | None = None
     choi_onset: int | None = None
     choi_offset: int | None = None
     total_choi_counts: int | None = None
+
+    # Generic algorithm values (NEW - preferred for new code)
+    sleep_algorithm_onset: int | None = None
+    sleep_algorithm_offset: int | None = None
 
     # NWT sensor data values
     nwt_onset: int | None = None
@@ -777,11 +805,19 @@ class SleepMetrics:
             "movement_index": self.movement_index,
             "fragmentation_index": self.fragmentation_index,
             "sleep_fragmentation_index": self.sleep_fragmentation_index,
+            # Sleep algorithm identifier (DI pattern)
+            "sleep_algorithm_name": self.sleep_algorithm_name,
+            # Onset/offset rule identifier (DI pattern)
+            "onset_offset_rule": self.onset_offset_rule,
+            # Legacy algorithm columns
             "sadeh_onset": self.sadeh_onset,
             "sadeh_offset": self.sadeh_offset,
             "choi_onset": self.choi_onset,
             "choi_offset": self.choi_offset,
             "total_choi_counts": self.total_choi_counts,
+            # Generic algorithm columns (maps to same values as sadeh for now)
+            "sleep_algorithm_onset": self.sleep_algorithm_onset if self.sleep_algorithm_onset is not None else self.sadeh_onset,
+            "sleep_algorithm_offset": self.sleep_algorithm_offset if self.sleep_algorithm_offset is not None else self.sadeh_offset,
             "nwt_onset": self.nwt_onset,
             "nwt_offset": self.nwt_offset,
             "total_nwt_counts": self.total_nwt_counts,
@@ -864,11 +900,23 @@ class SleepMetrics:
             "sleep_fragmentation_index": period_metrics.get("sleep_fragmentation_index")
             if period_metrics
             else (self.sleep_fragmentation_index if is_main_sleep else None),
+            # Sleep algorithm identifier (DI pattern) - same for all periods
+            "sleep_algorithm_name": self.sleep_algorithm_name,
+            # Onset/offset rule identifier (DI pattern) - same for all periods
+            "onset_offset_rule": self.onset_offset_rule,
+            # Legacy algorithm columns
             "sadeh_onset": period_metrics.get("sadeh_onset") if period_metrics else (self.sadeh_onset if is_main_sleep else None),
             "sadeh_offset": period_metrics.get("sadeh_offset") if period_metrics else (self.sadeh_offset if is_main_sleep else None),
             "choi_onset": period_metrics.get("choi_onset") if period_metrics else (self.choi_onset if is_main_sleep else None),
             "choi_offset": period_metrics.get("choi_offset") if period_metrics else (self.choi_offset if is_main_sleep else None),
             "total_choi_counts": period_metrics.get("total_choi_counts") if period_metrics else (self.total_choi_counts if is_main_sleep else None),
+            # Generic algorithm columns
+            "sleep_algorithm_onset": period_metrics.get("sleep_algorithm_onset")
+            if period_metrics
+            else (self.sleep_algorithm_onset if self.sleep_algorithm_onset is not None else (self.sadeh_onset if is_main_sleep else None)),
+            "sleep_algorithm_offset": period_metrics.get("sleep_algorithm_offset")
+            if period_metrics
+            else (self.sleep_algorithm_offset if self.sleep_algorithm_offset is not None else (self.sadeh_offset if is_main_sleep else None)),
             "nwt_onset": self._calculate_nwt_from_database(sleep_period, "onset") if sleep_period and sleep_period.is_complete else None,
             "nwt_offset": self._calculate_nwt_from_database(sleep_period, "offset") if sleep_period and sleep_period.is_complete else None,
             "total_nwt_counts": self._calculate_nwt_from_database(sleep_period, "total") if sleep_period and sleep_period.is_complete else None,
@@ -1098,16 +1146,29 @@ class AppConfig:
     custom_vector_magnitude_column: str = ""  # Recommended for Choi algorithm
 
     # Algorithm Configuration
-    sadeh_variant: str = "actilife"  # "actilife" or "original"
     night_start_hour: int = 22
     night_end_hour: int = 7
     max_sleep_periods: int = 4  # 1 main sleep + up to 3 naps (hardcoded, not configurable)
     choi_axis: str = ActivityDataPreference.VECTOR_MAGNITUDE
 
+    # Sleep Scoring Algorithm Selection (DI pattern)
+    sleep_algorithm_id: str = "sadeh_1994_actilife"  # Algorithm identifier for factory
+
+    # Onset/Offset Rule Selection (DI pattern)
+    onset_offset_rule_id: str = "consecutive_3_5"  # Rule identifier for factory
+
     # Raw Data Pipeline (gt3x) - for future use
     data_source_type: str = "csv"  # "csv" or "gt3x"
     gt3x_folder: str = ""
-    nonwear_algorithm: str = "choi"  # "choi", "vanhees_2013", "vanhees_2023"
+
+    # Data Source Configuration (DI pattern)
+    data_source_type_id: str = "csv"  # Factory identifier for data source loader
+    csv_skip_rows: int = 10  # CSV-specific: rows to skip
+    gt3x_epoch_length: int = 60  # GT3X-specific: epoch length in seconds
+    gt3x_return_raw: bool = False  # GT3X-specific: return raw acceleration data
+
+    # Nonwear Detection Algorithm Selection (DI pattern)
+    nonwear_algorithm_id: str = "choi_2011"  # Algorithm identifier for factory
 
     # Automatic Processing
     auto_place_diary_markers: bool = True
@@ -1180,14 +1241,16 @@ class AppConfig:
             # ALGORITHM SETTINGS (Critical for reproducibility)
             # ============================================================
             "algorithm": {
-                # Sadeh sleep scoring algorithm
-                "sadeh_variant": self.sadeh_variant,  # "actilife" (threshold=-4) or "original" (threshold=0)
+                # Sleep scoring algorithm selection (DI pattern)
+                "sleep_algorithm_id": self.sleep_algorithm_id,  # e.g., "sadeh_1994_actilife", "sadeh_1994_original", "cole_kripke_1992"
+                # Onset/offset rule selection (DI pattern)
+                "onset_offset_rule_id": self.onset_offset_rule_id,  # e.g., "consecutive_3_5", "tudor_locke_2014"
                 # Night definition for sleep period detection
                 "night_start_hour": self.night_start_hour,
                 "night_end_hour": self.night_end_hour,
-                # Choi nonwear detection algorithm
+                # Nonwear detection algorithm (DI pattern)
                 "choi_axis": self.choi_axis,  # Which axis to use for nonwear detection
-                "nonwear_algorithm": self.nonwear_algorithm,
+                "nonwear_algorithm_id": self.nonwear_algorithm_id,
             },
             # ============================================================
             # DATA PROCESSING SETTINGS (Important for data interpretation)
@@ -1271,11 +1334,12 @@ class AppConfig:
         # Algorithm settings (Critical for reproducibility)
         if "algorithm" in data:
             alg = data["algorithm"]
-            config.sadeh_variant = alg.get("sadeh_variant", config.sadeh_variant)
+            config.sleep_algorithm_id = alg.get("sleep_algorithm_id", config.sleep_algorithm_id)
+            config.onset_offset_rule_id = alg.get("onset_offset_rule_id", config.onset_offset_rule_id)
             config.night_start_hour = alg.get("night_start_hour", config.night_start_hour)
             config.night_end_hour = alg.get("night_end_hour", config.night_end_hour)
             config.choi_axis = alg.get("choi_axis", config.choi_axis)
-            config.nonwear_algorithm = alg.get("nonwear_algorithm", config.nonwear_algorithm)
+            config.nonwear_algorithm_id = alg.get("nonwear_algorithm_id", config.nonwear_algorithm_id)
 
         # Data processing settings
         if "data_processing" in data:
@@ -1629,3 +1693,97 @@ class DiaryImportResult:
         if self.total_files_processed == 0:
             return 0.0
         return (len(self.successful_files) / self.total_files_processed) * 100
+
+
+# ============================================================================
+# DATA SOURCE CONFIGURATION (DI PATTERN)
+# ============================================================================
+
+
+@dataclass(frozen=True)
+class DataSourceConfig:
+    """
+    Data source configuration for dependency injection.
+
+    Immutable configuration for data source loaders.
+    Used to specify which data source to use and how to configure it.
+
+    Attributes:
+        source_type: Data source type identifier (e.g., "csv", "gt3x")
+        file_path: Path to the data file
+        skip_rows: Number of header rows to skip (CSV-specific)
+        encoding: File encoding (CSV-specific)
+        custom_columns: Custom column mappings (optional)
+
+    """
+
+    source_type: str = "csv"  # DataSourceType enum value
+    file_path: str = ""
+    skip_rows: int = 10
+    encoding: str = "utf-8"
+    custom_columns: dict[str, str] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for storage."""
+        return {
+            "source_type": self.source_type,
+            "file_path": self.file_path,
+            "skip_rows": self.skip_rows,
+            "encoding": self.encoding,
+            "custom_columns": self.custom_columns,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DataSourceConfig:
+        """Create from dictionary data."""
+        return cls(
+            source_type=data.get("source_type", "csv"),
+            file_path=data.get("file_path", ""),
+            skip_rows=data.get("skip_rows", 10),
+            encoding=data.get("encoding", "utf-8"),
+            custom_columns=data.get("custom_columns", {}),
+        )
+
+
+@dataclass(frozen=True)
+class LoadedDataResult:
+    """
+    Result of data loading operation.
+
+    Immutable container for loaded activity data and metadata.
+    Returned by DataSourceLoader.load_file() implementations.
+
+    Attributes:
+        activity_data: DataFrame with datetime and activity columns
+        metadata: File and device metadata
+        column_mapping: Mapping of standard names to actual column names
+        source_type: Data source type identifier
+        file_path: Original file path
+
+    """
+
+    activity_data: pd.DataFrame
+    metadata: dict[str, Any]
+    column_mapping: dict[str, str]
+    source_type: str
+    file_path: str
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary (excluding DataFrame)."""
+        return {
+            "metadata": self.metadata,
+            "column_mapping": self.column_mapping,
+            "source_type": self.source_type,
+            "file_path": self.file_path,
+            "record_count": len(self.activity_data),
+        }
+
+    @property
+    def has_data(self) -> bool:
+        """Check if activity data is present and non-empty."""
+        return self.activity_data is not None and not self.activity_data.empty
+
+    @property
+    def record_count(self) -> int:
+        """Get number of records in activity data."""
+        return len(self.activity_data) if self.has_data else 0

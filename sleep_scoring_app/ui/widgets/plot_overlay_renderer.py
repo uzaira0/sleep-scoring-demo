@@ -18,7 +18,7 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import QTimer
 
-from sleep_scoring_app.core.algorithms import SleepScoringAlgorithms
+from sleep_scoring_app.core.algorithms import NonwearAlgorithmFactory
 from sleep_scoring_app.core.constants import NonwearDataSource, UIColors
 from sleep_scoring_app.services.nonwear_service import NonwearPeriod
 
@@ -506,28 +506,9 @@ class PlotOverlayRenderer:
             return periods
 
         try:
-            algorithms = SleepScoringAlgorithms()
-            choi_results = algorithms.run_choi_algorithm(self.parent.axis_y_data)
-
-            for result in choi_results:
-                start_idx = result.get("start_index", 0)
-                end_idx = result.get("end_index", 0)
-
-                if start_idx < len(self.parent.timestamps) and end_idx < len(self.parent.timestamps):
-                    start_time = self.parent.timestamps[start_idx].isoformat()
-                    end_time = self.parent.timestamps[end_idx].isoformat()
-                    duration = result.get("duration_minutes", end_idx - start_idx)
-
-                    period = NonwearPeriod(
-                        start_time=start_time,
-                        end_time=end_time,
-                        participant_id="dynamic",
-                        source=NonwearDataSource.CHOI_ALGORITHM,
-                        duration_minutes=duration,
-                        start_index=start_idx,
-                        end_index=end_idx,
-                    )
-                    periods.append(period)
+            # Use NonwearAlgorithmFactory (DI pattern)
+            choi_algorithm = NonwearAlgorithmFactory.create("choi_2011")
+            periods = choi_algorithm.detect(activity_data=self.parent.axis_y_data, timestamps=self.parent.timestamps)
         except Exception:
             logger.exception("Error converting Choi results to periods")
 

@@ -4,6 +4,8 @@ Export Tab Component
 Contains export functionality and configuration options.
 """
 
+from __future__ import annotations
+
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -13,6 +15,7 @@ from PyQt6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
     QPushButton,
     QRadioButton,
@@ -22,6 +25,7 @@ from PyQt6.QtWidgets import (
 )
 
 from sleep_scoring_app.core.constants import ButtonText
+from sleep_scoring_app.ui.column_selection_dialog import ColumnSelectionDialog
 from sleep_scoring_app.utils.column_registry import column_registry
 
 if TYPE_CHECKING:
@@ -33,9 +37,9 @@ logger = logging.getLogger(__name__)
 class ExportTab(QWidget):
     """Export Tab for data export functionality."""
 
-    def __init__(self, parent: "SleepScoringMainWindow") -> None:
+    def __init__(self, parent: SleepScoringMainWindow) -> None:
         super().__init__(parent)
-        self.parent = parent  # Reference to main window
+        self.parent = parent
         self.setup_ui()
 
     def setup_ui(self) -> None:
@@ -61,6 +65,10 @@ class ExportTab(QWidget):
         # Data summary section
         summary_group = self._create_data_summary_section()
         content_layout.addWidget(summary_group)
+
+        # Column selection section
+        columns_group = self._create_column_selection_section()
+        content_layout.addWidget(columns_group)
 
         # Grouping options section
         grouping_group = self._create_grouping_options_section()
@@ -152,6 +160,39 @@ class ExportTab(QWidget):
 
         self.summary_label.setText(summary_text)
 
+    def _create_column_selection_section(self) -> QGroupBox:
+        """Create column selection section with button to open dialog."""
+        group = QGroupBox("Export Columns")
+        layout = QHBoxLayout(group)
+
+        self.column_count_label = QLabel()
+        self._update_column_count()
+        layout.addWidget(self.column_count_label)
+
+        layout.addStretch()
+
+        select_columns_btn = QPushButton("Select Columns...")
+        select_columns_btn.clicked.connect(self._open_column_selection_dialog)
+        select_columns_btn.setStyleSheet("font-weight: bold; padding: 8px 15px;")
+        layout.addWidget(select_columns_btn)
+
+        return group
+
+    def _open_column_selection_dialog(self) -> None:
+        """Open the column selection dialog."""
+        dialog = ColumnSelectionDialog(self, self.parent.selected_export_columns)
+        if dialog.exec():
+            self.parent.selected_export_columns = dialog.get_selected_columns()
+            self._update_column_count()
+
+    def _update_column_count(self) -> None:
+        """Update the column count label."""
+        selected = len(self.parent.selected_export_columns)
+        # Count only toggleable columns (not always_exported)
+        toggleable = len([c for c in column_registry.get_exportable() if c.export_column and not c.is_always_exported])
+        always_exported = len([c for c in column_registry.get_exportable() if c.export_column and c.is_always_exported])
+        self.column_count_label.setText(f"{selected}/{toggleable + always_exported} columns selected for export ({always_exported} always included)")
+
     def _create_grouping_options_section(self) -> QGroupBox:
         """Create grouping options section."""
         group = QGroupBox("Grouping Options")
@@ -237,13 +278,7 @@ class ExportTab(QWidget):
         self.include_headers_checkbox.stateChanged.connect(self.parent.save_export_options)
         layout.addWidget(self.include_headers_checkbox)
 
-        self.include_metadata_checkbox = QCheckBox("Include metadata comments")
-        self.include_metadata_checkbox.setChecked(bool(self.parent.config_manager.config.include_metadata))
-        self.include_metadata_checkbox.stateChanged.connect(self.parent.save_export_options)
-        layout.addWidget(self.include_metadata_checkbox)
-
-        # Store references in parent for backward compatibility
+        # Store reference in parent for backward compatibility
         self.parent.include_headers_checkbox = self.include_headers_checkbox
-        self.parent.include_metadata_checkbox = self.include_metadata_checkbox
 
         return group

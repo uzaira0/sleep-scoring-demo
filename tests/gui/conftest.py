@@ -123,7 +123,7 @@ def sample_sleep_metrics(sample_participant, sample_daily_sleep_markers):
         participant=sample_participant,
         filename="4000 BO (2021-04-20)60sec.csv",
         analysis_date="2021-04-20",
-        algorithm_type=AlgorithmType.COMBINED,
+        algorithm_type=AlgorithmType.SADEH_1994_ACTILIFE,
         daily_sleep_markers=sample_daily_sleep_markers,
         onset_time="22:00",
         offset_time="06:00",

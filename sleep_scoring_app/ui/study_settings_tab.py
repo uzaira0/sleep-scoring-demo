@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import Qt, QTime, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import (
-    QButtonGroup,
     QComboBox,
     QFormLayout,
     QGroupBox,
@@ -24,7 +23,6 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
-    QRadioButton,
     QScrollArea,
     QSizePolicy,
     QTextEdit,
@@ -33,7 +31,10 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from sleep_scoring_app.core.constants import ActivityDataPreference, SadehVariant
+from sleep_scoring_app.core.algorithms.factory import AlgorithmFactory
+from sleep_scoring_app.core.algorithms.nonwear_factory import NonwearAlgorithmFactory
+from sleep_scoring_app.core.algorithms.onset_offset_factory import OnsetOffsetRuleFactory
+from sleep_scoring_app.core.constants import ActivityDataPreference
 
 if TYPE_CHECKING:
     from sleep_scoring_app.ui.main_window import SleepScoringMainWindow
@@ -649,41 +650,80 @@ class StudySettingsTab(QWidget):
         layout = QVBoxLayout(group_box)
         layout.setSpacing(15)
 
-        # Sadeh Variant Selection
-        sadeh_layout = QVBoxLayout()
+        # Sleep Scoring Algorithm Selection (DI pattern)
+        algorithm_layout = QVBoxLayout()
 
-        sadeh_label = QLabel("<b>Sadeh Algorithm Variant:</b>")
-        sadeh_label.setStyleSheet("QLabel { color: #2c3e50; margin-bottom: 5px; }")
-        sadeh_layout.addWidget(sadeh_label)
+        algorithm_label = QLabel("<b>Sleep Scoring Algorithm:</b>")
+        algorithm_label.setStyleSheet("QLabel { color: #2c3e50; margin-bottom: 5px; }")
+        algorithm_layout.addWidget(algorithm_label)
 
-        # Radio buttons
-        self.sadeh_button_group = QButtonGroup(self)
+        algorithm_row = QHBoxLayout()
+        self.sleep_algorithm_combo = QComboBox()
 
-        self.sadeh_original_radio = QRadioButton("Original Paper 1994 (threshold = 0)")
-        self.sadeh_original_radio.setToolTip("Original Sadeh (1994) paper threshold. Use for cross-device comparisons or replication studies.")
-        self.sadeh_button_group.addButton(self.sadeh_original_radio, 0)
-        sadeh_layout.addWidget(self.sadeh_original_radio)
+        # Populate from factory
+        available_algorithms = AlgorithmFactory.get_available_algorithms()
+        for algo_id, algo_name in available_algorithms.items():
+            self.sleep_algorithm_combo.addItem(algo_name, algo_id)
 
-        self.sadeh_actilife_radio = QRadioButton("ActiLife (threshold = -4)")
-        self.sadeh_actilife_radio.setToolTip("ActiGraph's ActiLife software threshold. Use for ActiGraph device data.")
-        self.sadeh_button_group.addButton(self.sadeh_actilife_radio, 1)
-        sadeh_layout.addWidget(self.sadeh_actilife_radio)
-
-        # Explanation label
-        sadeh_help = QLabel(
-            "The original Sadeh (1994) paper used threshold = 0 for sleep/wake classification. "
-            "ActiGraph's ActiLife software uses threshold = -4 to account for differences in activity "
-            "count scaling between devices. Use ActiLife for ActiGraph data, Original for cross-device "
-            "comparisons or replication studies."
+        self.sleep_algorithm_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.sleep_algorithm_combo.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.sleep_algorithm_combo.setToolTip(
+            "Select the sleep scoring algorithm to use.\n"
+            "• Sadeh (1994): Classic algorithm using axis Y activity counts\n"
+            "• Cole-Kripke (1992): Alternative algorithm with 7-minute sliding window"
         )
-        sadeh_help.setWordWrap(True)
-        sadeh_help.setStyleSheet(
-            "QLabel { color: #7f8c8d; font-size: 11px; font-style: italic; "
-            "background-color: #ecf0f1; padding: 8px; border-radius: 4px; border-left: 3px solid #3498db; }"
-        )
-        sadeh_layout.addWidget(sadeh_help)
+        algorithm_row.addWidget(self.sleep_algorithm_combo)
+        algorithm_row.addStretch()
+        algorithm_layout.addLayout(algorithm_row)
 
-        layout.addLayout(sadeh_layout)
+        # Algorithm info label
+        algorithm_help = QLabel(
+            "The sleep scoring algorithm determines how each epoch is classified as Sleep or Wake. "
+            "Different algorithms may produce slightly different results. Sadeh (1994) is the most commonly used."
+        )
+        algorithm_help.setWordWrap(True)
+        algorithm_help.setStyleSheet("QLabel { color: #7f8c8d; font-size: 11px; font-style: italic; }")
+        algorithm_layout.addWidget(algorithm_help)
+
+        layout.addLayout(algorithm_layout)
+
+        # Onset/Offset Rule Selection (DI pattern)
+        rule_layout = QVBoxLayout()
+
+        rule_label = QLabel("<b>Onset/Offset Detection Rule:</b>")
+        rule_label.setStyleSheet("QLabel { color: #2c3e50; margin-bottom: 5px; }")
+        rule_layout.addWidget(rule_label)
+
+        rule_row = QHBoxLayout()
+        self.onset_offset_rule_combo = QComboBox()
+
+        # Populate from factory
+        available_rules = OnsetOffsetRuleFactory.get_available_rules()
+        for rule_id, rule_name in available_rules.items():
+            self.onset_offset_rule_combo.addItem(rule_name, rule_id)
+
+        self.onset_offset_rule_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.onset_offset_rule_combo.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.onset_offset_rule_combo.setToolTip(
+            "Select the rule for detecting sleep onset and offset times.\n"
+            "• Consecutive 3/5: 3 minutes consecutive sleep for onset, 5 for offset\n"
+            "• Consecutive 5/10: 5 minutes for onset, 10 for offset (stricter)\n"
+            "• Tudor-Locke (2014): Uses consecutive wake epochs for offset detection"
+        )
+        rule_row.addWidget(self.onset_offset_rule_combo)
+        rule_row.addStretch()
+        rule_layout.addLayout(rule_row)
+
+        # Rule info label
+        rule_help = QLabel(
+            "The onset/offset rule determines how sleep start and end times are refined within the marked period. "
+            "Tudor-Locke uses a different approach that looks for consecutive wake epochs for offset detection."
+        )
+        rule_help.setWordWrap(True)
+        rule_help.setStyleSheet("QLabel { color: #7f8c8d; font-size: 11px; font-style: italic; }")
+        rule_layout.addWidget(rule_help)
+
+        layout.addLayout(rule_layout)
 
         # Night Hours Configuration
         night_hours_layout = QVBoxLayout()
@@ -719,10 +759,45 @@ class StudySettingsTab(QWidget):
 
         layout.addLayout(night_hours_layout)
 
+        # Nonwear Detection Algorithm Selection (DI pattern)
+        nonwear_layout = QVBoxLayout()
+
+        nonwear_label = QLabel("<b>Nonwear Detection Algorithm:</b>")
+        nonwear_label.setStyleSheet("QLabel { color: #2c3e50; margin-bottom: 5px; }")
+        nonwear_layout.addWidget(nonwear_label)
+
+        nonwear_row = QHBoxLayout()
+        self.nonwear_algorithm_combo = QComboBox()
+
+        # Populate from factory
+        available_nonwear = NonwearAlgorithmFactory.get_available_algorithms()
+        for algo_id, algo_name in available_nonwear.items():
+            self.nonwear_algorithm_combo.addItem(algo_name, algo_id)
+
+        self.nonwear_algorithm_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.nonwear_algorithm_combo.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.nonwear_algorithm_combo.setToolTip(
+            "Select the algorithm for detecting nonwear periods.\n• Choi (2011): Standard algorithm using 90-minute windows with spike tolerance"
+        )
+        nonwear_row.addWidget(self.nonwear_algorithm_combo)
+        nonwear_row.addStretch()
+        nonwear_layout.addLayout(nonwear_row)
+
+        # Nonwear algorithm info label
+        nonwear_help = QLabel(
+            "The nonwear detection algorithm identifies periods when the device was not worn. "
+            "Choi (2011) is the standard validated algorithm for ActiGraph devices."
+        )
+        nonwear_help.setWordWrap(True)
+        nonwear_help.setStyleSheet("QLabel { color: #7f8c8d; font-size: 11px; font-style: italic; }")
+        nonwear_layout.addWidget(nonwear_help)
+
+        layout.addLayout(nonwear_layout)
+
         # Choi Algorithm Axis Selection
         choi_layout = QVBoxLayout()
 
-        choi_label = QLabel("<b>Choi Algorithm Axis (Nonwear Detection):</b>")
+        choi_label = QLabel("<b>Nonwear Detection Axis:</b>")
         choi_label.setStyleSheet("QLabel { color: #2c3e50; margin-bottom: 5px; }")
         choi_layout.addWidget(choi_label)
 
@@ -755,9 +830,11 @@ class StudySettingsTab(QWidget):
         layout.addLayout(choi_layout)
 
         # Connect signals for auto-save
-        self.sadeh_button_group.buttonClicked.connect(self._on_sadeh_variant_changed)
+        self.sleep_algorithm_combo.currentIndexChanged.connect(self._on_sleep_algorithm_changed)
+        self.onset_offset_rule_combo.currentIndexChanged.connect(self._on_onset_offset_rule_changed)
         self.night_start_time.timeChanged.connect(self._on_night_hours_changed)
         self.night_end_time.timeChanged.connect(self._on_night_hours_changed)
+        self.nonwear_algorithm_combo.currentIndexChanged.connect(self._on_nonwear_algorithm_changed)
         self.choi_axis_combo.currentIndexChanged.connect(self._on_choi_axis_changed)
 
         return group_box
@@ -857,19 +934,43 @@ class StudySettingsTab(QWidget):
             self._validate_all_patterns()
 
             # Load algorithm configuration
-            if hasattr(self, "sadeh_actilife_radio"):
-                if config.sadeh_variant == SadehVariant.ACTILIFE:
-                    self.sadeh_actilife_radio.setChecked(True)
-                else:
-                    self.sadeh_original_radio.setChecked(True)
+            # Load sleep algorithm selection
+            if hasattr(self, "sleep_algorithm_combo"):
+                self.sleep_algorithm_combo.blockSignals(True)
+                current_algo_id = config.sleep_algorithm_id
+                for i in range(self.sleep_algorithm_combo.count()):
+                    if self.sleep_algorithm_combo.itemData(i) == current_algo_id:
+                        self.sleep_algorithm_combo.setCurrentIndex(i)
+                        break
+                self.sleep_algorithm_combo.blockSignals(False)
 
-                # Block signals during load to prevent save-on-load feedback loop
-                self.night_start_time.blockSignals(True)
-                self.night_end_time.blockSignals(True)
-                self.night_start_time.setTime(QTime(config.night_start_hour, 0))
-                self.night_end_time.setTime(QTime(config.night_end_hour, 0))
-                self.night_start_time.blockSignals(False)
-                self.night_end_time.blockSignals(False)
+            # Load onset/offset rule selection
+            if hasattr(self, "onset_offset_rule_combo"):
+                self.onset_offset_rule_combo.blockSignals(True)
+                current_rule_id = config.onset_offset_rule_id
+                for i in range(self.onset_offset_rule_combo.count()):
+                    if self.onset_offset_rule_combo.itemData(i) == current_rule_id:
+                        self.onset_offset_rule_combo.setCurrentIndex(i)
+                        break
+                self.onset_offset_rule_combo.blockSignals(False)
+
+            # Load nonwear algorithm selection
+            if hasattr(self, "nonwear_algorithm_combo"):
+                self.nonwear_algorithm_combo.blockSignals(True)
+                current_nonwear_id = config.nonwear_algorithm_id
+                for i in range(self.nonwear_algorithm_combo.count()):
+                    if self.nonwear_algorithm_combo.itemData(i) == current_nonwear_id:
+                        self.nonwear_algorithm_combo.setCurrentIndex(i)
+                        break
+                self.nonwear_algorithm_combo.blockSignals(False)
+
+            # Block signals during load to prevent save-on-load feedback loop
+            self.night_start_time.blockSignals(True)
+            self.night_end_time.blockSignals(True)
+            self.night_start_time.setTime(QTime(config.night_start_hour, 0))
+            self.night_end_time.setTime(QTime(config.night_end_hour, 0))
+            self.night_start_time.blockSignals(False)
+            self.night_end_time.blockSignals(False)
 
             # Load Choi axis setting
             if hasattr(self, "choi_axis_combo"):
@@ -1584,34 +1685,69 @@ class StudySettingsTab(QWidget):
                 logger.exception("Error resetting patterns: %s", e)
                 QMessageBox.critical(self, "Error", f"Error resetting patterns: {e}")
 
-    def _on_sadeh_variant_changed(self) -> None:
-        """Handle Sadeh variant radio button changes."""
+    def _on_sleep_algorithm_changed(self, index: int) -> None:
+        """Handle sleep algorithm selection change."""
         try:
             if self.parent and self.parent.config_manager and self.parent.config_manager.config:
-                if self.sadeh_actilife_radio.isChecked():
-                    variant = SadehVariant.ACTILIFE
-                else:
-                    variant = SadehVariant.ORIGINAL
-
-                self.parent.config_manager.config.sadeh_variant = variant
+                algorithm_id = self.sleep_algorithm_combo.itemData(index)
+                algorithm_name = self.sleep_algorithm_combo.itemText(index)
+                self.parent.config_manager.config.sleep_algorithm_id = algorithm_id
                 self.parent.config_manager.save_config()
-                logger.debug("Auto-saved Sadeh variant: %s", variant)
+                logger.info("Sleep scoring algorithm changed to: %s (%s)", algorithm_name, algorithm_id)
 
-                # Clear algorithm cache and trigger recalculation
+                # Create new algorithm instance and update PlotAlgorithmManager
                 if hasattr(self.parent, "plot_widget") and self.parent.plot_widget:
                     pw = self.parent.plot_widget
                     if hasattr(pw, "algorithm_manager"):
+                        # Create algorithm from factory with current config
+                        config = self.parent.config_manager.config
+                        algorithm = AlgorithmFactory.create(algorithm_id, config)
+                        pw.algorithm_manager.set_sleep_scoring_algorithm(algorithm)
+
+                        # Clear caches and trigger recalculation
                         pw.algorithm_manager._algorithm_cache.clear()
                         pw.algorithm_manager.plot_algorithms()
-                    # Reapply sleep scoring rules if markers exist
-                    if hasattr(pw, "marker_renderer") and hasattr(pw, "daily_sleep_markers"):
-                        selected = pw.get_selected_marker_period()
-                        if selected and selected.is_complete:
-                            pw.algorithm_manager.apply_sleep_scoring_rules(selected)
-                    pw.update()
-                    logger.info("Recalculated Sadeh algorithm with new threshold")
+
+                        # Reapply sleep scoring rules if markers exist
+                        if hasattr(pw, "marker_renderer") and hasattr(pw, "daily_sleep_markers"):
+                            selected = pw.get_selected_marker_period()
+                            if selected and selected.is_complete:
+                                pw.algorithm_manager.apply_sleep_scoring_rules(selected)
+
+                        pw.update()
+                        logger.info("Recalculated with new algorithm: %s", algorithm_name)
         except Exception as e:
-            logger.exception("Error auto-saving Sadeh variant: %s", e)
+            logger.exception("Error changing sleep algorithm: %s", e)
+
+    def _on_onset_offset_rule_changed(self, index: int) -> None:
+        """Handle onset/offset rule selection change."""
+        try:
+            if self.parent and self.parent.config_manager and self.parent.config_manager.config:
+                rule_id = self.onset_offset_rule_combo.itemData(index)
+                rule_name = self.onset_offset_rule_combo.itemText(index)
+                self.parent.config_manager.config.onset_offset_rule_id = rule_id
+                self.parent.config_manager.save_config()
+                logger.info("Onset/offset rule changed to: %s (%s)", rule_name, rule_id)
+
+                # Create new rule instance and update PlotAlgorithmManager
+                if hasattr(self.parent, "plot_widget") and self.parent.plot_widget:
+                    pw = self.parent.plot_widget
+                    if hasattr(pw, "algorithm_manager"):
+                        # Create rule from factory with current config
+                        config = self.parent.config_manager.config
+                        rule = OnsetOffsetRuleFactory.create(rule_id, config)
+                        pw.algorithm_manager.set_onset_offset_rule(rule)
+
+                        # Reapply sleep scoring rules if markers exist
+                        if hasattr(pw, "marker_renderer") and hasattr(pw, "daily_sleep_markers"):
+                            selected = pw.get_selected_marker_period()
+                            if selected and selected.is_complete:
+                                pw.algorithm_manager.apply_sleep_scoring_rules(selected)
+
+                        pw.update()
+                        logger.info("Reapplied onset/offset rules with: %s", rule_name)
+        except Exception as e:
+            logger.exception("Error changing onset/offset rule: %s", e)
 
     def _on_night_hours_changed(self) -> None:
         """Handle night hours time changes."""
@@ -1626,6 +1762,35 @@ class StudySettingsTab(QWidget):
                 logger.debug("Auto-saved night hours: %d:00 - %d:00", start_hour, end_hour)
         except Exception as e:
             logger.exception("Error auto-saving night hours: %s", e)
+
+    def _on_nonwear_algorithm_changed(self, index: int) -> None:
+        """Handle nonwear algorithm selection change."""
+        try:
+            if self.parent and self.parent.config_manager and self.parent.config_manager.config:
+                algo_id = self.nonwear_algorithm_combo.itemData(index)
+                self.parent.config_manager.config.nonwear_algorithm_id = algo_id
+                self.parent.config_manager.save_config()
+                logger.info("Nonwear detection algorithm changed to: %s", algo_id)
+
+                # Recalculate nonwear detection with new algorithm
+                if hasattr(self.parent, "plot_widget") and self.parent.plot_widget:
+                    pw = self.parent.plot_widget
+
+                    # Clear caches
+                    if hasattr(pw, "algorithm_manager"):
+                        pw.algorithm_manager._algorithm_cache.clear()
+                    if hasattr(pw, "clear_choi_cache"):
+                        pw.clear_choi_cache()
+
+                    # Trigger recalculation
+                    if hasattr(pw, "update_choi_overlay_only"):
+                        data_for_nonwear = getattr(pw, "activity_data", None)
+                        if data_for_nonwear is not None:
+                            pw.update_choi_overlay_only(data_for_nonwear)
+                            pw.update()
+                            logger.info("Recalculated nonwear detection with algorithm: %s", algo_id)
+        except Exception as e:
+            logger.exception("Error changing nonwear algorithm: %s", e)
 
     def _on_choi_axis_changed(self, index: int) -> None:
         """Handle Choi axis selection change."""

@@ -18,13 +18,68 @@ class FeatureFlags:
 
 
 class AlgorithmType(StrEnum):
-    """Sleep scoring algorithm types."""
+    """
+    Sleep scoring algorithm identifiers.
 
-    MANUAL = "Manual"
-    SADEH = "Sadeh"
-    CHOI = "Choi"
-    COMBINED = "Manual + Sadeh"
-    AUTO = "Automatic"
+    These values match the algorithm IDs registered in AlgorithmFactory.
+    Use these for storing/retrieving algorithm type in database and exports.
+
+    For creating algorithm instances, use AlgorithmFactory.create(algorithm_id).
+    """
+
+    # Sleep scoring algorithms (registered in AlgorithmFactory)
+    SADEH_1994_ORIGINAL = "sadeh_1994_original"
+    SADEH_1994_ACTILIFE = "sadeh_1994_actilife"
+    COLE_KRIPKE_1992 = "cole_kripke_1992"
+
+    # Special values for UI/workflow states
+    MANUAL = "manual"  # Manual scoring without algorithm
+    CHOI = "choi"  # Nonwear detection (not sleep scoring)
+
+    # Legacy values - kept for database migration compatibility
+    # These should be migrated to specific algorithm IDs
+    _LEGACY_SADEH = "Sadeh"  # Migrate to SADEH_1994_ACTILIFE
+    _LEGACY_COMBINED = "Manual + Algorithm"  # Migrate to SADEH_1994_ACTILIFE
+    _LEGACY_MANUAL_SADEH = "Manual + Sadeh"  # Migrate to SADEH_1994_ACTILIFE
+
+    @classmethod
+    def get_default(cls) -> "AlgorithmType":
+        """Get the default algorithm type."""
+        return cls.SADEH_1994_ACTILIFE
+
+    @classmethod
+    def migrate_legacy_value(cls, value: str) -> "AlgorithmType":
+        """
+        Migrate legacy algorithm type values to current values.
+
+        Args:
+            value: Legacy or current algorithm type string
+
+        Returns:
+            Current AlgorithmType value
+
+        """
+        # Map legacy values to current values
+        legacy_mapping = {
+            "Sadeh": cls.SADEH_1994_ACTILIFE,
+            "Manual + Algorithm": cls.SADEH_1994_ACTILIFE,
+            "Manual + Sadeh": cls.SADEH_1994_ACTILIFE,
+            "Cole-Kripke": cls.COLE_KRIPKE_1992,
+            "Manual": cls.MANUAL,
+            "Choi": cls.CHOI,
+            "Automatic": cls.SADEH_1994_ACTILIFE,
+        }
+
+        # Check if it's a legacy value
+        if value in legacy_mapping:
+            return legacy_mapping[value]
+
+        # Check if it's already a valid current value
+        try:
+            return cls(value)
+        except ValueError:
+            # Unknown value, default to SADEH_1994_ACTILIFE
+            return cls.SADEH_1994_ACTILIFE
 
 
 class AlgorithmResult(StrEnum):
@@ -184,12 +239,20 @@ class DatabaseColumn(StrEnum):
     AVERAGE_AWAKENING_LENGTH = "average_awakening_length"
     ALGORITHM_TYPE = "algorithm_type"
 
-    # Algorithm-specific values
+    # Algorithm-specific values (LEGACY - kept for backward compatibility)
     SADEH_ONSET = "sadeh_onset"
     SADEH_OFFSET = "sadeh_offset"
     CHOI_ONSET = "choi_onset"
     CHOI_OFFSET = "choi_offset"
     TOTAL_CHOI_COUNTS = "total_choi_counts"
+
+    # Generic sleep algorithm columns (NEW - use for all algorithms)
+    SLEEP_ALGORITHM_NAME = "sleep_algorithm_name"  # e.g., "sadeh_1994", "cole_kripke_1992"
+    SLEEP_ALGORITHM_ONSET = "sleep_algorithm_onset"  # Algorithm value at onset marker
+    SLEEP_ALGORITHM_OFFSET = "sleep_algorithm_offset"  # Algorithm value at offset marker
+
+    # Onset/offset rule identifier (NEW - for DI pattern)
+    ONSET_OFFSET_RULE = "onset_offset_rule"  # e.g., "consecutive_3_5", "tudor_locke_2014"
 
     # NWT sensor data columns
     NWT_ONSET = "nwt_onset"
@@ -343,14 +406,23 @@ class ExportColumn(StrEnum):
     MOVEMENT_INDEX = "Movement Index"
     FRAGMENTATION_INDEX = "Fragmentation Index"
     SLEEP_FRAGMENTATION_INDEX = "Sleep Fragmentation Index"
-    SADEH_ONSET = "Sadeh Algorithm Value at Sleep Onset"
-    SADEH_OFFSET = "Sadeh Algorithm Value at Sleep Offset"
+    # Algorithm results (LEGACY - kept for Sadeh-specific exports)
+    SADEH_ONSET = "Sleep Algorithm Value at Onset"
+    SADEH_OFFSET = "Sleep Algorithm Value at Offset"
     SADEH_DATA_SOURCE = "Sadeh_Data_Source"
     ACTILIFE_VS_CALCULATED_AGREEMENT = "ActiLife_vs_Calculated_Agreement_Percent"
     ACTILIFE_VS_CALCULATED_DISAGREEMENTS = "ActiLife_vs_Calculated_Disagreements"
-    CHOI_ONSET = "Choi Algorithm Value at Sleep Onset"
-    CHOI_OFFSET = "Choi Algorithm Value at Sleep Offset"
-    TOTAL_CHOI_COUNTS = "Total Choi Algorithm Counts over the Sleep Period"
+    CHOI_ONSET = "Nonwear Algorithm Value at Onset"
+    CHOI_OFFSET = "Nonwear Algorithm Value at Offset"
+    TOTAL_CHOI_COUNTS = "Total Nonwear Algorithm Counts"
+
+    # Generic algorithm results (NEW - use for all algorithms)
+    SLEEP_ALGORITHM_NAME = "Sleep Scoring Algorithm"
+    SLEEP_ALGORITHM_ONSET = "Sleep Algorithm Value at Onset"
+    SLEEP_ALGORITHM_OFFSET = "Sleep Algorithm Value at Offset"
+
+    # Onset/offset rule (NEW - for DI pattern)
+    ONSET_OFFSET_RULE = "Onset/Offset Rule"
 
     # NWT sensor data columns
     NWT_ONSET = "NWT Sensor Value at Sleep Onset"
@@ -1038,26 +1110,106 @@ class DevicePreset(StrEnum):
     GENERIC_CSV = "generic_csv"
 
 
-class SadehVariant(StrEnum):
-    """Sadeh algorithm threshold variants."""
-
-    ACTILIFE = "actilife"  # threshold = -4
-    ORIGINAL = "original"  # threshold = 0
-
-
 class DataSourceType(StrEnum):
     """Data source type options."""
 
     CSV = "csv"
     GT3X = "gt3x"
 
+    @classmethod
+    def get_default(cls) -> "DataSourceType":
+        """Get the default data source type."""
+        return cls.CSV
+
+    @classmethod
+    def migrate_legacy_value(cls, value: str) -> "DataSourceType":
+        """
+        Migrate legacy data source type values to current values.
+
+        Args:
+            value: Legacy or current data source type string
+
+        Returns:
+            Current DataSourceType value
+
+        """
+        # Map legacy values to current values
+        legacy_mapping = {
+            "csv_file": cls.CSV,
+            "excel": cls.CSV,
+            "xlsx": cls.CSV,
+            "gt3x_file": cls.GT3X,
+            "actigraph": cls.GT3X,
+        }
+
+        # Check if it's a legacy value
+        if value in legacy_mapping:
+            return legacy_mapping[value]
+
+        # Check if it's already a valid current value
+        try:
+            return cls(value)
+        except ValueError:
+            # Unknown value, default to CSV
+            return cls.CSV
+
 
 class NonwearAlgorithm(StrEnum):
-    """Nonwear detection algorithm options."""
+    """
+    Nonwear detection algorithm identifiers.
 
-    CHOI = "choi"
+    These values match the algorithm IDs registered in NonwearAlgorithmFactory.
+    Use these for storing/retrieving algorithm type in database and exports.
+
+    For creating algorithm instances, use NonwearAlgorithmFactory.create(algorithm_id).
+    """
+
+    # Nonwear detection algorithms (registered in NonwearAlgorithmFactory)
+    CHOI_2011 = "choi_2011"
+    VAN_HEES_2023 = "van_hees_2023"
+
+    # Future algorithms
     VANHEES_2013 = "vanhees_2013"
-    VANHEES_2023 = "vanhees_2023"
+
+    # Legacy values - kept for migration compatibility
+    _LEGACY_CHOI = "choi"  # Migrate to CHOI_2011
+
+    @classmethod
+    def get_default(cls) -> "NonwearAlgorithm":
+        """Get the default nonwear algorithm type."""
+        return cls.CHOI_2011
+
+    @classmethod
+    def migrate_legacy_value(cls, value: str) -> "NonwearAlgorithm":
+        """
+        Migrate legacy algorithm type values to current values.
+
+        Args:
+            value: Legacy or current algorithm type string
+
+        Returns:
+            Current NonwearAlgorithm value
+
+        """
+        # Map legacy values to current values
+        legacy_mapping = {
+            "choi": cls.CHOI_2011,
+            "Choi": cls.CHOI_2011,
+            "choi_algorithm": cls.CHOI_2011,
+            "vanhees_2023": cls.VAN_HEES_2023,
+            "van_hees_2023": cls.VAN_HEES_2023,
+        }
+
+        # Check if it's a legacy value
+        if value in legacy_mapping:
+            return legacy_mapping[value]
+
+        # Check if it's already a valid current value
+        try:
+            return cls(value)
+        except ValueError:
+            # Unknown value, default to CHOI_2011
+            return cls.CHOI_2011
 
 
 # ============================================================================

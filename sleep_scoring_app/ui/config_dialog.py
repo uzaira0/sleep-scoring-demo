@@ -53,7 +53,6 @@ SETTING_METADATA = {
     "study.default_timepoint": ("Default Timepoint", "Default timepoint when extraction fails"),
     "study.unknown_value": ("Unknown Value", "Placeholder for unknown values"),
     # Algorithm settings
-    "algorithm.sadeh_variant": ("Sadeh Variant", "Sleep scoring threshold: 'actilife' (-4) or 'original' (0)"),
     "algorithm.night_start_hour": ("Night Start Hour", "Hour when night period begins (e.g., 22 for 10 PM)"),
     "algorithm.night_end_hour": ("Night End Hour", "Hour when night period ends (e.g., 7 for 7 AM)"),
     "algorithm.choi_axis": ("Choi Algorithm Axis", "Axis for nonwear detection"),
@@ -584,7 +583,6 @@ class ConfigImportDialog(QDialog):
             "study.default_timepoint": "study_default_timepoint",
             "study.unknown_value": "study_unknown_value",
             # Algorithm settings
-            "algorithm.sadeh_variant": "sadeh_variant",
             "algorithm.night_start_hour": "night_start_hour",
             "algorithm.night_end_hour": "night_end_hour",
             "algorithm.choi_axis": "choi_axis",
