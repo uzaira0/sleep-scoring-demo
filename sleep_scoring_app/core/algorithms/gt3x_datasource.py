@@ -34,6 +34,7 @@ References:
     - pygt3x library: https://github.com/actigraph/pygt3x
     - ActiGraph GT3X binary format specification
     - ActiGraph device documentation
+
 """
 
 from __future__ import annotations
@@ -186,7 +187,7 @@ class GT3XDataSourceLoader:
                 # df has columns: X, Y, Z, IdleSleepMode
                 # Index is timestamps
                 timestamps = df.index.to_numpy()
-                acc_data = df[["X", "Y", "Z"]].values
+                acc_data = df[["X", "Y", "Z"]].to_numpy()
 
         except Exception as e:
             msg = f"Error reading GT3X file with pygt3x: {e}"
@@ -296,7 +297,7 @@ class GT3XDataSourceLoader:
             epoch_datetimes = pd.to_datetime(epoch_start_timestamps, unit="s")
 
         # Create DataFrame
-        df = pd.DataFrame(
+        return pd.DataFrame(
             {
                 DatabaseColumn.TIMESTAMP: epoch_datetimes,
                 DatabaseColumn.AXIS_X: epoch_x,
@@ -305,8 +306,6 @@ class GT3XDataSourceLoader:
                 DatabaseColumn.VECTOR_MAGNITUDE: epoch_vm,
             },
         )
-
-        return df
 
     def _create_raw_dataframe(self, raw_data: np.ndarray, timestamps: np.ndarray, sample_rate: float) -> pd.DataFrame:
         """
@@ -332,7 +331,7 @@ class GT3XDataSourceLoader:
         vm = np.sqrt(np.sum(raw_data**2, axis=1))
 
         # Create DataFrame
-        df = pd.DataFrame(
+        return pd.DataFrame(
             {
                 DatabaseColumn.TIMESTAMP: datetimes,
                 DatabaseColumn.AXIS_X: raw_data[:, 0],
@@ -341,8 +340,6 @@ class GT3XDataSourceLoader:
                 DatabaseColumn.VECTOR_MAGNITUDE: vm,
             },
         )
-
-        return df
 
     def detect_columns(self, df: pd.DataFrame) -> ColumnMapping:
         """

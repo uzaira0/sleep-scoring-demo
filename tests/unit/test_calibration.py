@@ -114,7 +114,7 @@ class TestSelectStationaryPoints:
         # High SD for last 20 (moving)
         features[80:, 4:7] = 0.1
 
-        stationary, status = select_stationary_points(features)
+        stationary, _status = select_stationary_points(features)
 
         # Should have filtered out moving points
         assert len(stationary) < n_points
@@ -135,7 +135,7 @@ class TestSelectStationaryPoints:
         # Low SD (stationary)
         features[:, 4:7] = 0.005
 
-        stationary, status = select_stationary_points(features)
+        _stationary, status = select_stationary_points(features)
 
         # Should fail sphere coverage check
         assert "not enough points on all sides of sphere" in status
@@ -148,7 +148,7 @@ class TestSelectStationaryPoints:
         features[:, 1:4] = np.array([0.0, 0.0, 1.0])
         features[:, 4:7] = 0.005
 
-        stationary, status = select_stationary_points(features)
+        _stationary, status = select_stationary_points(features)
 
         # Should fail minimum points check
         assert "not enough stationary points" in status
@@ -167,7 +167,7 @@ class TestSelectStationaryPoints:
         features[25:, 0] = 99999  # Invalid marker
         features[25:, 3] = np.nan  # NaN in mean_z
 
-        stationary, status = select_stationary_points(features)
+        stationary, _status = select_stationary_points(features)
 
         # Should only keep valid points (minus first row)
         assert len(stationary) <= 24
@@ -185,7 +185,7 @@ class TestSelectStationaryPoints:
         # Make some rows identical (duplicate non-wear)
         features[5:10, 1:7] = features[4, 1:7]  # 5 duplicate rows
 
-        stationary, status = select_stationary_points(features)
+        stationary, _status = select_stationary_points(features)
 
         # Should have removed duplicates
         assert len(stationary) < n_points - 1  # -1 for first row removal
@@ -606,7 +606,7 @@ class TestCalibrationIntegration:
         )
 
         # Calibrate using numpy array from DataFrame
-        xyz_data = df[["X", "Y", "Z"]].values
+        xyz_data = df[["X", "Y", "Z"]].to_numpy()
         result = calibrate(xyz_data, sf)
 
         assert result.success

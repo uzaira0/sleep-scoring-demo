@@ -16,13 +16,15 @@ import numpy as np
 
 @dataclass(frozen=True)
 class ImputationConfig:
-    """Configuration for time gap imputation.
+    """
+    Configuration for time gap imputation.
 
     Attributes:
         gap_threshold_sec: Minimum gap duration to impute (default 0.25s).
             Will be adjusted to at least 2 samples at the given frequency.
         max_gap_min: Maximum gap to fully impute (default 90 min).
             Gaps longer than this may be partially filled.
+
     """
 
     gap_threshold_sec: float = 0.25
@@ -31,7 +33,8 @@ class ImputationConfig:
 
 @dataclass(frozen=True)
 class ImputationResult:
-    """Result of time gap imputation.
+    """
+    Result of time gap imputation.
 
     Attributes:
         data: Imputed accelerometer data (n_samples_new, 3) for x, y, z axes.
@@ -40,6 +43,7 @@ class ImputationResult:
         total_gap_sec: Total duration of gaps in seconds.
         n_samples_added: Total number of samples added through replication.
         qc_log: Full quality control statistics including zero replacement info.
+
     """
 
     data: np.ndarray
@@ -56,7 +60,8 @@ def impute_timegaps(
     sample_freq: float,
     config: ImputationConfig | None = None,
 ) -> ImputationResult:
-    """Impute time gaps and zero values in accelerometer data.
+    """
+    Impute time gaps and zero values in accelerometer data.
 
     This replicates R GGIR g.imputeTimegaps using ROW REPLICATION.
 
@@ -81,6 +86,7 @@ def impute_timegaps(
         1
         >>> result.n_samples_added
         28  # Gap was filled by replicating the first sample
+
     """
     if config is None:
         config = ImputationConfig()
@@ -94,8 +100,7 @@ def impute_timegaps(
 
     # Ensure k is at least 2 samples
     k = config.gap_threshold_sec
-    if k < 2 / sample_freq:
-        k = 2 / sample_freq
+    k = max(k, 2 / sample_freq)
 
     # Initialize QC log
     qc_log: dict[str, int | float] = {
@@ -111,7 +116,7 @@ def impute_timegaps(
     zero_indices = np.where(zeros_mask)[0]
 
     if len(zero_indices) > 0:
-        qc_log["n_zeros_replaced"] = int(len(zero_indices))
+        qc_log["n_zeros_replaced"] = len(zero_indices)
 
         # Handle zeros at the start
         if zero_indices[0] == 0:
@@ -165,9 +170,7 @@ def impute_timegaps(
     gap_limit_samples = int(gap_limit_seconds * sample_freq)
 
     for gap_idx in gap_indices:
-        if gap_counts[gap_idx] > gap_limit_samples:
-            # Partially fill long gap - cap at max_gap_min
-            gap_counts[gap_idx] = gap_limit_samples
+        gap_counts[gap_idx] = min(gap_counts[gap_idx], gap_limit_samples)
 
     # Normalize values at gap positions to 1g magnitude
     for idx in gap_indices:

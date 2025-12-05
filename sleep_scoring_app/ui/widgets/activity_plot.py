@@ -1151,9 +1151,7 @@ class ActivityPlotWidget(pg.PlotWidget):
 
         # Use NonwearAlgorithmFactory (DI pattern)
         choi_algorithm = NonwearAlgorithmFactory.create("choi_2011")
-        choi_mask = choi_algorithm.detect_mask(self.axis_y_data)
-
-        return choi_mask
+        return choi_algorithm.detect_mask(self.axis_y_data)
 
     def get_nonwear_sensor_results_per_minute(self) -> list[int]:
         """Get nonwear sensor periods as per-minute results (1=nonwear, 0=wear)."""

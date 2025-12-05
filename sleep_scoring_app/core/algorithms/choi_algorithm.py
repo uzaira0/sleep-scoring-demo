@@ -8,6 +8,7 @@ References:
     Choi, L., Liu, Z., Matthews, C. E., & Buchowski, M. S. (2011).
     Validation of accelerometer wear and nonwear time classification algorithm.
     Medicine and Science in Sports and Exercise, 43(2), 357-364.
+
 """
 
 from __future__ import annotations
@@ -15,12 +16,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
-
 from sleep_scoring_app.core.algorithms.choi import detect_nonwear as _detect_nonwear_core
 
 if TYPE_CHECKING:
     from datetime import datetime
+
+    import numpy as np
 
     from sleep_scoring_app.core.dataclasses import NonwearPeriod
 

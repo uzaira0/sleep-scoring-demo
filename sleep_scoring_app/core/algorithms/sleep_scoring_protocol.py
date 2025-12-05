@@ -23,15 +23,15 @@ Example Usage:
 References:
     - Sadeh, A., et al. (1994). Activity-based sleep-wake identification.
     - Cole, R. J., et al. (1992). Automatic sleep/wake identification from wrist activity.
+
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-import numpy as np
-
 if TYPE_CHECKING:
+    import numpy as np
     import pandas as pd
 
 

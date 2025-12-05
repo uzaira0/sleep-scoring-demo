@@ -35,7 +35,7 @@ T = TypeVar("T")
 K = TypeVar("K")
 
 
-class BoundedCache(Generic[K, T]):
+class BoundedCache[K, T]:
     """Thread-safe LRU cache with size limits and memory monitoring."""
 
     def __init__(self, max_size: int = MemoryConstants.CACHE_MAX_SIZE, max_memory_mb: int = MemoryConstants.CACHE_MAX_MEMORY_MB) -> None:

@@ -278,8 +278,8 @@ class TestGT3XMetadataExtraction:
         start_time = metadata["start_time"]
         end_time = metadata["end_time"]
 
-        assert isinstance(start_time, pd.Timestamp) or isinstance(start_time, pd.DatetimeIndex)
-        assert isinstance(end_time, pd.Timestamp) or isinstance(end_time, pd.DatetimeIndex)
+        assert isinstance(start_time, (pd.Timestamp, pd.DatetimeIndex))
+        assert isinstance(end_time, (pd.Timestamp, pd.DatetimeIndex))
 
         # End time should be after start time
         # Convert to Timestamp if needed for comparison
@@ -441,7 +441,7 @@ class TestGT3XEndToEndWorkflow:
         assert DatabaseColumn.AXIS_Y in df.columns
 
         # Step 5: Validate data
-        is_valid, errors = loader.validate_data(df)
+        is_valid, _errors = loader.validate_data(df)
         assert is_valid is True
 
         # Step 6: Check metadata

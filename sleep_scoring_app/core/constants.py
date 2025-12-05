@@ -30,7 +30,8 @@ class AlgorithmType(StrEnum):
     # Sleep scoring algorithms (registered in AlgorithmFactory)
     SADEH_1994_ORIGINAL = "sadeh_1994_original"
     SADEH_1994_ACTILIFE = "sadeh_1994_actilife"
-    COLE_KRIPKE_1992 = "cole_kripke_1992"
+    COLE_KRIPKE_1992_ORIGINAL = "cole_kripke_1992_original"
+    COLE_KRIPKE_1992_ACTILIFE = "cole_kripke_1992_actilife"
 
     # Special values for UI/workflow states
     MANUAL = "manual"  # Manual scoring without algorithm
@@ -41,6 +42,7 @@ class AlgorithmType(StrEnum):
     _LEGACY_SADEH = "Sadeh"  # Migrate to SADEH_1994_ACTILIFE
     _LEGACY_COMBINED = "Manual + Algorithm"  # Migrate to SADEH_1994_ACTILIFE
     _LEGACY_MANUAL_SADEH = "Manual + Sadeh"  # Migrate to SADEH_1994_ACTILIFE
+    _LEGACY_COLE_KRIPKE = "cole_kripke_1992"  # Migrate to COLE_KRIPKE_1992_ACTILIFE
 
     @classmethod
     def get_default(cls) -> "AlgorithmType":
@@ -64,7 +66,8 @@ class AlgorithmType(StrEnum):
             "Sadeh": cls.SADEH_1994_ACTILIFE,
             "Manual + Algorithm": cls.SADEH_1994_ACTILIFE,
             "Manual + Sadeh": cls.SADEH_1994_ACTILIFE,
-            "Cole-Kripke": cls.COLE_KRIPKE_1992,
+            "Cole-Kripke": cls.COLE_KRIPKE_1992_ACTILIFE,
+            "cole_kripke_1992": cls.COLE_KRIPKE_1992_ACTILIFE,  # Old single variant
             "Manual": cls.MANUAL,
             "Choi": cls.CHOI,
             "Automatic": cls.SADEH_1994_ACTILIFE,

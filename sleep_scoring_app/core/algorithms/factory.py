@@ -29,13 +29,13 @@ Example Usage:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from sleep_scoring_app.core.algorithms.cole_kripke import ColeKripkeAlgorithm
 from sleep_scoring_app.core.algorithms.sadeh import SadehAlgorithm
-from sleep_scoring_app.core.algorithms.sleep_scoring_protocol import SleepScoringAlgorithm
 
 if TYPE_CHECKING:
+    from sleep_scoring_app.core.algorithms.sleep_scoring_protocol import SleepScoringAlgorithm
     from sleep_scoring_app.utils.config import AppConfig
 
 logger = logging.getLogger(__name__)
@@ -77,7 +77,7 @@ class AlgorithmFactory:
 
     """
 
-    _registry: dict[str, _AlgorithmEntry] = {
+    _registry: ClassVar[dict[str, _AlgorithmEntry]] = {
         "sadeh_1994_original": _AlgorithmEntry(
             algorithm_class=SadehAlgorithm,
             display_name="Sadeh (1994) Original",
@@ -88,10 +88,15 @@ class AlgorithmFactory:
             display_name="Sadeh (1994) ActiLife",
             params={"threshold": -4.0, "variant_name": "actilife"},
         ),
-        "cole_kripke_1992": _AlgorithmEntry(
+        "cole_kripke_1992_original": _AlgorithmEntry(
             algorithm_class=ColeKripkeAlgorithm,
-            display_name="Cole-Kripke (1992)",
-            params={},
+            display_name="Cole-Kripke (1992) Original",
+            params={"variant_name": "original"},
+        ),
+        "cole_kripke_1992_actilife": _AlgorithmEntry(
+            algorithm_class=ColeKripkeAlgorithm,
+            display_name="Cole-Kripke (1992) ActiLife",
+            params={"variant_name": "actilife"},
         ),
         # Future algorithms:
         # 'sazonov_2004': _AlgorithmEntry(SazonovAlgorithm, 'Sazonov (2004)', {}),

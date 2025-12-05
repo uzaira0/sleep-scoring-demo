@@ -18,10 +18,10 @@ import pyqtgraph as pg
 
 from sleep_scoring_app.core.algorithms import AlgorithmFactory, NonwearAlgorithmFactory, SleepScoringAlgorithm
 from sleep_scoring_app.core.algorithms.onset_offset_factory import OnsetOffsetRuleFactory
-from sleep_scoring_app.core.algorithms.onset_offset_protocol import OnsetOffsetRule
 from sleep_scoring_app.core.constants import ActivityDataPreference, UIColors
 
 if TYPE_CHECKING:
+    from sleep_scoring_app.core.algorithms.onset_offset_protocol import OnsetOffsetRule
     from sleep_scoring_app.core.dataclasses import SleepPeriod
     from sleep_scoring_app.ui.widgets.activity_plot import ActivityPlotWidget
 

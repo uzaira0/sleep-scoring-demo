@@ -11,8 +11,10 @@ Critical distinction:
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from datetime import datetime
 
 
 @runtime_checkable
@@ -33,6 +35,7 @@ class OnsetOffsetRule(Protocol):
 
         Returns:
             Human-readable rule name (e.g., "Consecutive 3/5 Minutes", "Tudor-Locke (2014)")
+
         """
         ...
 
@@ -43,6 +46,7 @@ class OnsetOffsetRule(Protocol):
 
         Returns:
             Snake_case identifier (e.g., "consecutive_3_5", "tudor_locke_2014")
+
         """
         ...
 
@@ -53,6 +57,7 @@ class OnsetOffsetRule(Protocol):
 
         Returns:
             User-friendly description for tooltips/documentation
+
         """
         ...
 
@@ -77,6 +82,7 @@ class OnsetOffsetRule(Protocol):
 
         Raises:
             ValueError: If input data is invalid or inconsistent
+
         """
         ...
 
@@ -86,6 +92,7 @@ class OnsetOffsetRule(Protocol):
 
         Returns:
             Dictionary of parameter names and values
+
         """
         ...
 
@@ -98,6 +105,7 @@ class OnsetOffsetRule(Protocol):
 
         Raises:
             ValueError: If parameter name is invalid or value is out of range
+
         """
         ...
 
@@ -111,5 +119,6 @@ class OnsetOffsetRule(Protocol):
 
         Returns:
             Tuple of (onset_label, offset_label) for display in UI
+
         """
         ...

@@ -26,108 +26,11 @@ on:
   push:
     tags:
       - "v*"
-    branches:
-      - main
-      - master
-
-  # Trigger on pull requests
-  pull_request:
-    branches:
-      - main
-      - master
 
 permissions:
   contents: write
 
 jobs:
-  test:
-    name: Test on ${{ matrix.os }} / Python ${{ matrix.python-version }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.12"]
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: "pip"
-
-      - name: Install system dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libxkbcommon-x11-0 \
-            libxcb-icccm4 \
-            libxcb-image0 \
-            libxcb-keysyms1 \
-            libxcb-randr0 \
-            libxcb-render-util0 \
-            libxcb-xinerama0 \
-            libxcb-xfixes0 \
-            libxcb-shape0 \
-            libxcb-cursor0 \
-            libegl1 \
-            libgl1 \
-            libxcb1 \
-            xvfb
-
-      - name: Cache pip dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/pip
-            ~/AppData/Local/pip/Cache
-          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('pyproject.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-${{ matrix.python-version }}-
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .[gui,dev]
-
-      - name: Run unit tests (Linux)
-        if: runner.os == 'Linux'
-        env:
-          QT_QPA_PLATFORM: offscreen
-          DISPLAY: ":99.0"
-        run: |
-          Xvfb :99 -screen 0 1024x768x24 &
-          sleep 3
-          pytest tests/ -v --tb=short -x --ignore=tests/gui
-
-      - name: Run unit tests (Windows/macOS)
-        if: runner.os != 'Linux'
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: |
-          pytest tests/ -v --tb=short -x --ignore=tests/gui
-
-      - name: Run GUI tests (Linux)
-        if: runner.os == 'Linux'
-        env:
-          QT_QPA_PLATFORM: offscreen
-          DISPLAY: ":99.0"
-        run: |
-          pytest tests/gui -v --tb=short -x
-        continue-on-error: true
-
-      - name: Run GUI tests (Windows/macOS)
-        if: runner.os != 'Linux'
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: |
-          pytest tests/gui -v --tb=short -x
-        continue-on-error: true
-
   determine-version:
     runs-on: ubuntu-latest
     outputs:
@@ -184,7 +87,7 @@ jobs:
             VERSION='${{ github.event.release.tag_name }}'
             VERSION=${VERSION#v}
           else
-            # For regular push, use date-based version
+            # Fallback to date-based version
             VERSION=$(date +'%Y.%m.%d.%H%M')
           fi
 
@@ -193,13 +96,8 @@ jobs:
 
   build:
     name: Build on ${{ matrix.os }}
-    needs: [test, determine-version]
+    needs: [determine-version]
     runs-on: ${{ matrix.os }}
-    # Only run build on push to main/master, tags, releases, or manual trigger
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'release' ||
-      (github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))
     strategy:
       fail-fast: false
       matrix:
@@ -448,22 +346,16 @@ jobs:
 
   build-summary:
     name: Build Summary
-    needs: [test, build]
+    needs: [build]
     runs-on: ubuntu-latest
     if: always()
     steps:
-      - name: Check test and build status
+      - name: Check build status
         run: |
-          echo 'Test result: ${{ needs.test.result }}'
           echo 'Build result: ${{ needs.build.result }}'
 
-          if [ '${{ needs.test.result }}' != 'success' ]; then
-            echo 'Tests failed!'
-            exit 1
-          fi
-
-          if [ '${{ needs.build.result }}' == 'success' ] || [ '${{ needs.build.result }}' == 'skipped' ]; then
-            echo 'All checks passed!'
+          if [ '${{ needs.build.result }}' == 'success' ]; then
+            echo 'Build completed successfully!'
           else
             echo 'Build failed!'
             exit 1

@@ -29,13 +29,13 @@ Example Usage:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
-from sleep_scoring_app.core.algorithms.choi_algorithm import ChoiAlgorithm
-from sleep_scoring_app.core.algorithms.nonwear_detection_protocol import NonwearDetectionAlgorithm
+from sleep_scoring_app.core.algorithms.choi import ChoiAlgorithm
 from sleep_scoring_app.core.algorithms.van_hees import VanHeesNonwearAlgorithm
 
 if TYPE_CHECKING:
+    from sleep_scoring_app.core.algorithms.nonwear_detection_protocol import NonwearDetectionAlgorithm
     from sleep_scoring_app.utils.config import AppConfig
 
 logger = logging.getLogger(__name__)
@@ -78,7 +78,7 @@ class NonwearAlgorithmFactory:
 
     """
 
-    _registry: dict[str, _AlgorithmEntry] = {
+    _registry: ClassVar[dict[str, _AlgorithmEntry]] = {
         "choi_2011": _AlgorithmEntry(
             algorithm_class=ChoiAlgorithm,
             display_name="Choi (2011)",

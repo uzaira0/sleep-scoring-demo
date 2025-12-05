@@ -7,14 +7,14 @@ Provides centralized rule instantiation and configuration management.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from sleep_scoring_app.core.algorithms.config import SleepRulesConfig
-from sleep_scoring_app.core.algorithms.onset_offset_protocol import OnsetOffsetRule
 from sleep_scoring_app.core.algorithms.sleep_rules import SleepRules
 from sleep_scoring_app.core.algorithms.tudor_locke import TudorLockeConfig, TudorLockeRule
 
 if TYPE_CHECKING:
+    from sleep_scoring_app.core.algorithms.onset_offset_protocol import OnsetOffsetRule
     from sleep_scoring_app.utils.config import AppConfig
 
 logger = logging.getLogger(__name__)
@@ -28,14 +28,14 @@ class OnsetOffsetRuleFactory:
     Enables dependency injection throughout the application.
     """
 
-    _rules: dict[str, type] = {
+    _rules: ClassVar[dict[str, type]] = {
         "consecutive_3_5": SleepRules,
         "consecutive_5_10": SleepRules,  # Same class with different config
         "tudor_locke_2014": TudorLockeRule,
     }
 
     # Default configurations for known rule variants
-    _default_configs: dict[str, SleepRulesConfig | TudorLockeConfig] = {
+    _default_configs: ClassVar[dict[str, SleepRulesConfig | TudorLockeConfig]] = {
         "consecutive_3_5": SleepRulesConfig(
             onset_consecutive_minutes=3,
             offset_consecutive_minutes=5,
@@ -71,6 +71,7 @@ class OnsetOffsetRuleFactory:
 
         Raises:
             ValueError: If rule_id is not registered
+
         """
         if rule_id not in cls._rules:
             available = ", ".join(cls._rules.keys())
@@ -104,6 +105,7 @@ class OnsetOffsetRuleFactory:
 
         Returns:
             Dictionary mapping rule_id to display name
+
         """
         result = {}
         for rule_id in cls._rules:
@@ -123,6 +125,7 @@ class OnsetOffsetRuleFactory:
 
         Returns:
             Default rule ID ("consecutive_3_5")
+
         """
         return "consecutive_3_5"
 
@@ -143,6 +146,7 @@ class OnsetOffsetRuleFactory:
 
         Raises:
             ValueError: If rule_id already registered
+
         """
         if rule_id in cls._rules:
             msg = f"Onset/offset rule '{rule_id}' is already registered"
@@ -167,6 +171,7 @@ class OnsetOffsetRuleFactory:
 
         Raises:
             ValueError: If rule_id not registered
+
         """
         if rule_id not in cls._rules:
             available = ", ".join(cls._rules.keys())

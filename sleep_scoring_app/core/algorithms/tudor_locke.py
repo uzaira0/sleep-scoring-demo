@@ -24,6 +24,7 @@ Key Difference from Consecutive N/M Rules:
     - Tudor-Locke offset is the LAST sleep minute before the consecutive wake period begins
 
 This class implements the OnsetOffsetRule protocol for dependency injection.
+
 """
 
 from __future__ import annotations
@@ -157,6 +158,7 @@ class TudorLockeRule:
 
         Raises:
             ValueError: If parameter name is invalid
+
         """
         valid_params = {
             "onset_consecutive_minutes",
@@ -182,6 +184,7 @@ class TudorLockeRule:
 
         Returns:
             Tuple of (onset_label, offset_label) for display in UI
+
         """
         onset_label = f"Sleep Onset at {onset_time}\nTudor-Locke: {self.config.onset_consecutive_minutes} consecutive S"
         offset_label = f"Sleep Offset at {offset_time}\nTudor-Locke: {self.config.offset_consecutive_wake_minutes} consecutive W"

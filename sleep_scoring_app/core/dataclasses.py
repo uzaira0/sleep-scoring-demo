@@ -31,6 +31,8 @@ from sleep_scoring_app.utils.column_registry import column_registry
 if TYPE_CHECKING:
     from pathlib import Path
 
+    import pandas as pd
+
 # Configure logging
 logger = logging.getLogger(__name__)
 

@@ -6,7 +6,7 @@
 
 ## Overview
 
-This visual sleep scoring application was originally developed internally by the P01HD109876 Digital Assessment Core to implement a user-friendly, semi-automated, and  replicable version of a manual sleep scoring workflow, and is now being updated to include additional features for different kinds of sleep scoring workflows. It has been preliminarily validated for interrater, metric, and algorithmic reliability with excellent ICCs. **Although this is a "demo" repository of the application with synthetic data, it has full functionality if your manual sleep scoring workflow is similar.** For more general workflows, there will be future releases soon. Please contact at uzair.alam@bcm.edu if you have any questions.
+This visual sleep scoring application was originally developed internally by the P01HD109876 Digital Assessment Core to implement a user-friendly, semi-automated, and replicable version of a manual sleep scoring workflow for sleep and nap scoring of actigraphy data from a 3-5 year old sample. It is in the process of being updated to include additional features for different kinds of sleep scoring workflows. It has also been preliminarily validated for interrater, metric, and algorithmic reliability. **Although this is a "demo" repository of the application with synthetic data, it has full functionality if your manual sleep scoring workflow is similar.** For more general workflows, there will be future releases soon. Please contact at uzair.alam@bcm.edu if you have any questions.
 
 ## Features
 
@@ -67,7 +67,7 @@ Data import settings are managed in the Data Settings tab:
 - Import manual nonwear sensor data with specific column format if available
 - Import sleep diary data with specific column format if available
 
-## Algorithm References
+## Sleep/Wake Algorithm/Rule References
 
 ### Sadeh Algorithm
 > Sadeh, A., Sharkey, K. M., & Carskadon, M. A. (1994). Activity-based sleep-wake identification: An empirical test of methodological issues. *Sleep*, 17(3), 201-207.
@@ -80,6 +80,9 @@ The Sadeh algorithm uses an 11-minute sliding window to classify each epoch as s
 > Choi, L., Liu, Z., Matthews, C. E., & Buchowski, M. S. (2011). Validation of accelerometer wear and nonwear time classification algorithm. *Medicine and Science in Sports and Exercise*, 43(2), 357-364.
 
 The Choi algorithm detects nonwear periods by identifying consecutive epochs with zero activity counts, allowing for small spikes within the window. The newest version of the Choi algorithm is used.
+
+### Cole-Kripke Algorithm (WIP)
+
 
 ## Project Structure
 

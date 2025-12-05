@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pandas as pd
 
@@ -36,11 +37,13 @@ from .choi import choi_detect_nonwear
 from .config import SleepRulesConfig
 from .factory import AlgorithmFactory
 from .onset_offset_factory import OnsetOffsetRuleFactory
-from .onset_offset_protocol import OnsetOffsetRule
 from .sadeh import sadeh_score
 from .sleep_rules import SleepRules
-from .sleep_scoring_protocol import SleepScoringAlgorithm
 from .types import ActivityColumn
+
+if TYPE_CHECKING:
+    from .onset_offset_protocol import OnsetOffsetRule
+    from .sleep_scoring_protocol import SleepScoringAlgorithm
 
 logger = logging.getLogger(__name__)
 

@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import functools
 import logging
-from typing import TYPE_CHECKING, Callable, ParamSpec, TypeVar
+from collections.abc import Callable
+from typing import TYPE_CHECKING, ParamSpec, TypeVar
 
 from PyQt6.QtCore import QThread, QTimer
 
@@ -23,7 +24,7 @@ P = ParamSpec("P")
 T = TypeVar("T")
 
 
-def ensure_main_thread(func: Callable[P, T]) -> Callable[P, T]:
+def ensure_main_thread[**P, T](func: Callable[P, T]) -> Callable[P, T]:
     """
     Decorator to ensure a QWidget method runs on the main thread.
 

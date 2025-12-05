@@ -40,17 +40,19 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
 
 from sleep_scoring_app.core.algorithms.choi import detect_nonwear as _detect_nonwear_new
 from sleep_scoring_app.core.algorithms.onset_offset_factory import OnsetOffsetRuleFactory
-from sleep_scoring_app.core.algorithms.onset_offset_protocol import OnsetOffsetRule
 from sleep_scoring_app.core.algorithms.sadeh import score_activity as _score_activity_new
 from sleep_scoring_app.core.algorithms.sleep_rules import SleepRules as _SleepRulesNew
 from sleep_scoring_app.core.exceptions import ErrorCodes, ValidationError
+
+if TYPE_CHECKING:
+    from sleep_scoring_app.core.algorithms.onset_offset_protocol import OnsetOffsetRule
 
 logger = logging.getLogger(__name__)
 

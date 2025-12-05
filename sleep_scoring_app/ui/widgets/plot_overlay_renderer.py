@@ -20,9 +20,9 @@ from PyQt6.QtCore import QTimer
 
 from sleep_scoring_app.core.algorithms import NonwearAlgorithmFactory
 from sleep_scoring_app.core.constants import NonwearDataSource, UIColors
-from sleep_scoring_app.services.nonwear_service import NonwearPeriod
 
 if TYPE_CHECKING:
+    from sleep_scoring_app.services.nonwear_service import NonwearPeriod
     from sleep_scoring_app.ui.widgets.activity_plot import ActivityPlotWidget
 
 logger = logging.getLogger(__name__)

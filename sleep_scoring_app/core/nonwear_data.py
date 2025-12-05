@@ -13,11 +13,12 @@ from typing import TYPE_CHECKING
 
 from sleep_scoring_app.core.algorithms import NonwearAlgorithmFactory
 from sleep_scoring_app.core.constants import ActivityDataPreference, NonwearDataSource
-from sleep_scoring_app.core.dataclasses import NonwearPeriod
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from datetime import datetime
+
+    from sleep_scoring_app.core.dataclasses import NonwearPeriod
 
 logger = logging.getLogger(__name__)
 

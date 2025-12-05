@@ -94,11 +94,11 @@ __all__ = [
     "ActivityColumn",
     # === Algorithm Factory (Dependency Injection) ===
     "AlgorithmFactory",
+    # === Data Source Protocol and Factory (Dependency Injection) ===
+    "CSVDataSourceLoader",
     # === Calibration ===
     "CalibrationConfig",
     "CalibrationResult",
-    # === Data Source Protocol and Factory (Dependency Injection) ===
-    "CSVDataSourceLoader",
     "CancellationCheck",
     # === Choi Algorithm (Nonwear Detection) ===
     "ChoiAlgorithm",
@@ -112,11 +112,11 @@ __all__ = [
     "ImputationResult",
     "LogCallback",
     "NWTCorrelationResult",
-    # === Algorithm Data Types ===
-    "NonwearPeriod",
     # === Nonwear Detection Protocol and Factory (Dependency Injection) ===
     "NonwearAlgorithmFactory",
     "NonwearDetectionAlgorithm",
+    # === Algorithm Data Types ===
+    "NonwearPeriod",
     # === Onset/Offset Rule Protocol and Factory (Dependency Injection) ===
     "OnsetOffsetRule",
     "OnsetOffsetRuleFactory",
@@ -129,10 +129,10 @@ __all__ = [
     "SleepRulesConfig",
     # === Algorithm Protocol ===
     "SleepScoringAlgorithm",
+    "TimeRange",
     # === Tudor-Locke Onset/Offset Rules ===
     "TudorLockeConfig",
     "TudorLockeRule",
-    "TimeRange",
     # === Calibration Functions ===
     "apply_calibration",
     # === Auto-Scoring Orchestration ===

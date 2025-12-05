@@ -23,16 +23,17 @@ Example Usage:
 References:
     - Choi, L., et al. (2011). Validation of accelerometer wear and nonwear time classification algorithm.
     - van Hees, V. T., et al. (2013). Separating movement and gravity components in an acceleration signal.
+
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-import numpy as np
-
 if TYPE_CHECKING:
     from datetime import datetime
+
+    import numpy as np
 
     from sleep_scoring_app.core.dataclasses import NonwearPeriod
 

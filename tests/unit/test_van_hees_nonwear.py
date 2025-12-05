@@ -155,7 +155,7 @@ class TestVanHeesAlgorithmDetect:
         algorithm = VanHeesNonwearAlgorithm()
         data = np.zeros((100, 3))
         timestamps = [datetime(2000, 1, 1) + timedelta(seconds=i) for i in range(50)]
-        with pytest.raises(ValueError, match="Timestamps length.*must match data length"):
+        with pytest.raises(ValueError, match=r"Timestamps length.*must match data length"):
             algorithm.detect(data, timestamps)
 
     def test_detect_with_empty_data_returns_empty_list(self) -> None:

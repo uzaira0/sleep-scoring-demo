@@ -896,7 +896,7 @@ class DatabaseSchemaManager:
                 ("'Sadeh'", "'sadeh_1994_actilife'"),
                 ("'Manual + Algorithm'", "'sadeh_1994_actilife'"),
                 ("'Manual + Sadeh'", "'sadeh_1994_actilife'"),
-                ("'Cole-Kripke'", "'cole_kripke_1992'"),
+                ("'Cole-Kripke'", "'cole_kripke_1992_actilife'"),
                 ("'Automatic'", "'sadeh_1994_actilife'"),
                 ("'Manual'", "'manual'"),
                 ("'Choi'", "'choi'"),

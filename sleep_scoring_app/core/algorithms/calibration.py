@@ -22,13 +22,15 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class CalibrationConfig:
-    """Configuration for auto-calibration (sphere calibration).
+    """
+    Configuration for auto-calibration (sphere calibration).
 
     Attributes:
         epoch_size_sec: Size of calibration epochs in seconds.
         sphere_criterion: Criterion for sphere population check.
         sd_criterion: SD threshold for stationary point selection.
         min_stationary_points: Minimum number of stationary points needed.
+
     """
 
     epoch_size_sec: int = 10
@@ -39,7 +41,8 @@ class CalibrationConfig:
 
 @dataclass(frozen=True)
 class CalibrationResult:
-    """Result from auto-calibration.
+    """
+    Result from auto-calibration.
 
     Attributes:
         scale: Scale factors for x, y, z axes.
@@ -49,6 +52,7 @@ class CalibrationResult:
         n_points_used: Number of stationary points used.
         success: Whether calibration was successful.
         message: Status message.
+
     """
 
     scale: np.ndarray
@@ -72,7 +76,8 @@ def extract_calibration_features(
     sample_rate: float,
     epoch_size_sec: int = 10,
 ) -> np.ndarray:
-    """Extract features for calibration from accelerometer data.
+    """
+    Extract features for calibration from accelerometer data.
 
     Calculates per-epoch features: EN (Euclidean norm), mean x/y/z, SD x/y/z.
 
@@ -83,6 +88,7 @@ def extract_calibration_features(
 
     Returns:
         Feature array (n_epochs, 7): [EN, mean_x, mean_y, mean_z, sd_x, sd_y, sd_z]
+
     """
     window_len = int(sample_rate * epoch_size_sec)
     n_windows = len(data) // window_len
@@ -112,7 +118,8 @@ def select_stationary_points(
     sd_criterion: float = 0.013,
     sphere_criterion: float = 0.3,
 ) -> tuple[np.ndarray, str]:
-    """Select stationary points for calibration.
+    """
+    Select stationary points for calibration.
 
     Filters features to find non-movement periods suitable for sphere calibration.
 
@@ -123,6 +130,7 @@ def select_stationary_points(
 
     Returns:
         Tuple of (filtered features, status message).
+
     """
     # Filter valid data (remove 99999 or NaNs)
     valid_mask = (features[:, 0] != 99999) & ~np.isnan(features[:, 0]) & ~np.isnan(features[:, 3])
@@ -171,7 +179,8 @@ def calibrate(
     sample_rate: float,
     config: CalibrationConfig | None = None,
 ) -> CalibrationResult:
-    """Perform auto-calibration on accelerometer data.
+    """
+    Perform auto-calibration on accelerometer data.
 
     Args:
         data: Accelerometer data (n_samples, 3) for x, y, z axes.
@@ -180,6 +189,7 @@ def calibrate(
 
     Returns:
         CalibrationResult with scale, offset, and diagnostic information.
+
     """
     if config is None:
         config = CalibrationConfig()
@@ -252,7 +262,8 @@ def apply_calibration(
     scale: np.ndarray,
     offset: np.ndarray,
 ) -> np.ndarray | pd.DataFrame:
-    """Apply calibration parameters to accelerometer data.
+    """
+    Apply calibration parameters to accelerometer data.
 
     Args:
         data: Accelerometer data (n_samples, 3) as numpy array or DataFrame.
@@ -262,6 +273,7 @@ def apply_calibration(
 
     Returns:
         Calibrated data in the same format as input.
+
     """
     if isinstance(data, np.ndarray):
         # Numpy array - apply directly

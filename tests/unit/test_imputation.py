@@ -6,6 +6,8 @@ Critical verification: Row replication (not insertion) maintains epoch alignment
 
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
 import pytest
 
@@ -30,8 +32,8 @@ class TestImputationConfig:
     def test_config_is_frozen(self):
         """Test that config is immutable."""
         config = ImputationConfig()
-        with pytest.raises(Exception):  # FrozenInstanceError
-            config.gap_threshold_sec = 1.0  # type: ignore
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            config.gap_threshold_sec = 1.0  # type: ignore[misc]
 
 
 class TestImputationResult:
@@ -69,8 +71,8 @@ class TestImputationResult:
             n_samples_added=0,
             qc_log={},
         )
-        with pytest.raises(Exception):  # FrozenInstanceError
-            result.n_gaps = 5  # type: ignore
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            result.n_gaps = 5  # type: ignore[misc]
 
 
 class TestImputeTimegapsNoGaps:

@@ -55,7 +55,7 @@ def sample_csv_file(tmp_path):
     ]
 
     with open(file_path, "w") as f:
-        f.write("\n".join(metadata_lines + [column_header] + data_rows))
+        f.write("\n".join([*metadata_lines, column_header, *data_rows]))
 
     return file_path
 

@@ -27,6 +27,7 @@ Example Usage:
 References:
     - ActiGraph CSV format specification
     - GT3X binary format specification (ActiGraph)
+
 """
 
 from __future__ import annotations

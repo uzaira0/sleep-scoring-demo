@@ -15,6 +15,7 @@ References:
     van Hees, V. T., et al. (2023). GGIR: A research community-driven open source
     R package for generating physical activity and sleep outcomes from multi-day
     raw accelerometer data. Journal for the Measurement of Physical Behaviour.
+
 """
 
 from __future__ import annotations
@@ -150,9 +151,7 @@ class VanHeesNonwearAlgorithm:
         nonwear_scores = self._detect_nonwear_scores(data)
 
         # Convert scores to NonwearPeriod objects
-        periods = self._scores_to_periods(nonwear_scores, timestamps)
-
-        return periods
+        return self._scores_to_periods(nonwear_scores, timestamps)
 
     def detect_mask(self, activity_data: list[float] | np.ndarray) -> list[int]:
         """
@@ -194,9 +193,7 @@ class VanHeesNonwearAlgorithm:
         nonwear_scores = self._detect_nonwear_scores(data)
 
         # Convert to binary mask (score >= 2 = nonwear)
-        mask = [1 if score >= 2 else 0 for score in nonwear_scores]
-
-        return mask
+        return [1 if score >= 2 else 0 for score in nonwear_scores]
 
     def _detect_nonwear_scores(self, data: np.ndarray) -> np.ndarray:
         """

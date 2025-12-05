@@ -15,3 +15,12 @@ repos:
         types: [python]
         pass_filenames: false
         verbose: true
+
+      - id: pytest
+        name: pytest (unit + integration)
+        entry: bash -c 'pytest tests/unit tests/integration -x --tb=short -q'
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-commit]
+        verbose: true

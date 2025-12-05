@@ -29,14 +29,15 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from sleep_scoring_app.core.algorithms.csv_datasource import CSVDataSourceLoader
-from sleep_scoring_app.core.algorithms.datasource_protocol import DataSourceLoader
 from sleep_scoring_app.core.algorithms.gt3x_datasource import GT3XDataSourceLoader
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from sleep_scoring_app.core.algorithms.datasource_protocol import DataSourceLoader
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,7 @@ class DataSourceFactory:
 
     """
 
-    _registry: dict[str, _LoaderEntry] = {
+    _registry: ClassVar[dict[str, _LoaderEntry]] = {
         "csv": _LoaderEntry(
             loader_class=CSVDataSourceLoader,
             display_name="CSV/XLSX File Loader",
@@ -157,7 +158,7 @@ class DataSourceFactory:
             ext = f".{ext}"
 
         # Check each loader's supported extensions
-        for loader_id, entry in cls._registry.items():
+        for entry in cls._registry.values():
             loader_instance = entry.loader_class()
             if ext in loader_instance.supported_extensions:
                 return loader_instance

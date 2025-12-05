@@ -119,6 +119,7 @@ class SleepRules:
 
         Raises:
             ValueError: If parameter name is invalid
+
         """
         # Only accept valid parameters
         valid_params = {
@@ -145,6 +146,7 @@ class SleepRules:
 
         Returns:
             Tuple of (onset_label, offset_label) for display in UI
+
         """
         onset_label = f"Sleep Onset at {onset_time}\n{self.config.onset_consecutive_minutes} consecutive S epochs"
         offset_label = f"Sleep Offset at {offset_time}\n{self.config.offset_consecutive_minutes} consecutive S before W"

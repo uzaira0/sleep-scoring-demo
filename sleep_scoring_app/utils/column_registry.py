@@ -363,7 +363,7 @@ class ColumnRegistry:
                 ui_order=401,
                 ui_group="Algorithm Results",
                 default_value="sadeh_1994",
-                description="Sleep scoring algorithm identifier (e.g., sadeh_1994, cole_kripke_1992)",
+                description="Sleep scoring algorithm identifier (e.g., sadeh_1994_actilife, cole_kripke_1992_actilife)",
             ),
         )
 

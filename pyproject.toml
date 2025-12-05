@@ -19,7 +19,6 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     #"Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Medical Science Apps.",
-    "scipy>=1.11.0",
 ]
 # Core dependencies - required for algorithm functionality only
 dependencies = [
@@ -27,6 +26,7 @@ dependencies = [
     "numpy>=1.24.0",
     "scipy>=1.0.0",
     "pygt3x>=0.3.0",
+    "psutil>=5.9.0",
 ]
 
 [project.optional-dependencies]
@@ -45,8 +45,6 @@ dev = [
     "ruff>=0.1.0",
     "basedpyright>=1.18.0",
     "pre-commit>=3.0.0",
-    "psutil>=5.9.0",
-    # Removed incorrect classifier entry
 ]
 # Build dependencies - for creating distributable packages
 build = [
@@ -54,7 +52,7 @@ build = [
 ]
 # Complete installation - includes all dependencies
 all = [
-    "sleep-scoring-app[gui,dev,build]",
+    "sleep-scoring-demo[gui,dev,build]",
 ]
 
 [project.scripts]
@@ -148,7 +146,6 @@ ignore = [
     "A001",     # Builtin variable shadowing (legitimate variable names)
     "A004",     # Builtin import shadowing (ImportError for custom exceptions)
     "A005",     # Module shadows stdlib (dataclasses.py, types.py - intentional names)
-    "PD901",    # Generic DataFrame variable name `df` (common convention)
     "B007",     # Unused loop variable (placeholder loops)
     "D105",     # Missing docstring in magic method (dunder methods)
     "ANN002",   # Missing type annotation for *args (generic parameters)

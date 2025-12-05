@@ -29,11 +29,18 @@ class TestAlgorithmFactoryCreation:
         assert algorithm.name == "Sadeh (1994) ActiLife"
         assert isinstance(algorithm, SleepScoringAlgorithm)
 
-    def test_create_cole_kripke(self) -> None:
-        """Test creating Cole-Kripke 1992 algorithm."""
-        algorithm = AlgorithmFactory.create("cole_kripke_1992")
+    def test_create_cole_kripke_actilife(self) -> None:
+        """Test creating Cole-Kripke 1992 ActiLife algorithm."""
+        algorithm = AlgorithmFactory.create("cole_kripke_1992_actilife")
         assert algorithm is not None
-        assert algorithm.name == "Cole-Kripke (1992)"
+        assert algorithm.name == "Cole-Kripke (1992) ActiLife"
+        assert isinstance(algorithm, SleepScoringAlgorithm)
+
+    def test_create_cole_kripke_original(self) -> None:
+        """Test creating Cole-Kripke 1992 Original algorithm."""
+        algorithm = AlgorithmFactory.create("cole_kripke_1992_original")
+        assert algorithm is not None
+        assert algorithm.name == "Cole-Kripke (1992) Original"
         assert isinstance(algorithm, SleepScoringAlgorithm)
 
     def test_create_unknown_algorithm_raises(self) -> None:
@@ -57,20 +64,23 @@ class TestAlgorithmFactoryRegistry:
         assert isinstance(available, dict)
         assert "sadeh_1994_original" in available
         assert "sadeh_1994_actilife" in available
-        assert "cole_kripke_1992" in available
+        assert "cole_kripke_1992_actilife" in available
+        assert "cole_kripke_1992_original" in available
 
     def test_get_available_algorithms_returns_display_names(self) -> None:
         """Test that available algorithms dict has display names as values."""
         available = AlgorithmFactory.get_available_algorithms()
         assert available["sadeh_1994_original"] == "Sadeh (1994) Original"
         assert available["sadeh_1994_actilife"] == "Sadeh (1994) ActiLife"
-        assert available["cole_kripke_1992"] == "Cole-Kripke (1992)"
+        assert available["cole_kripke_1992_actilife"] == "Cole-Kripke (1992) ActiLife"
+        assert available["cole_kripke_1992_original"] == "Cole-Kripke (1992) Original"
 
     def test_is_registered_true(self) -> None:
         """Test is_registered returns True for registered algorithms."""
         assert AlgorithmFactory.is_registered("sadeh_1994_original") is True
         assert AlgorithmFactory.is_registered("sadeh_1994_actilife") is True
-        assert AlgorithmFactory.is_registered("cole_kripke_1992") is True
+        assert AlgorithmFactory.is_registered("cole_kripke_1992_actilife") is True
+        assert AlgorithmFactory.is_registered("cole_kripke_1992_original") is True
 
     def test_is_registered_false(self) -> None:
         """Test is_registered returns False for unregistered algorithms."""

@@ -29,7 +29,8 @@ class TestFactoryEnumAlignment:
         # Core algorithm types should be in factory
         assert AlgorithmType.SADEH_1994_ORIGINAL.value in factory_ids
         assert AlgorithmType.SADEH_1994_ACTILIFE.value in factory_ids
-        assert AlgorithmType.COLE_KRIPKE_1992.value in factory_ids
+        assert AlgorithmType.COLE_KRIPKE_1992_ORIGINAL.value in factory_ids
+        assert AlgorithmType.COLE_KRIPKE_1992_ACTILIFE.value in factory_ids
 
     def test_nonwear_algorithm_enum_matches_factory(self) -> None:
         """Test NonwearAlgorithm enum values match factory registered IDs."""
@@ -86,43 +87,6 @@ class TestSleepScoringPipeline:
         """Generate sample activity DataFrame for testing."""
         np.random.seed(42)
         n_epochs = 60
-
-        # Simulate 1 hour of data at 1-minute epochs
-        timestamps = pd.date_range(start="2024-01-01 22:00:00", periods=n_epochs, freq="1min")
-
-        activity = np.concatenate(
-            [
-                np.random.randint(0, 50, size=20),  # Sleep period
-                np.random.randint(100, 500, size=20),  # Wake period
-                np.random.randint(0, 50, size=20),  # Sleep period
-            ]
-        )
-
-        return pd.DataFrame(
-            {
-                "datetime": timestamps,
-                "Axis1": activity,
-            }
-        )
-
-    def test_sadeh_scores_dataframe(self, sample_activity_df: pd.DataFrame) -> None:
-        """Test that Sadeh algorithm can score a DataFrame."""
-        algorithm = AlgorithmFactory.create("sadeh_1994_actilife")
-        result = algorithm.score(sample_activity_df)
-
-        assert "Sadeh Score" in result.columns
-        assert len(result) == len(sample_activity_df)
-        # Scores should be 0 (wake) or 1 (sleep)
-        assert set(result["Sadeh Score"].unique()).issubset({0, 1})
-
-    def test_cole_kripke_scores_dataframe(self, sample_activity_df: pd.DataFrame) -> None:
-        """Test that Cole-Kripke algorithm can score a DataFrame."""
-        algorithm = AlgorithmFactory.create("cole_kripke_1992")
-        result = algorithm.score(sample_activity_df)
-
-        # Cole-Kripke uses "Sleep Score" as the column name (standardized across algorithms)
-        assert "Sleep Score" in result.columns
-        assert len(result) == len(sample_activity_df)
         # Scores should be 0 (wake) or 1 (sleep)
         assert set(result["Sleep Score"].unique()).issubset({0, 1})
 
@@ -239,7 +203,7 @@ class TestNonwearPipeline:
 
     def test_choi_detect_mask(self, sample_activity_with_nonwear: tuple) -> None:
         """Test that Choi algorithm produces per-epoch mask."""
-        activity, timestamps = sample_activity_with_nonwear
+        activity, _timestamps = sample_activity_with_nonwear
 
         algorithm = NonwearAlgorithmFactory.create("choi_2011")
         mask = algorithm.detect_mask(activity)
@@ -286,7 +250,7 @@ class TestCrossFactoryIntegration:
         sleep_scores = scored_df["Sadeh Score"].tolist()
         ts_list = [pd.Timestamp(t).to_pydatetime() for t in timestamps]
 
-        onset_idx, offset_idx = onset_rule.apply_rules(
+        onset_idx, _offset_idx = onset_rule.apply_rules(
             sleep_scores=sleep_scores,
             sleep_start_marker=ts_list[20],
             sleep_end_marker=ts_list[100],

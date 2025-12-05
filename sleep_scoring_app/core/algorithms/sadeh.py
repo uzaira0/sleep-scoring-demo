@@ -275,7 +275,8 @@ class SadehAlgorithm:
         - Original (threshold=0.0): As published in Sadeh et al. (1994)
         - ActiLife (threshold=-4.0): As implemented in ActiGraph's ActiLife software
 
-    Parameters:
+    Parameters
+    ----------
         threshold: Sleep/wake classification threshold
             - 0.0: Original Sadeh (1994) paper threshold
             - -4.0: ActiLife software threshold (default)
@@ -296,7 +297,8 @@ class SadehAlgorithm:
         >>> # Score array (legacy API)
         >>> scores = algorithm.score_array(activity_counts)
 
-    References:
+    References
+    ----------
         Sadeh, A., Sharkey, M., & Carskadon, M. A. (1994).
         Activity-based sleep-wake identification: An empirical test of
         methodological issues. Sleep, 17(3), 201-207.

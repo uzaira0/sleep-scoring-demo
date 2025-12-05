@@ -2,30 +2,41 @@
 Cole-Kripke (1992) sleep scoring algorithm - Framework-agnostic implementation.
 
 This module implements the Cole-Kripke algorithm for classifying minute-by-minute
-activity data as sleep or wake. The implementation uses FIXED validated parameters
-from the published paper and provides a simple function-based API.
+activity data as sleep or wake. Two variants are supported:
+
+    1. Original (1992): As published in Cole et al. (1992) paper
+    2. ActiLife: As implemented in ActiGraph's ActiLife software
 
 References:
     Cole, R. J., Kripke, D. F., Gruen, W., Mullaney, D. J., & Gillin, J. C. (1992).
     Automatic sleep/wake identification from wrist activity. Sleep, 15(5), 461-469.
 
-Algorithm Details:
+    ActiGraph's Implementation:
+    https://actigraphcorp.my.site.com/support/s/article/Where-can-I-find-documentation-for-the-Sadeh-and-Cole-Kripke-algorithms
+
+Algorithm Details (ActiLife Implementation):
+    - Uses y-axis epoch data
+    - Divides count values by 100
+    - Caps scaled values over 300 to 300
     - Uses a 7-minute sliding window (4 previous + current + 2 future epochs)
-    - Activity counts are scaled by dividing by 100 and capping at 300
-    - Uses weighted sum of activity in the sliding window
-    - Formula: SI = P * (W4*A4 + W3*A3 + W2*A2 + W1*A1 + W0*A0 + W-1*A-1 + W-2*A-2)
-    - Classification: SI < 1.0 = Sleep (1), otherwise Wake (0)
+    - Missing epochs (at boundaries) are treated as zero
+    - Formula: 0.001 * (106*A(t-4) + 54*A(t-3) + 58*A(t-2) + 76*A(t-1) + 230*A(t) + 74*A(t+1) + 67*A(t+2))
+    - Classification: result < 1 = Sleep (1), otherwise Wake (0)
     - ALWAYS uses Axis1 column (hardcoded in the algorithm)
 
 Coefficients (1-minute epochs):
     - P (scaling factor): 0.001
-    - W4 (lag 4): 106
-    - W3 (lag 3): 54
-    - W2 (lag 2): 58
-    - W1 (lag 1): 76
+    - W-4 (lag 4): 106
+    - W-3 (lag 3): 54
+    - W-2 (lag 2): 58
+    - W-1 (lag 1): 76
     - W0 (current): 230
-    - W-1 (lead 1): 74
-    - W-2 (lead 2): 67
+    - W+1 (lead 1): 74
+    - W+2 (lead 2): 67
+
+Variants:
+    - Original (1992): Uses activity data directly without pre-scaling (legacy behavior)
+    - ActiLife: Pre-scales activity by /100 and caps at 300 before applying algorithm
 
 """
 
@@ -45,11 +56,11 @@ logger = logging.getLogger(__name__)
 
 # Cole-Kripke algorithm constants (1-minute epochs)
 WINDOW_SIZE: int = 7  # 4 previous + current + 2 future
-ACTIVITY_SCALE: float = 100.0  # Divide activity counts by this
-ACTIVITY_CAP: float = 300.0  # Maximum scaled activity value
+ACTIVITY_SCALE_ACTILIFE: float = 100.0  # Divide activity counts by this (ActiLife variant)
+ACTIVITY_CAP_ACTILIFE: float = 300.0  # Maximum scaled activity value (ActiLife variant)
 THRESHOLD: float = 1.0  # Sleep/wake classification threshold
 
-# Scaling factor
+# Scaling factor for the weighted sum
 SCALING_FACTOR: float = 0.001
 
 # Coefficients for the weighted sum (1-minute epochs)
@@ -63,22 +74,20 @@ COEF_LEAD1: int = 74  # A(t+1)
 COEF_LEAD2: int = 67  # A(t+2)
 
 
-def cole_kripke_score(df: pd.DataFrame) -> pd.DataFrame:
+def cole_kripke_score(df: pd.DataFrame, use_actilife_scaling: bool = True) -> pd.DataFrame:
     """
     Apply Cole-Kripke (1992) sleep scoring algorithm to activity data.
 
-    Uses FIXED validated parameters from the published paper:
-    - Window size: 7 minutes (4 lag + current + 2 lead)
-    - Activity scaling: divide by 100, cap at 300
-    - Threshold: 1.0 (SI < 1.0 = sleep)
-    - Activity column: ALWAYS Axis1 (hardcoded in algorithm)
+    Two variants are supported:
+    - ActiLife (default): Pre-scales activity by dividing by 100 and caps at 300
+    - Original: Uses raw activity counts without pre-scaling
 
-    The algorithm uses a 7-minute sliding window with weighted coefficients
-    to calculate sleep/wake classifications. This is a validated research
-    algorithm with parameters that should not be modified.
+    Both variants use the same 7-minute sliding window with weighted coefficients.
 
     Args:
         df: DataFrame with datetime column and 'Axis1' activity column
+        use_actilife_scaling: If True (default), use ActiLife's pre-scaling (÷100, cap 300).
+                              If False, use raw activity counts (original paper behavior).
 
     Returns:
         Original DataFrame with new 'Sleep Score' column appended (1=sleep, 0=wake)
@@ -101,7 +110,7 @@ def cole_kripke_score(df: pd.DataFrame) -> pd.DataFrame:
         0  2024-01-01 00:00:00  45
         1  2024-01-01 00:01:00  32
         2  2024-01-01 00:02:00  0
-        >>> df = cole_kripke_score(df)
+        >>> df = cole_kripke_score(df)  # ActiLife variant (default)
         >>> df.head()
            datetime             Axis1  Sleep Score
         0  2024-01-01 00:00:00  45     1
@@ -136,14 +145,20 @@ def cole_kripke_score(df: pd.DataFrame) -> pd.DataFrame:
         msg = f"Axis1 column contains negative values at indices: {negative_indices[:10].tolist()}"
         raise ValueError(msg)
 
-    logger.debug(f"Running Cole-Kripke algorithm on {len(activity_data)} epochs")
+    variant_name = "ActiLife" if use_actilife_scaling else "Original"
+    logger.debug(f"Running Cole-Kripke ({variant_name}) algorithm on {len(activity_data)} epochs")
 
-    # Scale and cap activity counts
-    scaled_activity = np.minimum(activity_data / ACTIVITY_SCALE, ACTIVITY_CAP)
+    # Apply pre-scaling based on variant
+    if use_actilife_scaling:
+        # ActiLife variant: divide by 100 and cap at 300
+        scaled_activity = np.minimum(activity_data / ACTIVITY_SCALE_ACTILIFE, ACTIVITY_CAP_ACTILIFE)
+    else:
+        # Original variant: use raw activity counts
+        scaled_activity = activity_data.copy()
 
     sleep_wake_scores = _calculate_cole_kripke_scores(scaled_activity)
 
-    logger.debug(f"Cole-Kripke algorithm completed successfully for {len(activity_data)} epochs")
+    logger.debug(f"Cole-Kripke ({variant_name}) algorithm completed successfully for {len(activity_data)} epochs")
 
     result_df = df.copy()
     result_df["Sleep Score"] = sleep_wake_scores
@@ -151,23 +166,27 @@ def cole_kripke_score(df: pd.DataFrame) -> pd.DataFrame:
     return result_df
 
 
-def _calculate_cole_kripke_scores(scaled_activity: np.ndarray) -> np.ndarray:
+def _calculate_cole_kripke_scores(activity: np.ndarray) -> np.ndarray:
     """
-    Calculate Cole-Kripke sleep/wake scores for scaled activity data.
+    Calculate Cole-Kripke sleep/wake scores for activity data.
+
+    This is the core algorithm that applies the weighted sum formula.
+    The input should already be pre-processed (scaled/capped for ActiLife variant,
+    or raw counts for Original variant).
 
     Args:
-        scaled_activity: Array of activity counts scaled by /100 and capped at 300
+        activity: Array of activity counts (pre-processed based on variant)
 
     Returns:
         Array of sleep/wake classifications (1=sleep, 0=wake)
 
     """
-    n = len(scaled_activity)
+    n = len(activity)
     sleep_wake_scores = np.zeros(n, dtype=int)
 
     # Pad activity with zeros for boundary handling
     # 4 zeros at start (for lag), 2 zeros at end (for lead)
-    padded_activity = np.pad(scaled_activity, pad_width=(4, 2), mode="constant", constant_values=0)
+    padded_activity = np.pad(activity, pad_width=(4, 2), mode="constant", constant_values=0)
 
     # Coefficients array for vectorized multiplication
     coefficients = np.array([COEF_LAG4, COEF_LAG3, COEF_LAG2, COEF_LAG1, COEF_CURRENT, COEF_LEAD1, COEF_LEAD2])
@@ -187,12 +206,17 @@ def _calculate_cole_kripke_scores(scaled_activity: np.ndarray) -> np.ndarray:
     return sleep_wake_scores
 
 
-def score_activity_cole_kripke(activity_data: list[float] | np.ndarray) -> list[int]:
+def score_activity_cole_kripke(
+    activity_data: list[float] | np.ndarray,
+    use_actilife_scaling: bool = True,
+) -> list[int]:
     """
-    Legacy convenience function for backwards compatibility.
+    Score activity data using Cole-Kripke algorithm (convenience function).
 
     Args:
         activity_data: List or array of Axis1 activity count values
+        use_actilife_scaling: If True (default), use ActiLife's pre-scaling (÷100, cap 300).
+                              If False, use raw activity counts (original paper behavior).
 
     Returns:
         List of sleep/wake classifications (1=sleep, 0=wake)
@@ -200,7 +224,7 @@ def score_activity_cole_kripke(activity_data: list[float] | np.ndarray) -> list[
     Example:
         >>> from sleep_scoring_app.core.algorithms import score_activity_cole_kripke
         >>> activity_counts = [45, 32, 0, 12, 5, ...]
-        >>> sleep_scores = score_activity_cole_kripke(activity_counts)
+        >>> sleep_scores = score_activity_cole_kripke(activity_counts)  # ActiLife variant
         >>> sleep_scores
         [1, 1, 1, 1, 1, ...]
 
@@ -232,14 +256,20 @@ def score_activity_cole_kripke(activity_data: list[float] | np.ndarray) -> list[
         msg = f"activity_data contains negative values at indices: {negative_indices[:10].tolist()}"
         raise ValueError(msg)
 
-    logger.debug(f"Running Cole-Kripke algorithm on {len(activity_array)} epochs")
+    variant_name = "ActiLife" if use_actilife_scaling else "Original"
+    logger.debug(f"Running Cole-Kripke ({variant_name}) algorithm on {len(activity_array)} epochs")
 
-    # Scale and cap activity counts
-    scaled_activity = np.minimum(activity_array / ACTIVITY_SCALE, ACTIVITY_CAP)
+    # Apply pre-scaling based on variant
+    if use_actilife_scaling:
+        # ActiLife variant: divide by 100 and cap at 300
+        scaled_activity = np.minimum(activity_array / ACTIVITY_SCALE_ACTILIFE, ACTIVITY_CAP_ACTILIFE)
+    else:
+        # Original variant: use raw activity counts
+        scaled_activity = activity_array.copy()
 
     sleep_wake_scores = _calculate_cole_kripke_scores(scaled_activity)
 
-    logger.debug(f"Cole-Kripke algorithm completed successfully for {len(activity_array)} epochs")
+    logger.debug(f"Cole-Kripke ({variant_name}) algorithm completed successfully for {len(activity_array)} epochs")
 
     return sleep_wake_scores.tolist()
 
@@ -256,14 +286,28 @@ class ColeKripkeAlgorithm:
     to classify each epoch as sleep or wake based on activity counts. It ALWAYS uses
     the vertical axis (Axis1/axis_y) regardless of configuration.
 
-    Unlike Sadeh, the Cole-Kripke algorithm has NO configurable parameters - all
-    values are fixed from the published paper.
+    Two variants are supported:
+        - Original (1992): Uses raw activity counts as published in the paper
+        - ActiLife: Pre-scales activity by /100 and caps at 300 (ActiGraph's implementation)
+
+    Parameters
+    ----------
+        variant_name: Algorithm variant ("original" or "actilife")
+            - "original": Use raw activity counts (as published in Cole et al. 1992)
+            - "actilife": Pre-scale by /100 and cap at 300 (ActiGraph's implementation)
 
     Example:
         >>> from sleep_scoring_app.core.algorithms import ColeKripkeAlgorithm
         >>>
-        >>> # Create algorithm instance
-        >>> algorithm = ColeKripkeAlgorithm()
+        >>> # Create ActiLife variant (default-like behavior via factory)
+        >>> algorithm = ColeKripkeAlgorithm(variant_name="actilife")
+        >>> algorithm.name
+        'Cole-Kripke (1992) ActiLife'
+        >>>
+        >>> # Create Original variant
+        >>> algorithm = ColeKripkeAlgorithm(variant_name="original")
+        >>> algorithm.name
+        'Cole-Kripke (1992) Original'
         >>>
         >>> # Score DataFrame
         >>> df = algorithm.score(activity_df)
@@ -271,18 +315,31 @@ class ColeKripkeAlgorithm:
         >>> # Score array (legacy API)
         >>> scores = algorithm.score_array(activity_counts)
 
-    References:
+    References
+    ----------
         Cole, R. J., Kripke, D. F., Gruen, W., Mullaney, D. J., & Gillin, J. C. (1992).
         Automatic sleep/wake identification from wrist activity. Sleep, 15(5), 461-469.
 
+        ActiGraph Cole-Kripke Implementation:
+        https://actigraphcorp.my.site.com/support/s/article/Where-can-I-find-documentation-for-the-Sadeh-and-Cole-Kripke-algorithms
+
     """
 
-    def __init__(self) -> None:
-        """Initialize Cole-Kripke algorithm (no configurable parameters)."""
+    def __init__(self, variant_name: str = "actilife") -> None:
+        """
+        Initialize Cole-Kripke algorithm with specified variant.
+
+        Args:
+            variant_name: Algorithm variant ("original" or "actilife")
+                - "original": Use raw activity counts (as published)
+                - "actilife": Pre-scale by /100 and cap at 300 (default)
+
+        """
+        self._variant_name = variant_name.lower()
+        self._use_actilife_scaling = self._variant_name == "actilife"
+
         self._parameters = {
             "window_size": WINDOW_SIZE,
-            "activity_scale": ACTIVITY_SCALE,
-            "activity_cap": ACTIVITY_CAP,
             "threshold": THRESHOLD,
             "scaling_factor": SCALING_FACTOR,
             "coef_lag4": COEF_LAG4,
@@ -292,17 +349,27 @@ class ColeKripkeAlgorithm:
             "coef_current": COEF_CURRENT,
             "coef_lead1": COEF_LEAD1,
             "coef_lead2": COEF_LEAD2,
+            "variant": self._variant_name,
         }
+
+        # Add scaling parameters for ActiLife variant
+        if self._use_actilife_scaling:
+            self._parameters["activity_scale"] = ACTIVITY_SCALE_ACTILIFE
+            self._parameters["activity_cap"] = ACTIVITY_CAP_ACTILIFE
 
     @property
     def name(self) -> str:
         """Algorithm name for display."""
-        return "Cole-Kripke (1992)"
+        if self._variant_name == "original":
+            return "Cole-Kripke (1992) Original"
+        return "Cole-Kripke (1992) ActiLife"
 
     @property
     def identifier(self) -> str:
         """Unique algorithm identifier."""
-        return "cole_kripke_1992"
+        if self._variant_name == "original":
+            return "cole_kripke_1992_original"
+        return "cole_kripke_1992_actilife"
 
     @property
     def requires_axis(self) -> str:
@@ -320,7 +387,7 @@ class ColeKripkeAlgorithm:
             Original DataFrame with added 'Sleep Score' column (1=sleep, 0=wake)
 
         """
-        return cole_kripke_score(df)
+        return cole_kripke_score(df, use_actilife_scaling=self._use_actilife_scaling)
 
     def score_array(
         self,
@@ -338,9 +405,9 @@ class ColeKripkeAlgorithm:
             List of sleep/wake classifications (1=sleep, 0=wake)
 
         """
-        return score_activity_cole_kripke(activity_data)
+        return score_activity_cole_kripke(activity_data, use_actilife_scaling=self._use_actilife_scaling)
 
-    def get_parameters(self) -> dict[str, float | int]:
+    def get_parameters(self) -> dict[str, float | int | str]:
         """
         Get current algorithm parameters.
 

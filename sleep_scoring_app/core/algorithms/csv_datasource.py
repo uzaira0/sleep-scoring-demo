@@ -20,6 +20,7 @@ Example Usage:
 
 References:
     - ActiGraph CSV export format specification
+
 """
 
 from __future__ import annotations
@@ -491,10 +492,8 @@ class CSVDataSourceLoader:
             msg = f"File not found: {file_path}"
             raise FileNotFoundError(msg)
 
-        metadata = {
+        return {
             "file_size": file_path.stat().st_size,
             "device_type": "actigraph",  # Assume ActiGraph for CSV files
             "epoch_length_seconds": 60,  # Standard 60-second epochs
         }
-
-        return metadata
