@@ -41,7 +41,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from sleep_scoring_app.core.constants import ButtonText, DevicePreset, InfoMessage
+from sleep_scoring_app.core.constants import ButtonText, DataSourceType, DevicePreset, InfoMessage, StudyDataParadigm
 
 if TYPE_CHECKING:
     from sleep_scoring_app.ui.main_window import SleepScoringMainWindow
@@ -496,6 +496,8 @@ class DataSettingsTab(QWidget):
         super().__init__(parent)
         self.parent = parent  # Reference to main window
         self.setup_ui()
+        # Filter loaders based on current paradigm after UI is fully set up
+        self.update_loaders_for_paradigm()
 
     def setup_ui(self) -> None:
         """Create the data settings tab UI."""
@@ -526,6 +528,10 @@ class DataSettingsTab(QWidget):
         header_label.setStyleSheet("QLabel { background-color: #f0f0f0; padding: 10px; border-radius: 5px; }")
         content_layout.addWidget(header_label)
 
+        # Current Paradigm indicator (link to Study Settings to change it)
+        paradigm_indicator = self._create_paradigm_indicator()
+        content_layout.addWidget(paradigm_indicator)
+
         # Activity Data Section
         activity_group = self._create_activity_data_section()
         content_layout.addWidget(activity_group)
@@ -554,6 +560,165 @@ class DataSettingsTab(QWidget):
         self.import_service = ImportService(self.parent.db_manager)
         self.import_worker = None
         self.progress_timer = QTimer()
+
+    def _init_file_management(self) -> None:
+        """Initialize file management widget."""
+        try:
+            from sleep_scoring_app.services.file_management_service import FileManagementServiceImpl
+            from sleep_scoring_app.ui.widgets.file_management_widget import FileManagementWidget
+
+            # Create file management service
+            file_service = FileManagementServiceImpl(self.parent.db_manager)
+
+            # Create widget
+            self.file_management_widget = FileManagementWidget(file_service, parent=self)
+
+            # Connect signals
+            self.file_management_widget.filesDeleted.connect(self._on_files_deleted)
+
+            logger.info("File management widget initialized")
+        except Exception as e:
+            logger.exception("Failed to initialize file management widget")
+            # Don't create widget if initialization fails
+            if hasattr(self, "file_management_widget"):
+                delattr(self, "file_management_widget")
+
+    def _on_files_deleted(self, filenames: list[str]) -> None:
+        """
+        Handle files deleted signal.
+
+        Clears caches, refreshes the Analysis tab file list, and handles
+        the case where the currently selected file was deleted.
+
+        Args:
+            filenames: List of deleted file names
+
+        """
+        logger.info("Files deleted: %s", filenames)
+
+        # Clear cache in unified data service for each deleted file
+        if hasattr(self.parent, "data_service"):
+            for filename in filenames:
+                self.parent.data_service.clear_file_cache(filename)
+
+        # Check if the currently selected file was deleted
+        current_file_deleted = False
+        if hasattr(self.parent, "selected_file") and self.parent.selected_file:
+            from pathlib import Path
+
+            current_filename = Path(self.parent.selected_file).name
+            if current_filename in filenames:
+                current_file_deleted = True
+                logger.info("Currently selected file %s was deleted", current_filename)
+
+        # Reload the file list in the Analysis tab (this updates the FileSelectionTable)
+        if hasattr(self.parent, "load_available_files"):
+            # Don't preserve selection if the current file was deleted
+            self.parent.load_available_files(preserve_selection=not current_file_deleted)
+
+        # If current file was deleted, clear the plot and reset UI state
+        if current_file_deleted:
+            self._handle_current_file_deleted()
+
+    def _handle_current_file_deleted(self) -> None:
+        """Handle cleanup when the currently selected file is deleted."""
+        try:
+            # Clear selected file reference
+            if hasattr(self.parent, "selected_file"):
+                self.parent.selected_file = None
+
+            # Clear available dates
+            if hasattr(self.parent, "available_dates"):
+                self.parent.available_dates = []
+
+            # Clear the plot widget
+            if hasattr(self.parent, "plot_widget") and self.parent.plot_widget is not None:
+                self.parent.plot_widget.clear_plot()
+
+            # Clear date dropdown
+            if hasattr(self.parent, "date_dropdown") and self.parent.date_dropdown is not None:
+                self.parent.date_dropdown.clear()
+
+            # Update status bar
+            if hasattr(self.parent, "update_status_bar"):
+                self.parent.update_status_bar()
+
+            logger.info("Cleared UI state after current file deletion")
+        except Exception as e:
+            logger.warning("Error during file deletion cleanup: %s", e)
+
+    def _create_paradigm_indicator(self) -> QWidget:
+        """Create a paradigm indicator showing current paradigm with link to change it."""
+        indicator_widget = QWidget()
+        indicator_layout = QHBoxLayout(indicator_widget)
+        indicator_layout.setContentsMargins(0, 10, 0, 10)
+
+        # Get current paradigm
+        try:
+            paradigm_value = self.parent.config_manager.config.data_paradigm
+            paradigm = StudyDataParadigm(paradigm_value)
+        except (ValueError, AttributeError):
+            paradigm = StudyDataParadigm.get_default()
+
+        # Create indicator label
+        self.paradigm_indicator_label = QLabel()
+        self._update_paradigm_indicator_label(paradigm)
+        indicator_layout.addWidget(self.paradigm_indicator_label)
+
+        # Add button to change paradigm (links to Study Settings tab)
+        change_paradigm_btn = QPushButton("Change Data Paradigm...")
+        change_paradigm_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                font-weight: bold;
+                padding: 6px 12px;
+                border-radius: 4px;
+                border: none;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        change_paradigm_btn.setToolTip("Go to Study Settings to change the Data Paradigm")
+        change_paradigm_btn.clicked.connect(self._go_to_study_settings)
+        indicator_layout.addWidget(change_paradigm_btn)
+
+        indicator_layout.addStretch()
+
+        return indicator_widget
+
+    def _update_paradigm_indicator_label(self, paradigm: StudyDataParadigm) -> None:
+        """Update the paradigm indicator label text and style."""
+        if paradigm == StudyDataParadigm.EPOCH_BASED:
+            text = "📊 <b>Current Data Paradigm:</b> Epoch-Based (CSV with activity counts)"
+            bg_color = "#e8f5e9"
+            border_color = "#4caf50"
+        else:
+            text = "📈 <b>Current Data Paradigm:</b> Raw Accelerometer (GT3X / Raw CSV)"
+            bg_color = "#e3f2fd"
+            border_color = "#2196f3"
+
+        self.paradigm_indicator_label.setText(text)
+        self.paradigm_indicator_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 12px;
+                padding: 10px 15px;
+                background-color: {bg_color};
+                border-left: 4px solid {border_color};
+                border-radius: 4px;
+            }}
+        """)
+        self.paradigm_indicator_label.setWordWrap(True)
+
+    def _go_to_study_settings(self) -> None:
+        """Switch to Study Settings tab."""
+        if hasattr(self.parent, "tab_widget"):
+            # Find the Study Settings tab index
+            for i in range(self.parent.tab_widget.count()):
+                if self.parent.tab_widget.tabText(i) == "Study Settings":
+                    self.parent.tab_widget.setCurrentIndex(i)
+                    break
 
     def _create_section_separator(self) -> QFrame:
         """Create a horizontal line separator."""
@@ -599,8 +764,21 @@ class DataSettingsTab(QWidget):
 
     def _create_activity_data_section(self) -> QGroupBox:
         """Create Activity Data section with global settings and import."""
-        activity_group = QGroupBox("Activity Data (.csv files)")
-        activity_layout = QVBoxLayout(activity_group)
+        # Make title paradigm-aware
+        try:
+            paradigm_value = self.parent.config_manager.config.data_paradigm
+            paradigm = StudyDataParadigm(paradigm_value)
+        except (ValueError, AttributeError):
+            paradigm = StudyDataParadigm.get_default()
+
+        # Set title based on paradigm
+        if paradigm == StudyDataParadigm.EPOCH_BASED:
+            title = "Activity Data (CSV/Excel with epoch counts)"
+        else:
+            title = "Activity Data (GT3X or raw CSV files)"
+
+        self.activity_group = QGroupBox(title)
+        activity_layout = QVBoxLayout(self.activity_group)
 
         # Global Settings Grid
         settings_grid = QGridLayout()
@@ -609,9 +787,12 @@ class DataSettingsTab(QWidget):
         settings_grid.addWidget(QLabel("Data Source Type:"), 0, 0)
         self.data_source_combo = QComboBox()
 
-        # Populate from factory
-        from sleep_scoring_app.core.algorithms.datasource_factory import DataSourceFactory
+        # Populate from factory - filtered by current paradigm
+        # Note: update_loaders_for_paradigm() is called after combo is set up
+        # to properly filter based on the current paradigm setting
+        from sleep_scoring_app.io.sources.loader_factory import DataSourceFactory
 
+        # Initial population with all loaders (will be filtered by paradigm)
         available_loaders = DataSourceFactory.get_available_loaders()
         for loader_id, display_name in available_loaders.items():
             self.data_source_combo.addItem(display_name, loader_id)
@@ -713,24 +894,17 @@ class DataSettingsTab(QWidget):
 
         activity_layout.addLayout(settings_grid)
 
-        # CSV-specific options section
+        # CSV-specific options section (placeholder for future CSV-only settings)
+        # Note: Skip Rows is now in the main settings section with auto-detect
         self.csv_options_widget = QWidget()
         csv_options_layout = QGridLayout(self.csv_options_widget)
         csv_options_layout.setContentsMargins(20, 10, 0, 10)
-
-        csv_options_layout.addWidget(QLabel("CSV Skip Rows:"), 0, 0)
-        self.csv_skip_rows_spin = QSpinBox()
-        self.csv_skip_rows_spin.setRange(0, 100)
-        self.csv_skip_rows_spin.blockSignals(True)
-        self.csv_skip_rows_spin.setValue(self.parent.config_manager.config.csv_skip_rows)
-        self.csv_skip_rows_spin.blockSignals(False)
-        self.csv_skip_rows_spin.valueChanged.connect(self._on_csv_skip_rows_changed)
-        self.csv_skip_rows_spin.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        self.csv_skip_rows_spin.setToolTip("Number of header rows to skip in CSV files")
-        csv_options_layout.addWidget(self.csv_skip_rows_spin, 0, 1)
-        csv_options_layout.setColumnStretch(2, 1)
+        # Currently empty - CSV uses Skip Rows from main settings
+        csv_options_layout.setColumnStretch(0, 1)
 
         activity_layout.addWidget(self.csv_options_widget)
+        # Hide CSV options widget since it's empty
+        self.csv_options_widget.setVisible(False)
 
         # GT3X-specific options section
         self.gt3x_options_widget = QWidget()
@@ -819,6 +993,16 @@ class DataSettingsTab(QWidget):
         self.activity_status_label = QLabel()
         activity_layout.addWidget(self.activity_status_label)
 
+        # File Management Section
+        activity_layout.addWidget(self._create_section_separator())
+        file_mgmt_label = QLabel("<b>Manage Imported Files:</b>")
+        activity_layout.addWidget(file_mgmt_label)
+
+        # Initialize file management widget
+        self._init_file_management()
+        if hasattr(self, "file_management_widget"):
+            activity_layout.addWidget(self.file_management_widget)
+
         # Clear buttons row
         clear_layout = QHBoxLayout()
         clear_layout.addStretch()
@@ -850,7 +1034,7 @@ class DataSettingsTab(QWidget):
 
         activity_layout.addLayout(clear_layout)
 
-        return activity_group
+        return self.activity_group
 
     def _create_nwt_data_section(self) -> QGroupBox:
         """Create NWT Sensor Data section."""
@@ -1065,18 +1249,91 @@ class DataSettingsTab(QWidget):
         current_index = self.data_source_combo.currentIndex()
         loader_id = self.data_source_combo.itemData(current_index)
 
-        is_csv = loader_id == "csv"
-        is_gt3x = loader_id == "gt3x"
+        is_csv = loader_id == DataSourceType.CSV
+        is_gt3x = loader_id == DataSourceType.GT3X
 
         self.csv_options_widget.setVisible(is_csv)
         self.gt3x_options_widget.setVisible(is_gt3x)
 
-    def _on_csv_skip_rows_changed(self, value: int) -> None:
-        """Handle CSV skip rows spinner change."""
-        if self.parent and self.parent.config_manager:
-            self.parent.config_manager.config.csv_skip_rows = value
-            self.parent.config_manager.save_config()
-            logger.debug("CSV skip rows changed to: %s", value)
+    def update_loaders_for_paradigm(self, paradigm: StudyDataParadigm | None = None) -> None:
+        """
+        Update the data source loader combo based on current paradigm.
+
+        Args:
+            paradigm: The paradigm to filter loaders for. If None, reads from config.
+
+        This method filters the available loaders:
+        - EPOCH_BASED: Only shows CSV loader (for pre-epoched CSV/Excel files)
+        - RAW_ACCELEROMETER: Shows both CSV and GT3X loaders
+
+        """
+        from sleep_scoring_app.io.sources.loader_factory import DataSourceFactory
+
+        # Get current paradigm if not provided
+        if paradigm is None:
+            try:
+                paradigm_value = self.parent.config_manager.config.data_paradigm
+                paradigm = StudyDataParadigm(paradigm_value)
+            except (ValueError, AttributeError):
+                paradigm = StudyDataParadigm.get_default()
+
+        # Store current selection to try to restore it
+        current_loader_id = self.data_source_combo.currentData()
+
+        # Block signals during update
+        self.data_source_combo.blockSignals(True)
+        self.data_source_combo.clear()
+
+        # Get all available loaders
+        available_loaders = DataSourceFactory.get_available_loaders()
+
+        # Filter loaders based on paradigm
+        if paradigm == StudyDataParadigm.EPOCH_BASED:
+            # Epoch-based: only CSV loader (GT3X requires raw processing)
+            filtered_loaders = {k: v for k, v in available_loaders.items() if k == DataSourceType.CSV}
+        else:
+            # Raw accelerometer: all loaders available
+            filtered_loaders = available_loaders
+
+        # Populate combo with filtered loaders
+        for loader_id, display_name in filtered_loaders.items():
+            self.data_source_combo.addItem(display_name, loader_id)
+
+        # Try to restore previous selection if still available
+        restored = False
+        if current_loader_id:
+            for i in range(self.data_source_combo.count()):
+                if self.data_source_combo.itemData(i) == current_loader_id:
+                    self.data_source_combo.setCurrentIndex(i)
+                    restored = True
+                    break
+
+        # If previous selection not available, select first item
+        if not restored and self.data_source_combo.count() > 0:
+            self.data_source_combo.setCurrentIndex(0)
+            # Update config with new loader
+            new_loader_id = self.data_source_combo.itemData(0)
+            if self.parent and self.parent.config_manager:
+                self.parent.config_manager.config.data_source_type_id = new_loader_id
+                self.parent.config_manager.save_config()
+
+        self.data_source_combo.blockSignals(False)
+
+        # Update visibility of loader-specific options
+        self._update_data_source_visibility()
+
+        # Update paradigm indicator
+        if hasattr(self, "paradigm_indicator_label"):
+            self._update_paradigm_indicator_label(paradigm)
+
+        # Update Activity Data GroupBox title
+        if hasattr(self, "activity_group"):
+            if paradigm == StudyDataParadigm.EPOCH_BASED:
+                self.activity_group.setTitle("Activity Data (CSV/Excel with epoch counts)")
+            else:
+                self.activity_group.setTitle("Activity Data (GT3X or raw CSV files)")
+
+        logger.info("Updated data source loaders for paradigm: %s", paradigm.get_display_name())
 
     def _on_gt3x_epoch_length_changed(self, value: int) -> None:
         """Handle GT3X epoch length spinner change."""

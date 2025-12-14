@@ -616,8 +616,8 @@ class DataManager:
         return {
             "full_participant_id": info.full_id,
             "numerical_participant_id": info.numerical_id,
-            "participant_group": info.group,
-            "participant_timepoint": info.timepoint,
+            "participant_group": info.group_str,
+            "participant_timepoint": info.timepoint_str,
             "date": info.date or "Unknown",
         }
 
@@ -628,7 +628,7 @@ class DataManager:
         if not file_path:
             return None
         info = extract_participant_info(file_path)
-        return info.group if info.group != "G1" else None
+        return info.group_str if info.group_str != "G1" else None
 
     def calculate_sleep_metrics(
         self,
@@ -661,17 +661,9 @@ class DataManager:
             onset_idx = self._find_closest_data_index(x_data, onset_timestamp)
             offset_idx = self._find_closest_data_index(x_data, offset_timestamp)
 
-            # Algorithm values at markers
+            # Algorithm values at markers (for sleep scoring algorithm only)
             sadeh_onset = sadeh_results[onset_idx] if onset_idx is not None and onset_idx < len(sadeh_results) else 0
             sadeh_offset = sadeh_results[offset_idx] if offset_idx is not None and offset_idx < len(sadeh_results) else 0
-            choi_onset = choi_results[onset_idx] if onset_idx is not None and onset_idx < len(choi_results) else 0
-            choi_offset = choi_results[offset_idx] if offset_idx is not None and offset_idx < len(choi_results) else 0
-            nwt_sensor_onset = (
-                nwt_sensor_results[onset_idx] if nwt_sensor_results and onset_idx is not None and onset_idx < len(nwt_sensor_results) else 0
-            )
-            nwt_sensor_offset = (
-                nwt_sensor_results[offset_idx] if nwt_sensor_results and offset_idx is not None and offset_idx < len(nwt_sensor_results) else 0
-            )
 
             # Initialize all variables
             total_activity = 0
@@ -740,11 +732,14 @@ class DataManager:
                 fragmentation_index = (awakenings / total_sleep_time * 100) if total_sleep_time > 0 else 0
                 sleep_fragmentation_index = ((waso + movement_events) / total_minutes_in_bed * 100) if total_minutes_in_bed > 0 else 0
 
-                # Count Choi algorithm results over sleep period
-                total_choi_counts = sum(choi_results[onset_idx : offset_idx + 1]) if onset_idx is not None and offset_idx is not None else 0
+                # Calculate overlapping nonwear minutes during sleep period
+                # Sum of 0/1 values per minute epoch = total nonwear minutes
+                overlapping_nonwear_minutes_algorithm = (
+                    sum(choi_results[onset_idx : offset_idx + 1]) if onset_idx is not None and offset_idx is not None else 0
+                )
 
-                # Count NWT sensor results over sleep period
-                total_nwt_sensor_counts = (
+                # Calculate overlapping NWT sensor nonwear minutes during sleep period
+                overlapping_nonwear_minutes_sensor = (
                     sum(nwt_sensor_results[onset_idx : offset_idx + 1])
                     if nwt_sensor_results and onset_idx is not None and offset_idx is not None
                     else 0
@@ -761,8 +756,8 @@ class DataManager:
                 movement_index = None
                 fragmentation_index = None
                 sleep_fragmentation_index = None
-                total_choi_counts = None
-                total_nwt_sensor_counts = None
+                overlapping_nonwear_minutes_algorithm = None
+                overlapping_nonwear_minutes_sensor = None
 
             return {
                 "Full Participant ID": participant_info["full_participant_id"],
@@ -786,17 +781,13 @@ class DataManager:
                 "Sleep Fragmentation Index": round(sleep_fragmentation_index, 2) if sleep_fragmentation_index is not None else None,
                 "Sadeh Algorithm Value at Sleep Onset": sadeh_onset if onset_idx is not None and onset_idx < len(sadeh_results) else None,
                 "Sadeh Algorithm Value at Sleep Offset": sadeh_offset if offset_idx is not None and offset_idx < len(sadeh_results) else None,
-                "Choi Algorithm Value at Sleep Onset": choi_onset if onset_idx is not None and onset_idx < len(choi_results) else None,
-                "Choi Algorithm Value at Sleep Offset": choi_offset if offset_idx is not None and offset_idx < len(choi_results) else None,
-                "Total Choi Algorithm Counts over the Sleep Period": int(total_choi_counts) if total_choi_counts is not None else None,
-                # NWT sensor data calculation (similar to Choi algorithm)
-                "NWT Sensor Value at Sleep Onset": nwt_sensor_onset
-                if nwt_sensor_results and onset_idx is not None and onset_idx < len(nwt_sensor_results)
+                # Overlapping nonwear minutes during sleep period
+                "Overlapping Nonwear Minutes (Algorithm)": int(overlapping_nonwear_minutes_algorithm)
+                if overlapping_nonwear_minutes_algorithm is not None
                 else None,
-                "NWT Sensor Value at Sleep Offset": nwt_sensor_offset
-                if nwt_sensor_results and offset_idx is not None and offset_idx < len(nwt_sensor_results)
+                "Overlapping Nonwear Minutes (Sensor)": int(overlapping_nonwear_minutes_sensor)
+                if overlapping_nonwear_minutes_sensor is not None
                 else None,
-                "Total NWT Sensor Counts over the Sleep Period": int(total_nwt_sensor_counts) if total_nwt_sensor_counts is not None else None,
             }
 
         except (ValueError, TypeError, KeyError, IndexError):
@@ -827,7 +818,7 @@ class DataManager:
         group = metrics_dict.get("Participant Group", "G1")
 
         # Reconstruct full_id from all three components (numerical_id, timepoint, group)
-        if numerical_id != "Unknown":
+        if numerical_id != "UNKNOWN":
             full_id = f"{numerical_id} {timepoint} {group}"
         else:
             full_id = metrics_dict.get("Full Participant ID", "Unknown BO G1")  # Fallback to stored value
@@ -902,12 +893,8 @@ class DataManager:
             sleep_fragmentation_index=metrics_dict.get("Sleep Fragmentation Index"),
             sadeh_onset=metrics_dict.get("Sadeh Algorithm Value at Sleep Onset"),
             sadeh_offset=metrics_dict.get("Sadeh Algorithm Value at Sleep Offset"),
-            choi_onset=metrics_dict.get("Choi Algorithm Value at Sleep Onset"),
-            choi_offset=metrics_dict.get("Choi Algorithm Value at Sleep Offset"),
-            total_choi_counts=metrics_dict.get("Total Choi Algorithm Counts over the Sleep Period"),
-            nwt_onset=metrics_dict.get("NWT Sensor Value at Sleep Onset"),
-            nwt_offset=metrics_dict.get("NWT Sensor Value at Sleep Offset"),
-            total_nwt_counts=metrics_dict.get("Total NWT Sensor Counts over the Sleep Period"),
+            overlapping_nonwear_minutes_algorithm=metrics_dict.get("Overlapping Nonwear Minutes (Algorithm)"),
+            overlapping_nonwear_minutes_sensor=metrics_dict.get("Overlapping Nonwear Minutes (Sensor)"),
             updated_at=datetime.now().isoformat(),
         )
 

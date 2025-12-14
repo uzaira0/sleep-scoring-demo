@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import pytest
 
-from sleep_scoring_app.core.algorithms.datasource_factory import DataSourceFactory
-from sleep_scoring_app.core.algorithms.datasource_protocol import DataSourceLoader
 from sleep_scoring_app.core.constants import DataSourceType
+from sleep_scoring_app.io.sources.loader_factory import DataSourceFactory
+from sleep_scoring_app.io.sources.loader_protocol import DataSourceLoader
 
 
 class TestDataSourceFactoryCreation:
@@ -27,7 +27,8 @@ class TestDataSourceFactoryCreation:
         """Test creating GT3X data source loader."""
         loader = DataSourceFactory.create("gt3x")
         assert loader is not None
-        assert loader.name == "GT3X File Loader"
+        # Name varies based on whether gt3x-rs is available
+        assert "GT3X" in loader.name
         assert isinstance(loader, DataSourceLoader)
 
     def test_create_invalid_loader_raises(self) -> None:
@@ -61,7 +62,8 @@ class TestDataSourceFactoryRegistry:
         """Test that available loaders dict has display names as values."""
         available = DataSourceFactory.get_available_loaders()
         assert available["csv"] == "CSV/XLSX File Loader"
-        assert available["gt3x"] == "GT3X File Loader"
+        # GT3X loader name varies based on whether gt3x-rs is available
+        assert "GT3X File Loader" in available["gt3x"]
 
     def test_is_registered_csv(self) -> None:
         """Test is_registered returns True for csv."""
@@ -105,7 +107,8 @@ class TestDataSourceFactoryExtensionMapping:
     def test_get_loader_for_extension_gt3x(self) -> None:
         """Test getting loader for .gt3x extension."""
         loader = DataSourceFactory.get_loader_for_extension(".gt3x")
-        assert loader.identifier == "gt3x"
+        # Identifier may be "gt3x" or "gt3x_rs" depending on which is available
+        assert loader.identifier in ("gt3x", "gt3x_rs")
 
     def test_get_loader_for_extension_unknown(self) -> None:
         """Test that unknown extension raises ValueError."""
@@ -144,7 +147,8 @@ class TestDataSourceFactoryFilePathMapping:
     def test_get_loader_for_file_gt3x(self) -> None:
         """Test getting loader for GT3X file path."""
         loader = DataSourceFactory.get_loader_for_file("/data/activity.gt3x")
-        assert loader.identifier == "gt3x"
+        # Identifier may be "gt3x" or "gt3x_rs" depending on which is available
+        assert loader.identifier in ("gt3x", "gt3x_rs")
 
     def test_get_loader_for_file_pathlib(self) -> None:
         """Test getting loader with pathlib.Path object."""
@@ -172,10 +176,10 @@ class TestDataSourceTypeEnumAlignment:
         assert csv_loader is not None
         assert csv_loader.identifier == "csv"
 
-        # GT3X loader
+        # GT3X loader - may return gt3x_rs if Rust backend is available
         gt3x_loader = DataSourceFactory.create(DataSourceType.GT3X.value)
         assert gt3x_loader is not None
-        assert gt3x_loader.identifier == "gt3x"
+        assert gt3x_loader.identifier in ("gt3x", "gt3x_rs")
 
     def test_enum_default_matches_factory_default(self) -> None:
         """Test that DataSourceType default matches factory default."""
@@ -199,8 +203,9 @@ class TestDataSourceLoaderBehavior:
     def test_gt3x_loader_properties(self) -> None:
         """Test GT3X loader has correct properties."""
         loader = DataSourceFactory.create("gt3x")
-        assert loader.name == "GT3X File Loader"
-        assert loader.identifier == "gt3x"
+        # Name and identifier vary based on whether gt3x-rs is available
+        assert "GT3X" in loader.name
+        assert loader.identifier in ("gt3x", "gt3x_rs")
         assert ".gt3x" in loader.supported_extensions
 
     def test_all_loaders_have_load_file_method(self) -> None:
@@ -245,7 +250,12 @@ class TestDataSourceLoaderBehavior:
             loader = DataSourceFactory.create(loader_id)
             assert hasattr(loader, "identifier")
             assert isinstance(loader.identifier, str)
-            assert loader.identifier == loader_id
+            # "gt3x" may return "gt3x_rs" loader when Rust backend is available
+            # "gt3x_pygt3x" is the fallback pygt3x loader with identifier "gt3x"
+            if loader_id in ("gt3x", "gt3x_pygt3x"):
+                assert loader.identifier in ("gt3x", "gt3x_rs")
+            else:
+                assert loader.identifier == loader_id
 
     def test_all_loaders_have_supported_extensions_property(self) -> None:
         """Test all loaders have supported_extensions property."""

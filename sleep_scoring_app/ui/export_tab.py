@@ -145,10 +145,10 @@ class ExportTab(QWidget):
                     if hasattr(metrics, "participant") and metrics.participant:
                         if hasattr(metrics.participant, "numerical_id"):
                             participants.add(metrics.participant.numerical_id)
-                        if hasattr(metrics.participant, "group"):
-                            groups.add(metrics.participant.group)
-                        if hasattr(metrics.participant, "timepoint"):
-                            timepoints.add(metrics.participant.timepoint)
+                        if hasattr(metrics.participant, "group_str"):
+                            groups.add(metrics.participant.group_str)
+                        if hasattr(metrics.participant, "timepoint_str"):
+                            timepoints.add(metrics.participant.timepoint_str)
 
                 summary_lines.append(f"Participants: {len(participants)}")
                 summary_lines.append(f"Groups: {len(groups)}")
@@ -278,7 +278,23 @@ class ExportTab(QWidget):
         self.include_headers_checkbox.stateChanged.connect(self.parent.save_export_options)
         layout.addWidget(self.include_headers_checkbox)
 
+        self.include_metadata_checkbox = QCheckBox("Include metadata (participant info, dates)")
+        self.include_metadata_checkbox.setChecked(bool(self.parent.config_manager.config.include_metadata))
+        self.include_metadata_checkbox.stateChanged.connect(self.parent.save_export_options)
+        layout.addWidget(self.include_metadata_checkbox)
+
+        self.separate_nonwear_file_checkbox = QCheckBox("Export nonwear markers to separate file")
+        self.separate_nonwear_file_checkbox.setChecked(bool(getattr(self.parent.config_manager.config, "export_nonwear_separate", True)))
+        self.separate_nonwear_file_checkbox.setToolTip(
+            "When enabled, manual nonwear markers will be exported to a separate CSV file\n"
+            "instead of being included as columns in the sleep data export."
+        )
+        self.separate_nonwear_file_checkbox.stateChanged.connect(self.parent.save_export_options)
+        layout.addWidget(self.separate_nonwear_file_checkbox)
+
         # Store reference in parent for backward compatibility
         self.parent.include_headers_checkbox = self.include_headers_checkbox
+        self.parent.include_metadata_checkbox = self.include_metadata_checkbox
+        self.parent.separate_nonwear_file_checkbox = self.separate_nonwear_file_checkbox
 
         return group

@@ -738,8 +738,8 @@ class DiaryService(QObject):
                     filename,
                     str(file_path),
                     participant_info.numerical_id,
-                    participant_info.group,
-                    participant_info.timepoint,
+                    participant_info.group_str,
+                    participant_info.timepoint_str,
                     file_hash,
                     file_stat.st_size,
                     datetime.fromtimestamp(file_stat.st_mtime).isoformat(),
@@ -1256,7 +1256,7 @@ class DiaryService(QObject):
 
         # Use full participant info instead of just numerical ID
         info = extract_participant_info(filename)
-        return info.full_id if info.numerical_id != "Unknown" else None
+        return info.full_id if info.numerical_id != "UNKNOWN" else None
 
     def extract_participant_info_from_filename(self, filename: str) -> ParticipantInfo | None:
         """Extract full participant info from filename using centralized extractor."""

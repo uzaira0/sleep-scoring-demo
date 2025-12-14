@@ -14,6 +14,7 @@ from PyQt6.QtCore import Qt, QTime, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import (
     QComboBox,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QInputDialog,
@@ -31,10 +32,23 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from sleep_scoring_app.core.algorithms.factory import AlgorithmFactory
-from sleep_scoring_app.core.algorithms.nonwear_factory import NonwearAlgorithmFactory
-from sleep_scoring_app.core.algorithms.onset_offset_factory import OnsetOffsetRuleFactory
-from sleep_scoring_app.core.constants import ActivityDataPreference
+from sleep_scoring_app.core.algorithms import (
+    AlgorithmFactory,
+    NonwearAlgorithmFactory,
+    SleepPeriodDetectorFactory,
+)
+from sleep_scoring_app.core.constants import (
+    ActivityDataPreference,
+    AlgorithmHelpText,
+    AlgorithmTooltip,
+    ParadigmInfoText,
+    ParadigmLabel,
+    ParadigmStyle,
+    ParadigmTooltip,
+    ParadigmWarning,
+    SettingsSection,
+    StudyDataParadigm,
+)
 
 if TYPE_CHECKING:
     from sleep_scoring_app.ui.main_window import SleepScoringMainWindow
@@ -142,7 +156,7 @@ class StudySettingsTab(QWidget):
         # Add explanation header
         header_label = QLabel(
             "<b>Study Configuration</b><br>"
-            "Configure study parameters such as default groups, timepoints, valid values, and "
+            "Configure study parameters such as data paradigm, default groups, timepoints, valid values, and "
             "regex patterns for participant information extraction. These settings affect how "
             "participant information is extracted and displayed.",
         )
@@ -150,7 +164,11 @@ class StudySettingsTab(QWidget):
         header_label.setStyleSheet("QLabel { background-color: #f0f0f0; padding: 10px; border-radius: 5px; }")
         content_layout.addWidget(header_label)
 
-        # Regex Patterns Section (Top Priority)
+        # Data Paradigm Section (TOP PRIORITY - First thing users see)
+        paradigm_group = self._create_data_paradigm_section()
+        content_layout.addWidget(paradigm_group)
+
+        # Regex Patterns Section
         regex_patterns_group = self._create_regex_patterns_section()
         content_layout.addWidget(regex_patterns_group)
 
@@ -224,9 +242,109 @@ class StudySettingsTab(QWidget):
             self.valid_groups_list.items_changed.connect(self._update_id_test_results)
             self.valid_timepoints_list.items_changed.connect(self._update_id_test_results)
 
+    def _create_data_paradigm_section(self) -> QGroupBox:
+        """Create the Data Paradigm section - FIRST and MOST IMPORTANT setting."""
+        group_box = QGroupBox(SettingsSection.DATA_PARADIGM)
+        group_box.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 13px;
+                border: 3px solid #3498db;
+                border-radius: 8px;
+                margin-top: 1ex;
+                padding-top: 15px;
+                background-color: #f8f9fa;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+                color: #2c3e50;
+            }
+        """)
+        layout = QVBoxLayout(group_box)
+        layout.setSpacing(15)
+
+        # Description
+        description_label = QLabel(
+            "<b>Select the type of data files you will use for this study.</b><br>"
+            "This is the <b>most important setting</b> and controls which file types you can import "
+            "and which algorithms are available. Choose carefully based on your data source."
+        )
+        description_label.setWordWrap(True)
+        description_label.setStyleSheet("QLabel { color: #2c3e50; font-size: 12px; margin-bottom: 10px; background: transparent; }")
+        layout.addWidget(description_label)
+
+        # Paradigm selection with prominent radio-button-style display
+        paradigm_selection_layout = QVBoxLayout()
+        paradigm_selection_layout.setSpacing(10)
+
+        # Paradigm label
+        paradigm_label = QLabel("Data Paradigm:")
+        paradigm_label.setStyleSheet(ParadigmStyle.SECTION_TITLE)
+        paradigm_selection_layout.addWidget(paradigm_label)
+
+        # Combo box for paradigm selection
+        self.data_paradigm_combo = QComboBox()
+        self.data_paradigm_combo.setStyleSheet("""
+            QComboBox {
+                font-size: 12px;
+                font-weight: bold;
+                padding: 8px;
+                border: 2px solid #3498db;
+                border-radius: 4px;
+                background-color: white;
+                min-width: 300px;
+            }
+            QComboBox:hover {
+                border: 2px solid #2980b9;
+                background-color: #ecf0f1;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 30px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 8px solid #3498db;
+                margin-right: 8px;
+            }
+        """)
+
+        # Populate paradigm options from enum
+        for paradigm in StudyDataParadigm:
+            self.data_paradigm_combo.addItem(paradigm.get_display_name(), paradigm.value)
+
+        self.data_paradigm_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.data_paradigm_combo.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.data_paradigm_combo.setToolTip(f"{ParadigmTooltip.COMBO_BOX}\n\n{ParadigmTooltip.EPOCH_BASED}\n\n{ParadigmTooltip.RAW_ACCELEROMETER}")
+        paradigm_selection_layout.addWidget(self.data_paradigm_combo)
+
+        layout.addLayout(paradigm_selection_layout)
+
+        # Paradigm info label (dynamically updated based on selection)
+        self.paradigm_info_label = QLabel()
+        self.paradigm_info_label.setWordWrap(True)
+        self.paradigm_info_label.setStyleSheet(ParadigmStyle.INFO_LABEL)
+        self._update_paradigm_info_label()
+        layout.addWidget(self.paradigm_info_label)
+
+        # Add warning about paradigm changes
+        warning_label = QLabel(
+            "⚠️ <b>Important:</b> Changing the paradigm after importing data may require "
+            "re-importing files to ensure compatibility with the selected paradigm."
+        )
+        warning_label.setWordWrap(True)
+        warning_label.setStyleSheet(ParadigmStyle.WARNING_BOX)
+        layout.addWidget(warning_label)
+
+        return group_box
+
     def _create_regex_patterns_section(self) -> QGroupBox:
         """Create the regex patterns configuration section."""
-        group_box = QGroupBox("Participant Information Patterns")
+        group_box = QGroupBox(SettingsSection.PARTICIPANT_IDENTIFICATION)
         layout = QVBoxLayout(group_box)
 
         # Description
@@ -299,7 +417,7 @@ class StudySettingsTab(QWidget):
 
     def _create_id_testing_section(self) -> QGroupBox:
         """Create the live ID testing section."""
-        group_box = QGroupBox("Live ID Pattern Testing")
+        group_box = QGroupBox(SettingsSection.LIVE_ID_TESTING)
         layout = QVBoxLayout(group_box)
 
         # Description
@@ -344,7 +462,7 @@ class StudySettingsTab(QWidget):
 
     def _create_study_parameters_section(self) -> QGroupBox:
         """Create the study parameters configuration section."""
-        group_box = QGroupBox("Study Parameters")
+        group_box = QGroupBox(SettingsSection.STUDY_PARAMETERS)
         layout = QVBoxLayout(group_box)
 
         # Unknown Value Placeholder
@@ -364,7 +482,7 @@ class StudySettingsTab(QWidget):
 
     def _create_valid_values_section(self) -> QGroupBox:
         """Create the valid groups and timepoints configuration section."""
-        group_box = QGroupBox("Valid Groups and Timepoints")
+        group_box = QGroupBox(SettingsSection.VALID_VALUES)
         group_box.setStyleSheet("""
             QGroupBox {
                 font-weight: bold;
@@ -604,7 +722,7 @@ class StudySettingsTab(QWidget):
 
     def _create_default_selection_section(self) -> QGroupBox:
         """Create the default selection section with intelligent dropdowns."""
-        group_box = QGroupBox("Default Selection")
+        group_box = QGroupBox(SettingsSection.DEFAULT_SELECTION)
         layout = QHBoxLayout(group_box)
 
         # Default Group Selection
@@ -646,41 +764,34 @@ class StudySettingsTab(QWidget):
 
     def _create_algorithm_configuration_section(self) -> QGroupBox:
         """Create the algorithm configuration section."""
-        group_box = QGroupBox("Algorithm Configuration")
+        group_box = QGroupBox(SettingsSection.ALGORITHM_SETTINGS)
         layout = QVBoxLayout(group_box)
         layout.setSpacing(15)
 
-        # Sleep Scoring Algorithm Selection (DI pattern)
+        # Note: Data Paradigm selection is now in its own prominent section at the top of the tab
+
+        # ========== Sleep/Wake Algorithm Selection ==========
         algorithm_layout = QVBoxLayout()
 
-        algorithm_label = QLabel("<b>Sleep Scoring Algorithm:</b>")
-        algorithm_label.setStyleSheet("QLabel { color: #2c3e50; margin-bottom: 5px; }")
+        algorithm_label = QLabel("<b>Sleep/Wake Algorithm:</b>")
+        algorithm_label.setStyleSheet(ParadigmStyle.LABEL)
         algorithm_layout.addWidget(algorithm_label)
 
         algorithm_row = QHBoxLayout()
         self.sleep_algorithm_combo = QComboBox()
 
-        # Populate from factory
-        available_algorithms = AlgorithmFactory.get_available_algorithms()
-        for algo_id, algo_name in available_algorithms.items():
-            self.sleep_algorithm_combo.addItem(algo_name, algo_id)
+        # Populate from factory - filtered by current paradigm
+        self._populate_algorithm_combo()
 
         self.sleep_algorithm_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.sleep_algorithm_combo.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        self.sleep_algorithm_combo.setToolTip(
-            "Select the sleep scoring algorithm to use.\n"
-            "• Sadeh (1994): Classic algorithm using axis Y activity counts\n"
-            "• Cole-Kripke (1992): Alternative algorithm with 7-minute sliding window"
-        )
+        self.sleep_algorithm_combo.setToolTip(AlgorithmTooltip.SLEEP_ALGORITHM_COMBO)
         algorithm_row.addWidget(self.sleep_algorithm_combo)
         algorithm_row.addStretch()
         algorithm_layout.addLayout(algorithm_row)
 
         # Algorithm info label
-        algorithm_help = QLabel(
-            "The sleep scoring algorithm determines how each epoch is classified as Sleep or Wake. "
-            "Different algorithms may produce slightly different results. Sadeh (1994) is the most commonly used."
-        )
+        algorithm_help = QLabel(AlgorithmHelpText.SLEEP_ALGORITHM)
         algorithm_help.setWordWrap(True)
         algorithm_help.setStyleSheet("QLabel { color: #7f8c8d; font-size: 11px; font-style: italic; }")
         algorithm_layout.addWidget(algorithm_help)
@@ -695,22 +806,19 @@ class StudySettingsTab(QWidget):
         rule_layout.addWidget(rule_label)
 
         rule_row = QHBoxLayout()
-        self.onset_offset_rule_combo = QComboBox()
+        self.sleep_period_detector_combo = QComboBox()
 
-        # Populate from factory
-        available_rules = OnsetOffsetRuleFactory.get_available_rules()
-        for rule_id, rule_name in available_rules.items():
-            self.onset_offset_rule_combo.addItem(rule_name, rule_id)
+        # Populate from factory - filtered by current paradigm
+        self._populate_sleep_period_detector_combo()
 
-        self.onset_offset_rule_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
-        self.onset_offset_rule_combo.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        self.onset_offset_rule_combo.setToolTip(
+        self.sleep_period_detector_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.sleep_period_detector_combo.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.sleep_period_detector_combo.setToolTip(
             "Select the rule for detecting sleep onset and offset times.\n"
-            "• Consecutive 3/5: 3 minutes consecutive sleep for onset, 5 for offset\n"
-            "• Consecutive 5/10: 5 minutes for onset, 10 for offset (stricter)\n"
-            "• Tudor-Locke (2014): Uses consecutive wake epochs for offset detection"
+            "• Epoch-based paradigm: Consecutive 3/5, Consecutive 5/10, Tudor-Locke (2014)\n"
+            "• Raw accelerometer paradigm: HDCZA (automatic SPT detection from z-angle)"
         )
-        rule_row.addWidget(self.onset_offset_rule_combo)
+        rule_row.addWidget(self.sleep_period_detector_combo)
         rule_row.addStretch()
         rule_layout.addLayout(rule_row)
 
@@ -794,10 +902,12 @@ class StudySettingsTab(QWidget):
 
         layout.addLayout(nonwear_layout)
 
-        # Choi Algorithm Axis Selection
-        choi_layout = QVBoxLayout()
+        # Choi Algorithm Axis Selection (wrapped in widget for show/hide)
+        self.choi_axis_widget = QWidget()
+        choi_layout = QVBoxLayout(self.choi_axis_widget)
+        choi_layout.setContentsMargins(0, 0, 0, 0)
 
-        choi_label = QLabel("<b>Nonwear Detection Axis:</b>")
+        choi_label = QLabel("<b>Choi Nonwear Detection Axis:</b>")
         choi_label.setStyleSheet("QLabel { color: #2c3e50; margin-bottom: 5px; }")
         choi_layout.addWidget(choi_label)
 
@@ -827,11 +937,12 @@ class StudySettingsTab(QWidget):
         choi_help.setStyleSheet("QLabel { color: #7f8c8d; font-size: 11px; font-style: italic; }")
         choi_layout.addWidget(choi_help)
 
-        layout.addLayout(choi_layout)
+        layout.addWidget(self.choi_axis_widget)
 
         # Connect signals for auto-save
+        self.data_paradigm_combo.currentIndexChanged.connect(self._on_data_paradigm_changed)
         self.sleep_algorithm_combo.currentIndexChanged.connect(self._on_sleep_algorithm_changed)
-        self.onset_offset_rule_combo.currentIndexChanged.connect(self._on_onset_offset_rule_changed)
+        self.sleep_period_detector_combo.currentIndexChanged.connect(self._on_sleep_period_detector_changed)
         self.night_start_time.timeChanged.connect(self._on_night_hours_changed)
         self.night_end_time.timeChanged.connect(self._on_night_hours_changed)
         self.nonwear_algorithm_combo.currentIndexChanged.connect(self._on_nonwear_algorithm_changed)
@@ -839,9 +950,22 @@ class StudySettingsTab(QWidget):
 
         return group_box
 
+    def _create_section_separator(self) -> QFrame:
+        """Create a horizontal line separator."""
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setFrameShadow(QFrame.Shadow.Sunken)
+        line.setStyleSheet("QFrame { color: #87CEEB; }")  # Light blue color
+        return line
+
     def _create_action_buttons(self) -> QHBoxLayout:
         """Create the action buttons layout."""
         layout = QHBoxLayout()
+
+        # Section label for clarity
+        config_label = QLabel(f"<b>{SettingsSection.IMPORT_EXPORT_CONFIG}:</b>")
+        config_label.setStyleSheet("QLabel { margin-right: 10px; }")
+        layout.addWidget(config_label)
 
         # Import/Export config buttons
         self.import_config_button = QPushButton("Import Config...")
@@ -858,12 +982,6 @@ class StudySettingsTab(QWidget):
         layout.addWidget(self.export_config_button)
 
         layout.addStretch()
-
-        self.apply_button = QPushButton("Apply Settings")
-        self.apply_button.clicked.connect(self._apply_settings)
-        self.apply_button.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-weight: bold; padding: 8px; }")
-
-        layout.addWidget(self.apply_button)
 
         return layout
 
@@ -934,6 +1052,21 @@ class StudySettingsTab(QWidget):
             self._validate_all_patterns()
 
             # Load algorithm configuration
+            # Load data paradigm selection (must be loaded before sleep algorithm)
+            if hasattr(self, "data_paradigm_combo"):
+                self.data_paradigm_combo.blockSignals(True)
+                current_paradigm = config.data_paradigm
+                for i in range(self.data_paradigm_combo.count()):
+                    if self.data_paradigm_combo.itemData(i) == current_paradigm:
+                        self.data_paradigm_combo.setCurrentIndex(i)
+                        break
+                self.data_paradigm_combo.blockSignals(False)
+                # Update the info label and repopulate algorithm combos
+                self._update_paradigm_info_label()
+                self._populate_algorithm_combo()
+                self._populate_nonwear_algorithm_combo()
+                self._populate_sleep_period_detector_combo()
+
             # Load sleep algorithm selection
             if hasattr(self, "sleep_algorithm_combo"):
                 self.sleep_algorithm_combo.blockSignals(True)
@@ -945,14 +1078,14 @@ class StudySettingsTab(QWidget):
                 self.sleep_algorithm_combo.blockSignals(False)
 
             # Load onset/offset rule selection
-            if hasattr(self, "onset_offset_rule_combo"):
-                self.onset_offset_rule_combo.blockSignals(True)
+            if hasattr(self, "sleep_period_detector_combo"):
+                self.sleep_period_detector_combo.blockSignals(True)
                 current_rule_id = config.onset_offset_rule_id
-                for i in range(self.onset_offset_rule_combo.count()):
-                    if self.onset_offset_rule_combo.itemData(i) == current_rule_id:
-                        self.onset_offset_rule_combo.setCurrentIndex(i)
+                for i in range(self.sleep_period_detector_combo.count()):
+                    if self.sleep_period_detector_combo.itemData(i) == current_rule_id:
+                        self.sleep_period_detector_combo.setCurrentIndex(i)
                         break
-                self.onset_offset_rule_combo.blockSignals(False)
+                self.sleep_period_detector_combo.blockSignals(False)
 
             # Load nonwear algorithm selection
             if hasattr(self, "nonwear_algorithm_combo"):
@@ -963,6 +1096,9 @@ class StudySettingsTab(QWidget):
                         self.nonwear_algorithm_combo.setCurrentIndex(i)
                         break
                 self.nonwear_algorithm_combo.blockSignals(False)
+
+                # Update Choi axis visibility based on loaded algorithm
+                self._update_choi_axis_visibility(current_nonwear_id)
 
             # Block signals during load to prevent save-on-load feedback loop
             self.night_start_time.blockSignals(True)
@@ -1185,103 +1321,6 @@ class StudySettingsTab(QWidget):
                 logger.debug("Default timepoint changed to: %s", text)
             except Exception as e:
                 logger.exception("Error saving default timepoint: %s", e)
-
-    def _apply_settings(self) -> None:
-        """Apply the current settings to configuration."""
-        try:
-            # Get current values
-            default_group = self.default_group_combo.currentText()
-            default_timepoint = self.default_timepoint_combo.currentText()
-            unknown_value = self.unknown_value_edit.text().strip()
-
-            # Get valid groups and timepoints using the new list methods
-            valid_groups = self.valid_groups_list.get_all_items()
-            valid_timepoints = self.valid_timepoints_list.get_all_items()
-
-            # STRICT VALIDATION - All fields must be properly configured
-            validation_errors = []
-
-            if not valid_groups:
-                validation_errors.append("• At least one valid group must be specified.")
-
-            if not valid_timepoints:
-                validation_errors.append("• At least one valid timepoint must be specified.")
-
-            if not unknown_value:
-                validation_errors.append("• Unknown value placeholder must be specified.")
-
-            # Get regex patterns
-            id_pattern = self.id_pattern_edit.text().strip()
-            timepoint_pattern = self.timepoint_pattern_edit.text().strip()
-            group_pattern = self.group_pattern_edit.text().strip()
-
-            # Require at least ID pattern for participant extraction
-            if not id_pattern:
-                validation_errors.append("• ID pattern is required for participant extraction.")
-
-            # Validate regex patterns before saving
-            if id_pattern:
-                try:
-                    re.compile(id_pattern)
-                except re.error as e:
-                    validation_errors.append(f"• ID Pattern invalid: {e}")
-
-            if timepoint_pattern:
-                try:
-                    re.compile(timepoint_pattern)
-                except re.error as e:
-                    validation_errors.append(f"• Timepoint Pattern invalid: {e}")
-
-            if group_pattern:
-                try:
-                    re.compile(group_pattern)
-                except re.error as e:
-                    validation_errors.append(f"• Group Pattern invalid: {e}")
-
-            # Validate default selections (skip placeholder texts)
-            if not default_group or default_group.startswith("--"):
-                validation_errors.append("• Default group must be selected from valid groups.")
-
-            if not default_timepoint or default_timepoint.startswith("--"):
-                validation_errors.append("• Default timepoint must be selected from valid timepoints.")
-
-            # Check that defaults are in the valid lists (only if they're real selections)
-            if default_group and not default_group.startswith("--") and default_group not in valid_groups:
-                validation_errors.append(f"• Default group '{default_group}' is not in the valid groups list.")
-
-            if default_timepoint and not default_timepoint.startswith("--") and default_timepoint not in valid_timepoints:
-                validation_errors.append(f"• Default timepoint '{default_timepoint}' is not in the valid timepoints list.")
-
-            # Show all validation errors at once
-            if validation_errors:
-                error_message = "Configuration is incomplete. Please fix the following issues:\n\n" + "\n".join(validation_errors)
-                error_message += "\n\n⚠️  All fields must be properly configured to ensure reliable participant extraction."
-                QMessageBox.warning(self, "Configuration Incomplete", error_message)
-                return
-
-            # Prepare participant ID patterns list - NO FALLBACKS, only user-defined patterns
-            participant_id_patterns = []
-            if id_pattern:
-                participant_id_patterns.append(id_pattern)
-
-            # Update configuration
-            self.parent.config_manager.update_study_settings(
-                default_group=default_group,
-                default_timepoint=default_timepoint,
-                valid_groups=valid_groups,
-                valid_timepoints=valid_timepoints,
-                unknown_value=unknown_value,
-                group_pattern=group_pattern,
-                timepoint_pattern=timepoint_pattern,
-                participant_id_patterns=participant_id_patterns,
-            )
-
-            QMessageBox.information(self, "Settings Applied", "Study settings have been saved successfully.")
-            logger.info("Study settings applied successfully")
-
-        except Exception as e:
-            logger.exception("Error applying study settings: %s", e)
-            QMessageBox.critical(self, "Error", f"Error applying study settings: {e}")
 
     # ============================================================================
     # AUTO-SAVE METHODS FOR GUI ELEMENTS
@@ -1580,8 +1619,8 @@ class StudySettingsTab(QWidget):
                     <span style="color: {color};">{icon} ID:</span> {status}<br>
                 """
 
-                # Group result
-                group_value = participant_info.group
+                # Group result - use group_str for the actual extracted value
+                group_value = participant_info.group_str
                 if group_value.upper() in [g.upper() for g in valid_groups]:
                     color = "#28a745"  # green
                     icon = "✓"
@@ -1599,8 +1638,8 @@ class StudySettingsTab(QWidget):
                     <span style="color: {color};">{icon} Group:</span> {status}<br>
                 """
 
-                # Timepoint result
-                timepoint_value = participant_info.timepoint
+                # Timepoint result - use timepoint_str for the actual extracted value
+                timepoint_value = participant_info.timepoint_str
                 if timepoint_value.upper() in [tp.upper() for tp in valid_timepoints]:
                     color = "#28a745"  # green
                     icon = "✓"
@@ -1616,25 +1655,6 @@ class StudySettingsTab(QWidget):
 
                 results_html += f"""
                     <span style="color: {color};">{icon} Timepoint:</span> {status}<br><br>
-                """
-
-                # Summary based on confidence
-                confidence = participant_info.confidence
-                if confidence >= 0.8:
-                    summary_color = "#28a745"
-                    summary_icon = "✓"
-                    summary_text = f"High confidence extraction ({confidence:.1%})"
-                elif confidence >= 0.5:
-                    summary_color = "#ffc107"
-                    summary_icon = "⚠"
-                    summary_text = f"Medium confidence extraction ({confidence:.1%})"
-                else:
-                    summary_color = "#dc3545"
-                    summary_icon = "✗"
-                    summary_text = f"Low confidence extraction ({confidence:.1%})"
-
-                results_html += f"""
-                    <b><span style="color: {summary_color};">{summary_icon} Overall:</span></b> {summary_text}
                 """
 
                 results_html += "</div>"
@@ -1685,6 +1705,185 @@ class StudySettingsTab(QWidget):
                 logger.exception("Error resetting patterns: %s", e)
                 QMessageBox.critical(self, "Error", f"Error resetting patterns: {e}")
 
+    def _get_current_paradigm(self) -> StudyDataParadigm:
+        """Get the currently selected data paradigm."""
+        paradigm_value = self.data_paradigm_combo.currentData()
+        try:
+            return StudyDataParadigm(paradigm_value)
+        except ValueError:
+            return StudyDataParadigm.get_default()
+
+    def _update_paradigm_info_label(self) -> None:
+        """Update the paradigm info label based on current selection."""
+        paradigm = self._get_current_paradigm()
+        if paradigm == StudyDataParadigm.EPOCH_BASED:
+            self.paradigm_info_label.setText(ParadigmInfoText.EPOCH_BASED_INFO)
+        else:
+            self.paradigm_info_label.setText(ParadigmInfoText.RAW_ACCELEROMETER_INFO)
+
+    def _populate_algorithm_combo(self) -> None:
+        """Populate sleep algorithm combo based on current paradigm."""
+        # Block signals to prevent triggering change handler during repopulation
+        self.sleep_algorithm_combo.blockSignals(True)
+
+        # Store current selection if any
+        current_algo_id = self.sleep_algorithm_combo.currentData()
+
+        # Clear and repopulate
+        self.sleep_algorithm_combo.clear()
+
+        paradigm = self._get_current_paradigm()
+        available_algorithms = AlgorithmFactory.get_available_algorithms()
+
+        for algo_id, algo_name in available_algorithms.items():
+            if paradigm.is_algorithm_compatible(algo_id):
+                self.sleep_algorithm_combo.addItem(algo_name, algo_id)
+
+        # Try to restore previous selection if still compatible
+        if current_algo_id and paradigm.is_algorithm_compatible(current_algo_id):
+            for i in range(self.sleep_algorithm_combo.count()):
+                if self.sleep_algorithm_combo.itemData(i) == current_algo_id:
+                    self.sleep_algorithm_combo.setCurrentIndex(i)
+                    break
+
+        self.sleep_algorithm_combo.blockSignals(False)
+
+    def _populate_nonwear_algorithm_combo(self) -> None:
+        """Populate nonwear algorithm combo based on current paradigm."""
+        if not hasattr(self, "nonwear_algorithm_combo"):
+            return
+
+        # Block signals to prevent triggering change handler during repopulation
+        self.nonwear_algorithm_combo.blockSignals(True)
+
+        # Store current selection if any
+        current_algo_id = self.nonwear_algorithm_combo.currentData()
+
+        # Clear and repopulate
+        self.nonwear_algorithm_combo.clear()
+
+        paradigm = self._get_current_paradigm()
+        available_algorithms = NonwearAlgorithmFactory.get_algorithms_for_paradigm(paradigm.value)
+
+        for algo_id, algo_name in available_algorithms.items():
+            self.nonwear_algorithm_combo.addItem(algo_name, algo_id)
+
+        # Try to restore previous selection if still compatible
+        restored = False
+        if current_algo_id and current_algo_id in available_algorithms:
+            for i in range(self.nonwear_algorithm_combo.count()):
+                if self.nonwear_algorithm_combo.itemData(i) == current_algo_id:
+                    self.nonwear_algorithm_combo.setCurrentIndex(i)
+                    restored = True
+                    break
+
+        # Update Choi axis visibility based on final selection
+        final_algo_id = self.nonwear_algorithm_combo.currentData() if self.nonwear_algorithm_combo.count() > 0 else None
+        if final_algo_id:
+            self._update_choi_axis_visibility(final_algo_id)
+
+        self.nonwear_algorithm_combo.blockSignals(False)
+
+    def _populate_sleep_period_detector_combo(self) -> None:
+        """Populate sleep period detector combo based on current paradigm."""
+        if not hasattr(self, "sleep_period_detector_combo"):
+            return
+
+        # Block signals to prevent triggering change handler during repopulation
+        self.sleep_period_detector_combo.blockSignals(True)
+
+        # Store current selection if any
+        current_detector_id = self.sleep_period_detector_combo.currentData()
+
+        # Clear and repopulate
+        self.sleep_period_detector_combo.clear()
+
+        paradigm = self._get_current_paradigm()
+        available_detectors = SleepPeriodDetectorFactory.get_detectors_for_paradigm(paradigm.value)
+
+        for detector_id, detector_name in available_detectors.items():
+            self.sleep_period_detector_combo.addItem(detector_name, detector_id)
+
+        # Try to restore previous selection if still compatible
+        if current_detector_id and current_detector_id in available_detectors:
+            for i in range(self.sleep_period_detector_combo.count()):
+                if self.sleep_period_detector_combo.itemData(i) == current_detector_id:
+                    self.sleep_period_detector_combo.setCurrentIndex(i)
+                    break
+
+        self.sleep_period_detector_combo.blockSignals(False)
+
+    def _on_data_paradigm_changed(self, index: int) -> None:
+        """Handle data paradigm selection change with confirmation."""
+        try:
+            new_paradigm_value = self.data_paradigm_combo.itemData(index)
+            new_paradigm = StudyDataParadigm(new_paradigm_value)
+
+            # Get current paradigm from config
+            current_paradigm_value = None
+            if self.parent and self.parent.config_manager and self.parent.config_manager.config:
+                current_paradigm_value = self.parent.config_manager.config.data_paradigm
+
+            # If paradigm hasn't changed, just update UI
+            if new_paradigm_value == current_paradigm_value:
+                self._update_paradigm_info_label()
+                return
+
+            # Check if data has been imported
+            has_imported_data = False
+            if hasattr(self.parent, "db_manager"):
+                try:
+                    # Check if there are any imported files
+                    file_count = self.parent.db_manager.get_imported_file_count()
+                    has_imported_data = file_count > 0
+                except Exception:
+                    pass
+
+            # Show confirmation dialog
+            message = ParadigmWarning.RESET_RECOMMENDED
+            if has_imported_data:
+                message = f"{ParadigmWarning.DATA_EXISTS}\n\n{ParadigmWarning.RESET_RECOMMENDED}"
+
+            reply = QMessageBox.question(
+                self,
+                ParadigmWarning.TITLE,
+                message,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+
+            if reply != QMessageBox.StandardButton.Yes:
+                # User canceled - revert combo box to previous value
+                self.data_paradigm_combo.blockSignals(True)
+                for i in range(self.data_paradigm_combo.count()):
+                    if self.data_paradigm_combo.itemData(i) == current_paradigm_value:
+                        self.data_paradigm_combo.setCurrentIndex(i)
+                        break
+                self.data_paradigm_combo.blockSignals(False)
+                return
+
+            # User confirmed - proceed with paradigm change
+            # Update info label
+            self._update_paradigm_info_label()
+
+            # Repopulate algorithm combos with compatible algorithms
+            self._populate_algorithm_combo()
+            self._populate_nonwear_algorithm_combo()
+            self._populate_sleep_period_detector_combo()
+
+            # Save to config
+            if self.parent and self.parent.config_manager and self.parent.config_manager.config:
+                self.parent.config_manager.config.data_paradigm = new_paradigm_value
+                self.parent.config_manager.save_config()
+                logger.info("Data paradigm changed to: %s", new_paradigm.get_display_name())
+
+            # Update Data Settings tab to filter available loaders
+            if hasattr(self.parent, "data_settings_tab") and self.parent.data_settings_tab:
+                self.parent.data_settings_tab.update_loaders_for_paradigm(new_paradigm)
+
+        except Exception as e:
+            logger.exception("Error changing data paradigm: %s", e)
+
     def _on_sleep_algorithm_changed(self, index: int) -> None:
         """Handle sleep algorithm selection change."""
         try:
@@ -1693,7 +1892,11 @@ class StudySettingsTab(QWidget):
                 algorithm_name = self.sleep_algorithm_combo.itemText(index)
                 self.parent.config_manager.config.sleep_algorithm_id = algorithm_id
                 self.parent.config_manager.save_config()
-                logger.info("Sleep scoring algorithm changed to: %s (%s)", algorithm_name, algorithm_id)
+                logger.info("Sleep/wake algorithm changed to: %s (%s)", algorithm_name, algorithm_id)
+
+                # Update compatibility helper
+                if hasattr(self.parent, "compatibility_helper"):
+                    self.parent.compatibility_helper.on_algorithm_changed(algorithm_id)
 
                 # Create new algorithm instance and update PlotAlgorithmManager
                 if hasattr(self.parent, "plot_widget") and self.parent.plot_widget:
@@ -1716,15 +1919,21 @@ class StudySettingsTab(QWidget):
 
                         pw.update()
                         logger.info("Recalculated with new algorithm: %s", algorithm_name)
+
+                # Update side table headers to reflect the new algorithm name
+                if hasattr(self.parent, "table_manager") and self.parent.table_manager:
+                    self.parent.table_manager.update_table_headers_for_algorithm()
+                    logger.debug("Updated table headers for algorithm: %s", algorithm_name)
+
         except Exception as e:
             logger.exception("Error changing sleep algorithm: %s", e)
 
-    def _on_onset_offset_rule_changed(self, index: int) -> None:
-        """Handle onset/offset rule selection change."""
+    def _on_sleep_period_detector_changed(self, index: int) -> None:
+        """Handle sleep period detector selection change."""
         try:
             if self.parent and self.parent.config_manager and self.parent.config_manager.config:
-                rule_id = self.onset_offset_rule_combo.itemData(index)
-                rule_name = self.onset_offset_rule_combo.itemText(index)
+                rule_id = self.sleep_period_detector_combo.itemData(index)
+                rule_name = self.sleep_period_detector_combo.itemText(index)
                 self.parent.config_manager.config.onset_offset_rule_id = rule_id
                 self.parent.config_manager.save_config()
                 logger.info("Onset/offset rule changed to: %s (%s)", rule_name, rule_id)
@@ -1733,10 +1942,9 @@ class StudySettingsTab(QWidget):
                 if hasattr(self.parent, "plot_widget") and self.parent.plot_widget:
                     pw = self.parent.plot_widget
                     if hasattr(pw, "algorithm_manager"):
-                        # Create rule from factory with current config
-                        config = self.parent.config_manager.config
-                        rule = OnsetOffsetRuleFactory.create(rule_id, config)
-                        pw.algorithm_manager.set_onset_offset_rule(rule)
+                        # Create rule from factory (no config needed - uses preset)
+                        detector = SleepPeriodDetectorFactory.create(rule_id)
+                        pw.algorithm_manager.set_sleep_period_detector(detector)
 
                         # Reapply sleep scoring rules if markers exist
                         if hasattr(pw, "marker_renderer") and hasattr(pw, "daily_sleep_markers"):
@@ -1772,6 +1980,9 @@ class StudySettingsTab(QWidget):
                 self.parent.config_manager.save_config()
                 logger.info("Nonwear detection algorithm changed to: %s", algo_id)
 
+                # Show/hide Choi axis widget based on selected algorithm
+                self._update_choi_axis_visibility(algo_id)
+
                 # Recalculate nonwear detection with new algorithm
                 if hasattr(self.parent, "plot_widget") and self.parent.plot_widget:
                     pw = self.parent.plot_widget
@@ -1791,6 +2002,20 @@ class StudySettingsTab(QWidget):
                             logger.info("Recalculated nonwear detection with algorithm: %s", algo_id)
         except Exception as e:
             logger.exception("Error changing nonwear algorithm: %s", e)
+
+    def _update_choi_axis_visibility(self, nonwear_algorithm_id: str) -> None:
+        """
+        Show/hide the Choi axis widget based on selected nonwear algorithm.
+
+        Args:
+            nonwear_algorithm_id: The currently selected nonwear algorithm ID.
+
+        """
+        if hasattr(self, "choi_axis_widget"):
+            # Only show Choi axis options when Choi algorithm is selected
+            is_choi = nonwear_algorithm_id == "choi_2011"
+            self.choi_axis_widget.setVisible(is_choi)
+            logger.debug("Choi axis widget visibility set to: %s", is_choi)
 
     def _on_choi_axis_changed(self, index: int) -> None:
         """Handle Choi axis selection change."""

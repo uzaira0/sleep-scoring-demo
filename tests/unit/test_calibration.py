@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sleep_scoring_app.core.algorithms.calibration import (
+from sleep_scoring_app.preprocessing.calibration import (
     CalibrationConfig,
     CalibrationResult,
     apply_calibration,

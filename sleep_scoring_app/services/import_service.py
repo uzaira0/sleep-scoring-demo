@@ -691,8 +691,8 @@ class ImportService(QObject):
                 str(file_path),
                 participant_info.participant_key,  # Add composite key
                 participant_info.numerical_id,
-                participant_info.group,
-                participant_info.timepoint,
+                participant_info.group_str,
+                participant_info.timepoint_str,
                 file_stat.st_size,
                 file_hash,
                 date_start,
@@ -766,8 +766,8 @@ class ImportService(QObject):
                         filename,
                         participant_info.participant_key,  # Add composite key
                         participant_info.numerical_id,
-                        participant_info.group,
-                        participant_info.timepoint,
+                        participant_info.group_str,
+                        participant_info.timepoint_str,
                         timestamps[i],
                         axis_y_value,  # AXIS_Y (vertical - primary for Sadeh algorithm)
                         axis_x_value,  # AXIS_X (lateral)

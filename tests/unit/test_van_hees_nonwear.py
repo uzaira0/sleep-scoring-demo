@@ -11,8 +11,7 @@ from datetime import datetime, timedelta
 import numpy as np
 import pytest
 
-from sleep_scoring_app.core.algorithms.nonwear_detection_protocol import NonwearDetectionAlgorithm
-from sleep_scoring_app.core.algorithms.van_hees import VanHeesNonwearAlgorithm
+from sleep_scoring_app.core.algorithms import NonwearDetectionAlgorithm, VanHeesNonwearAlgorithm
 
 
 class TestVanHeesAlgorithmCreation:
@@ -292,7 +291,7 @@ class TestVanHeesAlgorithmFactoryIntegration:
 
     def test_factory_creates_van_hees_algorithm(self) -> None:
         """Test factory can create van Hees algorithm."""
-        from sleep_scoring_app.core.algorithms.nonwear_factory import NonwearAlgorithmFactory
+        from sleep_scoring_app.core.algorithms import NonwearAlgorithmFactory
 
         algorithm = NonwearAlgorithmFactory.create("van_hees_2023")
         assert algorithm is not None
@@ -301,14 +300,14 @@ class TestVanHeesAlgorithmFactoryIntegration:
 
     def test_factory_returns_van_hees_instance(self) -> None:
         """Test factory returns VanHeesNonwearAlgorithm instance."""
-        from sleep_scoring_app.core.algorithms.nonwear_factory import NonwearAlgorithmFactory
+        from sleep_scoring_app.core.algorithms import NonwearAlgorithmFactory
 
         algorithm = NonwearAlgorithmFactory.create("van_hees_2023")
         assert isinstance(algorithm, VanHeesNonwearAlgorithm)
 
     def test_factory_registered_in_available_algorithms(self) -> None:
         """Test van Hees algorithm is listed in available algorithms."""
-        from sleep_scoring_app.core.algorithms.nonwear_factory import NonwearAlgorithmFactory
+        from sleep_scoring_app.core.algorithms import NonwearAlgorithmFactory
 
         available = NonwearAlgorithmFactory.get_available_algorithms()
         assert "van_hees_2023" in available
@@ -316,13 +315,13 @@ class TestVanHeesAlgorithmFactoryIntegration:
 
     def test_factory_is_registered_returns_true(self) -> None:
         """Test factory reports van Hees as registered."""
-        from sleep_scoring_app.core.algorithms.nonwear_factory import NonwearAlgorithmFactory
+        from sleep_scoring_app.core.algorithms import NonwearAlgorithmFactory
 
         assert NonwearAlgorithmFactory.is_registered("van_hees_2023") is True
 
     def test_factory_creates_with_default_parameters(self) -> None:
         """Test factory creates algorithm with correct default parameters."""
-        from sleep_scoring_app.core.algorithms.nonwear_factory import NonwearAlgorithmFactory
+        from sleep_scoring_app.core.algorithms import NonwearAlgorithmFactory
 
         algorithm = NonwearAlgorithmFactory.create("van_hees_2023")
         params = algorithm.get_parameters()

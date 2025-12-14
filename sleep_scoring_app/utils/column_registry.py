@@ -535,89 +535,32 @@ class ColumnRegistry:
             ),
         )
 
-        # Choi algorithm columns (nonwear detection)
+        # Overlapping nonwear minutes during sleep period
         self.register(
             ColumnDefinition(
-                name="choi_onset",
-                display_name="Nonwear Algorithm Value at Onset",
+                name="overlapping_nonwear_minutes_algorithm",
+                display_name="Overlapping Nonwear Minutes (Algorithm)",
                 column_type=ColumnType.ALGORITHM,
-                data_type=DataType.FLOAT,
-                database_column=DatabaseColumn.CHOI_ONSET,
-                export_column=ExportColumn.CHOI_ONSET,
+                data_type=DataType.INTEGER,
+                database_column=DatabaseColumn.OVERLAPPING_NONWEAR_MINUTES_ALGORITHM,
+                export_column=ExportColumn.OVERLAPPING_NONWEAR_MINUTES_ALGORITHM,
                 is_exportable=True,
                 ui_order=403,
-                ui_group="Algorithm Results",
+                ui_group="Nonwear",
             ),
         )
 
         self.register(
             ColumnDefinition(
-                name="choi_offset",
-                display_name="Nonwear Algorithm Value at Offset",
+                name="overlapping_nonwear_minutes_sensor",
+                display_name="Overlapping Nonwear Minutes (Sensor)",
                 column_type=ColumnType.ALGORITHM,
-                data_type=DataType.FLOAT,
-                database_column=DatabaseColumn.CHOI_OFFSET,
-                export_column=ExportColumn.CHOI_OFFSET,
+                data_type=DataType.INTEGER,
+                database_column=DatabaseColumn.OVERLAPPING_NONWEAR_MINUTES_SENSOR,
+                export_column=ExportColumn.OVERLAPPING_NONWEAR_MINUTES_SENSOR,
                 is_exportable=True,
                 ui_order=404,
-                ui_group="Algorithm Results",
-            ),
-        )
-
-        self.register(
-            ColumnDefinition(
-                name="total_choi_counts",
-                display_name="Total Nonwear Algorithm Counts",
-                column_type=ColumnType.ALGORITHM,
-                data_type=DataType.FLOAT,
-                database_column=DatabaseColumn.TOTAL_CHOI_COUNTS,
-                export_column=ExportColumn.TOTAL_CHOI_COUNTS,
-                is_exportable=True,
-                ui_order=405,
-                ui_group="Algorithm Results",
-            ),
-        )
-
-        # NWT sensor data columns
-        self.register(
-            ColumnDefinition(
-                name="nwt_onset",
-                display_name="Nonwear Sensor Value at Onset",
-                column_type=ColumnType.ALGORITHM,
-                data_type=DataType.FLOAT,
-                database_column=DatabaseColumn.NWT_ONSET,
-                export_column=ExportColumn.NWT_ONSET,
-                is_exportable=True,
-                ui_order=406,
-                ui_group="Algorithm Results",
-            ),
-        )
-
-        self.register(
-            ColumnDefinition(
-                name="nwt_offset",
-                display_name="Nonwear Sensor Value at Offset",
-                column_type=ColumnType.ALGORITHM,
-                data_type=DataType.FLOAT,
-                database_column=DatabaseColumn.NWT_OFFSET,
-                export_column=ExportColumn.NWT_OFFSET,
-                is_exportable=True,
-                ui_order=407,
-                ui_group="Algorithm Results",
-            ),
-        )
-
-        self.register(
-            ColumnDefinition(
-                name="total_nwt_counts",
-                display_name="Total Nonwear Sensor Counts",
-                column_type=ColumnType.ALGORITHM,
-                data_type=DataType.FLOAT,
-                database_column=DatabaseColumn.TOTAL_NWT_COUNTS,
-                export_column=ExportColumn.TOTAL_NWT_COUNTS,
-                is_exportable=True,
-                ui_order=408,
-                ui_group="Algorithm Results",
+                ui_group="Nonwear",
             ),
         )
 
@@ -964,6 +907,175 @@ class ColumnRegistry:
                 ui_group="Diary: Nonwear Information",
                 format_string="%H:%M",
                 description="Time when device was put back on (3rd period)",
+            ),
+        )
+
+        # Manual nonwear marker columns (user-placed via UI)
+        self.register(
+            ColumnDefinition(
+                name=ExportColumn.MANUAL_NWT_COUNT,
+                display_name="Manual Nonwear Count",
+                column_type=ColumnType.MARKER,
+                data_type=DataType.INTEGER,
+                export_column=ExportColumn.MANUAL_NWT_COUNT,
+                is_exportable=True,
+                ui_order=280,
+                ui_group="Manual Nonwear Markers",
+                description="Number of manually placed nonwear periods",
+            ),
+        )
+
+        self.register(
+            ColumnDefinition(
+                name=ExportColumn.MANUAL_NWT_1_START,
+                display_name="Manual Nonwear 1 Start",
+                column_type=ColumnType.MARKER,
+                data_type=DataType.STRING,
+                export_column=ExportColumn.MANUAL_NWT_1_START,
+                is_exportable=True,
+                ui_order=281,
+                ui_group="Manual Nonwear Markers",
+                format_string="%H:%M",
+                description="Start time of first manual nonwear period",
+            ),
+        )
+
+        self.register(
+            ColumnDefinition(
+                name=ExportColumn.MANUAL_NWT_1_END,
+                display_name="Manual Nonwear 1 End",
+                column_type=ColumnType.MARKER,
+                data_type=DataType.STRING,
+                export_column=ExportColumn.MANUAL_NWT_1_END,
+                is_exportable=True,
+                ui_order=282,
+                ui_group="Manual Nonwear Markers",
+                format_string="%H:%M",
+                description="End time of first manual nonwear period",
+            ),
+        )
+
+        self.register(
+            ColumnDefinition(
+                name=ExportColumn.MANUAL_NWT_1_DURATION,
+                display_name="Manual Nonwear 1 Duration (min)",
+                column_type=ColumnType.MARKER,
+                data_type=DataType.FLOAT,
+                export_column=ExportColumn.MANUAL_NWT_1_DURATION,
+                is_exportable=True,
+                ui_order=283,
+                ui_group="Manual Nonwear Markers",
+                format_string="{:.1f}",
+                unit="minutes",
+                description="Duration of first manual nonwear period",
+            ),
+        )
+
+        self.register(
+            ColumnDefinition(
+                name=ExportColumn.MANUAL_NWT_2_START,
+                display_name="Manual Nonwear 2 Start",
+                column_type=ColumnType.MARKER,
+                data_type=DataType.STRING,
+                export_column=ExportColumn.MANUAL_NWT_2_START,
+                is_exportable=True,
+                ui_order=284,
+                ui_group="Manual Nonwear Markers",
+                format_string="%H:%M",
+                description="Start time of second manual nonwear period",
+            ),
+        )
+
+        self.register(
+            ColumnDefinition(
+                name=ExportColumn.MANUAL_NWT_2_END,
+                display_name="Manual Nonwear 2 End",
+                column_type=ColumnType.MARKER,
+                data_type=DataType.STRING,
+                export_column=ExportColumn.MANUAL_NWT_2_END,
+                is_exportable=True,
+                ui_order=285,
+                ui_group="Manual Nonwear Markers",
+                format_string="%H:%M",
+                description="End time of second manual nonwear period",
+            ),
+        )
+
+        self.register(
+            ColumnDefinition(
+                name=ExportColumn.MANUAL_NWT_2_DURATION,
+                display_name="Manual Nonwear 2 Duration (min)",
+                column_type=ColumnType.MARKER,
+                data_type=DataType.FLOAT,
+                export_column=ExportColumn.MANUAL_NWT_2_DURATION,
+                is_exportable=True,
+                ui_order=286,
+                ui_group="Manual Nonwear Markers",
+                format_string="{:.1f}",
+                unit="minutes",
+                description="Duration of second manual nonwear period",
+            ),
+        )
+
+        self.register(
+            ColumnDefinition(
+                name=ExportColumn.MANUAL_NWT_3_START,
+                display_name="Manual Nonwear 3 Start",
+                column_type=ColumnType.MARKER,
+                data_type=DataType.STRING,
+                export_column=ExportColumn.MANUAL_NWT_3_START,
+                is_exportable=True,
+                ui_order=287,
+                ui_group="Manual Nonwear Markers",
+                format_string="%H:%M",
+                description="Start time of third manual nonwear period",
+            ),
+        )
+
+        self.register(
+            ColumnDefinition(
+                name=ExportColumn.MANUAL_NWT_3_END,
+                display_name="Manual Nonwear 3 End",
+                column_type=ColumnType.MARKER,
+                data_type=DataType.STRING,
+                export_column=ExportColumn.MANUAL_NWT_3_END,
+                is_exportable=True,
+                ui_order=288,
+                ui_group="Manual Nonwear Markers",
+                format_string="%H:%M",
+                description="End time of third manual nonwear period",
+            ),
+        )
+
+        self.register(
+            ColumnDefinition(
+                name=ExportColumn.MANUAL_NWT_3_DURATION,
+                display_name="Manual Nonwear 3 Duration (min)",
+                column_type=ColumnType.MARKER,
+                data_type=DataType.FLOAT,
+                export_column=ExportColumn.MANUAL_NWT_3_DURATION,
+                is_exportable=True,
+                ui_order=289,
+                ui_group="Manual Nonwear Markers",
+                format_string="{:.1f}",
+                unit="minutes",
+                description="Duration of third manual nonwear period",
+            ),
+        )
+
+        self.register(
+            ColumnDefinition(
+                name=ExportColumn.MANUAL_NWT_TOTAL_DURATION,
+                display_name="Manual Nonwear Total Duration (min)",
+                column_type=ColumnType.MARKER,
+                data_type=DataType.FLOAT,
+                export_column=ExportColumn.MANUAL_NWT_TOTAL_DURATION,
+                is_exportable=True,
+                ui_order=290,
+                ui_group="Manual Nonwear Markers",
+                format_string="{:.1f}",
+                unit="minutes",
+                description="Total duration of all manual nonwear periods",
             ),
         )
 

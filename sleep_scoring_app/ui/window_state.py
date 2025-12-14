@@ -92,6 +92,11 @@ class WindowStateManager:
             self._marker_status_cache.clear()
             logger.debug("Cleared entire marker status cache")
 
+        # Also invalidate the unified_data_service cache and update file table
+        if hasattr(self.parent, "data_service") and self.parent.data_service:
+            self.parent.data_service.invalidate_marker_status_cache(filename)
+            self.parent.data_service.update_file_table_indicators_only()
+
     def invalidate_metrics_cache(self) -> None:
         """Invalidate the metrics cache to force reload on next access."""
         self._metrics_cache = None
@@ -312,7 +317,7 @@ class WindowStateManager:
         reply = QMessageBox.question(
             self.parent,
             "Mark No Sleep",
-            f"Mark {date_str} as having no sleep period?\n\nThis will PERMANENTLY DELETE all existing markers for this date and save a record indicating no sleep occurred.",
+            f"Mark {date_str} as having no sleep period?\n\nThis will delete existing SLEEP markers for this date and save a record indicating no sleep occurred.\n\nNWT (nonwear) markers will be preserved.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -321,17 +326,17 @@ class WindowStateManager:
             return
 
         try:
-            # Clear plot markers
+            # Clear only SLEEP markers from the plot (preserve NWT markers)
             self.parent.plot_widget.clear_sleep_markers()
 
-            # Delete existing markers first
+            # Delete existing SLEEP metrics only (NWT markers are in a separate table)
             filename = Path(self.parent.selected_file).name
             try:
                 self.parent.db_manager.delete_sleep_metrics_for_date(filename, date_str)
-                logger.info(f"Deleted all existing markers for {filename} on {date_str}")
+                logger.info(f"Deleted sleep markers for {filename} on {date_str} (NWT markers preserved)")
             except Exception as e:
-                logger.exception("Error deleting existing markers")
-                QMessageBox.warning(self.parent, "Error", f"Failed to delete existing markers: {e}")
+                logger.exception("Error deleting existing sleep markers")
+                QMessageBox.warning(self.parent, "Error", f"Failed to delete existing sleep markers: {e}")
                 return
 
             # Extract participant info
@@ -376,9 +381,8 @@ class WindowStateManager:
                 sleep_fragmentation_index=None,
                 sadeh_onset=None,
                 sadeh_offset=None,
-                choi_onset=None,
-                choi_offset=None,
-                total_choi_counts=None,
+                overlapping_nonwear_minutes_algorithm=None,
+                overlapping_nonwear_minutes_sensor=None,
                 updated_at=datetime.now().isoformat(),
             )
 
@@ -462,6 +466,11 @@ class WindowStateManager:
             else:
                 logger.info(f"No saved markers found for {filename} on {current_date}")
                 self.parent.plot_widget.clear_sleep_markers()
+                # Reset button states when no saved data exists
+                self.parent.save_markers_btn.setText(ButtonText.SAVE_MARKERS)
+                self.parent.save_markers_btn.setStyleSheet(ButtonStyle.SAVE_MARKERS)
+                self.parent.no_sleep_btn.setText(ButtonText.MARK_NO_SLEEP)
+                self.parent.no_sleep_btn.setStyleSheet(ButtonStyle.MARK_NO_SLEEP)
 
         except Exception as e:
             logger.exception(f"Error loading saved markers: {e}")
@@ -625,10 +634,10 @@ class WindowStateManager:
         # Schedule a delayed table update to ensure final state is shown
         self.parent._table_update_timer.start(100)  # 100ms delay to catch end of drag
 
-        # Autosave on marker change (if enabled and we have valid markers and a selected file)
+        # Always autosave on marker change when we have valid markers and a selected file
+        # This matches the behavior of NWT markers which are always auto-saved
         if (
-            FeatureFlags.ENABLE_AUTOSAVE
-            and len(markers) == 2
+            len(markers) == 2
             and self.parent.selected_file
             and self.parent.available_dates
             and not getattr(self.parent.plot_widget, "markers_saved", False)

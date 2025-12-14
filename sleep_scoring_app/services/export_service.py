@@ -243,6 +243,7 @@ class ExportManager:
         include_config_in_metadata: bool = False,
         export_config_sidecar: bool = False,
         config_manager: any | None = None,
+        export_nonwear_separate: bool = True,
     ) -> bool:
         """Perform direct export from UI tab without modal dialog."""
         if not sleep_metrics_list:
@@ -344,6 +345,15 @@ class ExportManager:
                     config_manager.export_config_csv(config_sidecar_path)
                     logger.debug("Exported config sidecar to %s", config_sidecar_path)
 
+            # Export nonwear markers to separate file if requested
+            if export_nonwear_separate:
+                self._export_nonwear_markers_separate(
+                    sleep_metrics_list,
+                    output_path,
+                    include_headers,
+                    include_metadata,
+                )
+
             return True
 
         except (OSError, PermissionError, ValueError, DatabaseError) as e:
@@ -356,8 +366,7 @@ class ExportManager:
 
         import pandas as pd
 
-        from sleep_scoring_app.core.algorithms.factory import AlgorithmFactory
-        from sleep_scoring_app.core.algorithms.nonwear_factory import NonwearAlgorithmFactory
+        from sleep_scoring_app.core.algorithms import AlgorithmFactory, NonwearAlgorithmFactory
         from sleep_scoring_app.core.constants import NonwearDataSource
         from sleep_scoring_app.services.data_service import DataManager
         from sleep_scoring_app.services.nonwear_service import NonwearDataService
@@ -366,6 +375,11 @@ class ExportManager:
         data_manager = DataManager(database_manager=self.db_manager)
         nonwear_service = NonwearDataService(database_manager=self.db_manager)
 
+        # CRITICAL FIX #4: Cache for activity data to avoid redundant database calls
+        # Key is filename, value is (timestamps, axis_y, vector_mag)
+        # This prevents loading the same file's data multiple times for different periods
+        activity_data_cache: dict[str, tuple[list, list, list]] = {}
+
         for metrics in sleep_metrics_list:
             # Get all complete sleep periods
             complete_periods = metrics.daily_sleep_markers.get_complete_periods()
@@ -373,33 +387,58 @@ class ExportManager:
                 continue
 
             try:
-                # Calculate metrics for ALL periods - same logic for main sleep and naps
-                for period in complete_periods:
-                    # Load activity data for the period's date
-                    filename = metrics.filename
-                    analysis_date = metrics.analysis_date
+                filename = metrics.filename
 
-                    # Load activity data from database using correct method
-                    # Use the actual sleep period timestamps to get the exact data window
-                    # Add minimal buffer (5 minutes) for Sadeh algorithm context (needs 5 min before/after)
-                    period_start = datetime.fromtimestamp(period.onset_timestamp)
-                    period_end = datetime.fromtimestamp(period.offset_timestamp)
-                    start_time = period_start - timedelta(minutes=5)  # 5 min buffer for Sadeh algorithm
-                    end_time = period_end + timedelta(minutes=5)  # 5 min buffer for Sadeh algorithm
+                # Load activity data ONCE per file (cache hit or miss)
+                if filename not in activity_data_cache:
+                    # Find the full time range needed for all periods in this file
+                    all_starts = [datetime.fromtimestamp(p.onset_timestamp) for p in complete_periods]
+                    all_ends = [datetime.fromtimestamp(p.offset_timestamp) for p in complete_periods]
+                    earliest_start = min(all_starts) - timedelta(minutes=5)  # 5 min buffer for Sadeh
+                    latest_end = max(all_ends) + timedelta(minutes=5)
 
                     # Load AXIS_Y data for Sadeh
                     timestamps, axis_y_values = self.db_manager.load_raw_activity_data(
-                        filename=filename, start_time=start_time, end_time=end_time, activity_column=ActivityDataPreference.AXIS_Y
+                        filename=filename, start_time=earliest_start, end_time=latest_end, activity_column=ActivityDataPreference.AXIS_Y
                     )
 
                     if not timestamps or not axis_y_values:
                         logger.debug("No activity data found for %s", filename)
+                        activity_data_cache[filename] = ([], [], [])
                         continue
 
                     # Also load vector magnitude for Choi algorithm
                     _, vector_magnitude = self.db_manager.load_raw_activity_data(
-                        filename=filename, start_time=start_time, end_time=end_time, activity_column=ActivityDataPreference.VECTOR_MAGNITUDE
+                        filename=filename, start_time=earliest_start, end_time=latest_end, activity_column=ActivityDataPreference.VECTOR_MAGNITUDE
                     )
+
+                    activity_data_cache[filename] = (timestamps, axis_y_values, vector_magnitude or [])
+                    logger.debug("Cached activity data for %s (%d epochs)", filename, len(timestamps))
+
+                # Get cached data
+                cached_timestamps, cached_axis_y, cached_vector_mag = activity_data_cache[filename]
+                if not cached_timestamps:
+                    continue
+
+                # Calculate metrics for ALL periods using cached data
+                for period in complete_periods:
+                    # Extract the subset of data for this period
+                    period_start = datetime.fromtimestamp(period.onset_timestamp) - timedelta(minutes=5)
+                    period_end = datetime.fromtimestamp(period.offset_timestamp) + timedelta(minutes=5)
+
+                    # Filter cached data to the period's time range
+                    indices = []
+                    for i, ts in enumerate(cached_timestamps):
+                        ts_dt = ts if isinstance(ts, datetime) else datetime.fromtimestamp(ts)
+                        if period_start <= ts_dt <= period_end:
+                            indices.append(i)
+
+                    if not indices:
+                        continue
+
+                    timestamps = [cached_timestamps[i] for i in indices]
+                    axis_y_values = [cached_axis_y[i] for i in indices]
+                    vector_magnitude = [cached_vector_mag[i] for i in indices] if cached_vector_mag else []
 
                     # Convert datetime timestamps to Unix timestamps for compatibility
                     unix_timestamps = [ts.timestamp() if isinstance(ts, datetime) else ts for ts in timestamps]
@@ -489,12 +528,8 @@ class ExportManager:
                             "sleep_fragmentation_index": period_metrics.get("Sleep Fragmentation Index"),
                             "sadeh_onset": period_metrics.get("Sadeh Algorithm Value at Sleep Onset"),
                             "sadeh_offset": period_metrics.get("Sadeh Algorithm Value at Sleep Offset"),
-                            "choi_onset": period_metrics.get("Choi Algorithm Value at Sleep Onset"),
-                            "choi_offset": period_metrics.get("Choi Algorithm Value at Sleep Offset"),
-                            "total_choi_counts": period_metrics.get("Total Choi Algorithm Counts over the Sleep Period"),
-                            "nwt_onset": period_metrics.get("NWT Sensor Value at Sleep Onset"),
-                            "nwt_offset": period_metrics.get("NWT Sensor Value at Sleep Offset"),
-                            "total_nwt_counts": period_metrics.get("Total NWT Sensor Counts over the Sleep Period"),
+                            "overlapping_nonwear_minutes_algorithm": period_metrics.get("Overlapping Nonwear Minutes (Algorithm)"),
+                            "overlapping_nonwear_minutes_sensor": period_metrics.get("Overlapping Nonwear Minutes (Sensor)"),
                         }
 
                         # Store metrics for this period (works for both main sleep and naps)
@@ -515,16 +550,12 @@ class ExportManager:
                             metrics.sleep_fragmentation_index = period_metrics.get("Sleep Fragmentation Index")
                             metrics.sadeh_onset = period_metrics.get("Sadeh Algorithm Value at Sleep Onset")
                             metrics.sadeh_offset = period_metrics.get("Sadeh Algorithm Value at Sleep Offset")
-                            metrics.choi_onset = period_metrics.get("Choi Algorithm Value at Sleep Onset")
-                            metrics.choi_offset = period_metrics.get("Choi Algorithm Value at Sleep Offset")
-                            metrics.total_choi_counts = period_metrics.get("Total Choi Algorithm Counts over the Sleep Period")
-                            metrics.nwt_onset = period_metrics.get("NWT Sensor Value at Sleep Onset")
-                            metrics.nwt_offset = period_metrics.get("NWT Sensor Value at Sleep Offset")
-                            metrics.total_nwt_counts = period_metrics.get("Total NWT Sensor Counts over the Sleep Period")
+                            metrics.overlapping_nonwear_minutes_algorithm = period_metrics.get("Overlapping Nonwear Minutes (Algorithm)")
+                            metrics.overlapping_nonwear_minutes_sensor = period_metrics.get("Overlapping Nonwear Minutes (Sensor)")
 
                             # Store calculated values back to database for future exports
                             self.db_manager.save_sleep_metrics(metrics, is_autosave=False)
-                            logger.debug("Calculated and saved metrics for %s on %s", filename, analysis_date)
+                            logger.debug("Calculated and saved metrics for %s on %s", filename, metrics.analysis_date)
 
             except Exception as e:
                 import traceback
@@ -533,6 +564,128 @@ class ExportManager:
                 logger.warning("Full traceback: %s", traceback.format_exc())
                 # Continue with export even if calculation fails for one file
                 continue
+
+    def _export_nonwear_markers_separate(
+        self,
+        sleep_metrics_list: list[SleepMetrics],
+        output_path: Path,
+        include_headers: bool,
+        include_metadata: bool,
+    ) -> None:
+        """Export manual nonwear markers to a separate CSV file."""
+        from datetime import datetime
+
+        nonwear_data = []
+
+        for metrics in sleep_metrics_list:
+            try:
+                filename = metrics.filename
+                if not filename or not metrics.analysis_date:
+                    continue
+
+                # Parse analysis date
+                try:
+                    analysis_date = datetime.strptime(metrics.analysis_date, "%Y-%m-%d").date()
+                except ValueError:
+                    continue
+
+                # Load manual nonwear markers for this file/date
+                daily_nonwear = self.db_manager.load_manual_nonwear_markers(filename, analysis_date)
+                complete_periods = daily_nonwear.get_complete_periods()
+
+                if not complete_periods:
+                    continue
+
+                # Get participant info
+                participant_id = ""
+                group = ""
+                timepoint = ""
+                if hasattr(metrics, "participant") and metrics.participant:
+                    participant_id = getattr(metrics.participant, "numerical_id", "")
+                    group = getattr(metrics.participant, "group_str", "")
+                    timepoint = getattr(metrics.participant, "timepoint_str", "")
+
+                # Add each nonwear period as a row
+                for i, period in enumerate(complete_periods, start=1):
+                    start_dt = datetime.fromtimestamp(period.start_timestamp)
+                    end_dt = datetime.fromtimestamp(period.end_timestamp)
+                    duration = period.duration_minutes or 0.0
+
+                    nonwear_data.append(
+                        {
+                            "Participant ID": participant_id,
+                            "Group": group,
+                            "Timepoint": timepoint,
+                            "Filename": filename,
+                            "Date": metrics.analysis_date,
+                            "Nonwear Period Index": i,
+                            "Start Time": start_dt.strftime("%H:%M"),
+                            "End Time": end_dt.strftime("%H:%M"),
+                            "Start Datetime": start_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                            "End Datetime": end_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                            "Duration (minutes)": round(duration, 1),
+                        }
+                    )
+
+            except Exception as e:
+                logger.warning("Failed to get nonwear data for %s: %s", metrics.filename, e)
+                continue
+
+        if not nonwear_data:
+            logger.debug("No nonwear markers to export separately")
+            return
+
+        # Create DataFrame and export
+        nonwear_df = pd.DataFrame(nonwear_data)
+
+        # Sanitize string columns
+        for col in nonwear_df.select_dtypes(include=["object"]).columns:
+            nonwear_df[col] = nonwear_df[col].apply(self._sanitize_csv_cell)
+
+        # Sort by participant and date
+        sort_columns = []
+        if "Participant ID" in nonwear_df.columns:
+            sort_columns.append("Participant ID")
+        if "Date" in nonwear_df.columns:
+            sort_columns.append("Date")
+        if "Nonwear Period Index" in nonwear_df.columns:
+            sort_columns.append("Nonwear Period Index")
+
+        if sort_columns:
+            nonwear_df = nonwear_df.sort_values(by=sort_columns, ascending=True)
+
+        # Create filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filepath = output_path / f"nonwear_markers_{timestamp}.csv"
+
+        # Write to CSV atomically
+        temp_path = filepath.with_suffix(f".tmp.{os.getpid()}")
+        try:
+            with open(temp_path, "w", newline="", encoding="utf-8") as f:
+                if include_metadata:
+                    f.write("#\n")
+                    f.write("# Manual Nonwear Markers Export\n")
+                    f.write(f"# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"# Total Nonwear Periods: {len(nonwear_data)}\n")
+                    f.write(f"# Participants with Nonwear: {len({row['Participant ID'] for row in nonwear_data})}\n")
+                    f.write("#\n")
+
+                nonwear_df.to_csv(f, index=False, header=include_headers, float_format="%.1f")
+
+                f.flush()
+                os.fsync(f.fileno())
+
+            if temp_path.stat().st_size == 0:
+                msg = "Nonwear CSV write produced empty file"
+                raise OSError(msg)
+
+            temp_path.replace(filepath)
+            logger.info("Exported %d nonwear periods to %s", len(nonwear_data), filepath)
+
+        except Exception:
+            if temp_path.exists():
+                temp_path.unlink()
+            raise
 
     def _group_export_data(self, sleep_metrics_list: list[SleepMetrics], grouping_option: int) -> dict[str, list[SleepMetrics]]:
         """Group sleep metrics based on grouping option."""
@@ -549,7 +702,7 @@ class ExportManager:
         if grouping_option == 2:  # By group
             groups = {}
             for metrics in sleep_metrics_list:
-                group = metrics.participant.group
+                group = metrics.participant.group_str
                 if group not in groups:
                     groups[group] = []
                 groups[group].append(metrics)
@@ -557,7 +710,7 @@ class ExportManager:
         if grouping_option == 3:  # By timepoint
             groups = {}
             for metrics in sleep_metrics_list:
-                timepoint = metrics.participant.timepoint
+                timepoint = metrics.participant.timepoint_str
                 if timepoint not in groups:
                     groups[timepoint] = []
                 groups[timepoint].append(metrics)
@@ -569,7 +722,13 @@ class ExportManager:
         sleep_metrics_list: list[SleepMetrics],
         algorithm_name: AlgorithmType = AlgorithmType.SADEH_1994_ACTILIFE,
     ) -> str | None:
-        """Save comprehensive sleep metrics to ongoing backup file."""
+        """
+        Save comprehensive sleep metrics to ongoing backup file.
+
+        This saves BOTH the main sleep_metrics table AND the sleep_markers_extended
+        table to ensure data consistency between legacy single-period storage and
+        multi-period extended storage.
+        """
         if not sleep_metrics_list:
             return None
 
@@ -579,10 +738,14 @@ class ExportManager:
             safe_algorithm_name = sanitize_filename_component(AlgorithmType.SADEH_1994_ACTILIFE)
 
         try:
-            # Save to database
+            # Save to database - both main table AND extended markers table
             for metrics in sleep_metrics_list:
                 metrics.algorithm_type = algorithm_name
+                # Save to main sleep_metrics table (legacy + comprehensive data)
                 self.db_manager.save_sleep_metrics(metrics, is_autosave=False)
+                # CRITICAL FIX #1: Also save to sleep_markers_extended table (multi-period support)
+                # This ensures atomicity between the two tables
+                self.db_manager.save_daily_sleep_markers(metrics)
 
             logger.debug("Saved comprehensive sleep metrics to database for %s", sleep_metrics_list[0].filename)
             return "saved"

@@ -14,12 +14,15 @@ from typing import TYPE_CHECKING, Any
 from PyQt6.QtGui import QColor
 
 from sleep_scoring_app.core.constants import ActivityDataPreference, TableDimensions
-from sleep_scoring_app.utils.table_helpers import update_marker_table
+from sleep_scoring_app.utils.table_helpers import update_marker_table, update_table_sleep_algorithm_header
 
 if TYPE_CHECKING:
     from sleep_scoring_app.ui.main_window import SleepScoringMainWindow
 
 logger = logging.getLogger(__name__)
+
+# Default algorithm name for backward compatibility
+DEFAULT_SLEEP_ALGORITHM_NAME = "Sadeh"
 
 
 class MarkerTableManager:
@@ -42,7 +45,67 @@ class MarkerTableManager:
 
         """
         self.parent = parent
+        self._cached_algorithm_name: str | None = None
         logger.info("MarkerTableManager initialized")
+
+    def get_current_sleep_algorithm_name(self) -> str:
+        """
+        Get the display name of the currently configured sleep/wake algorithm.
+
+        Retrieves the algorithm name from the config via the AlgorithmFactory.
+
+        Returns:
+            Display name of the algorithm (e.g., "Sadeh", "Cole-Kripke")
+
+        """
+        try:
+            # Get config from main window
+            if hasattr(self.parent, "config_manager") and self.parent.config_manager:
+                config = self.parent.config_manager.config
+                if config and hasattr(config, "sleep_algorithm_id") and config.sleep_algorithm_id:
+                    # Get the display name from the factory
+                    from sleep_scoring_app.core.algorithms import AlgorithmFactory
+
+                    available = AlgorithmFactory.get_available_algorithms()
+                    algorithm_id = config.sleep_algorithm_id
+                    if algorithm_id in available:
+                        return available[algorithm_id]
+
+            # Fall back to getting it from the plot widget's algorithm manager
+            if hasattr(self.parent, "plot_widget") and self.parent.plot_widget:
+                if hasattr(self.parent.plot_widget, "algorithm_manager"):
+                    algorithm = self.parent.plot_widget.algorithm_manager.get_sleep_scoring_algorithm()
+                    if algorithm and hasattr(algorithm, "name"):
+                        return algorithm.name
+
+        except Exception as e:
+            logger.warning("Failed to get sleep algorithm name: %s", e)
+
+        return DEFAULT_SLEEP_ALGORITHM_NAME
+
+    def update_table_headers_for_algorithm(self) -> None:
+        """
+        Update the table column headers to reflect the current sleep algorithm.
+
+        Should be called when the algorithm is changed in study settings.
+
+        """
+        algorithm_name = self.get_current_sleep_algorithm_name()
+
+        # Only update if the algorithm name has changed
+        if algorithm_name == self._cached_algorithm_name:
+            return
+
+        self._cached_algorithm_name = algorithm_name
+        logger.info("Updating table headers for algorithm: %s", algorithm_name)
+
+        # Update onset table header
+        if hasattr(self.parent, "onset_table") and self.parent.onset_table:
+            update_table_sleep_algorithm_header(self.parent.onset_table, algorithm_name)
+
+        # Update offset table header
+        if hasattr(self.parent, "offset_table") and self.parent.offset_table:
+            update_table_sleep_algorithm_header(self.parent.offset_table, algorithm_name)
 
     def update_marker_tables(self, onset_data: list, offset_data: list) -> None:
         """Update the data tables with surrounding marker information."""
@@ -145,29 +208,48 @@ class MarkerTableManager:
         """
         Move a marker based on table row click.
 
+        This method checks the active marker category and moves either sleep or nonwear markers.
+
         Args:
-            marker_type: "onset" or "offset"
-            row: The row index that was clicked
+            marker_type: "onset" or "offset" (mapped to "start"/"end" for nonwear)
+            row: The row index that was clicked (in the visible table, not the full data)
 
         """
+        from sleep_scoring_app.core.constants import MarkerCategory
+
         try:
             # Check if we have plot widget and it's ready
             if not hasattr(self.parent, "plot_widget") or not self.parent.plot_widget:
                 logger.warning("Plot widget not available for marker movement")
                 return
 
-            # Get the appropriate table data
+            # Get the appropriate table container (stores data and visible offset)
             if marker_type == "onset":
-                table_data = getattr(self.parent, "_onset_table_data", None)
+                table_container = getattr(self.parent, "onset_table", None)
             else:
-                table_data = getattr(self.parent, "_offset_table_data", None)
+                table_container = getattr(self.parent, "offset_table", None)
 
-            if not table_data or row >= len(table_data):
-                logger.warning(f"No data available for row {row} in {marker_type} table")
+            if not table_container:
+                logger.warning(f"No table container available for {marker_type}")
                 return
 
-            # Get the row data
-            row_data = table_data[row]
+            # Get data and visible offset from the table container
+            table_data = getattr(table_container, "_table_data", None)
+            visible_start_idx = getattr(table_container, "_visible_start_idx", 0)
+
+            if not table_data:
+                logger.warning(f"No data available in {marker_type} table container")
+                return
+
+            # Calculate actual data index from table row + visible offset
+            data_idx = visible_start_idx + row
+
+            if data_idx >= len(table_data):
+                logger.warning(f"Data index {data_idx} out of range for {marker_type} table (len={len(table_data)})")
+                return
+
+            # Get the row data using the corrected index
+            row_data = table_data[data_idx]
 
             # Check if this is the marker row itself (no-op)
             if row_data.get("is_marker", False):
@@ -196,26 +278,51 @@ class MarkerTableManager:
                 logger.warning(f"No timestamp information in row data: {row_data}")
                 return
 
-            # Get the currently selected period to determine which period to move
-            selected_period = None
-            period_slot = None
+            # Check active marker category to determine which type of marker to move
+            active_category = self.parent.plot_widget.get_active_marker_category()
 
-            if hasattr(self.parent.plot_widget, "get_selected_marker_period"):
-                selected_period = self.parent.plot_widget.get_selected_marker_period()
-                if selected_period:
-                    # Use the marker_index from the selected period
-                    period_slot = selected_period.marker_index
-                    logger.debug(f"Moving {marker_type} marker for period {period_slot} ({selected_period.marker_type.value})")
+            if active_category == MarkerCategory.NONWEAR:
+                # Move nonwear marker
+                # Map onset/offset to start/end for nonwear markers
+                nonwear_marker_type = "start" if marker_type == "onset" else "end"
 
-            # Move the marker to the target timestamp
-            success = self.parent.plot_widget.move_marker_to_timestamp(marker_type, target_timestamp, period_slot)
+                selected_period = self.parent.plot_widget.marker_renderer.get_selected_nonwear_period()
+                period_slot = selected_period.marker_index if selected_period else None
 
-            if success:
-                logger.info(f"Successfully moved {marker_type} marker for period {period_slot} to row {row}")
-                # Auto-save after successful movement
-                self.parent.auto_save_current_markers()
+                if not selected_period:
+                    logger.warning("No nonwear period selected to move marker for")
+                    return
+
+                logger.debug(f"Moving nonwear {nonwear_marker_type} marker for period {period_slot}")
+
+                success = self.parent.plot_widget.move_nonwear_marker_to_timestamp(nonwear_marker_type, target_timestamp, period_slot)
+
+                if success:
+                    logger.info(f"Successfully moved nonwear {nonwear_marker_type} marker for period {period_slot} to row {row}")
+                else:
+                    logger.warning(f"Failed to move nonwear {nonwear_marker_type} marker for period {period_slot} to row {row}")
+
             else:
-                logger.warning(f"Failed to move {marker_type} marker for period {period_slot} to row {row}")
+                # Move sleep marker (default behavior)
+                selected_period = None
+                period_slot = None
+
+                if hasattr(self.parent.plot_widget, "get_selected_marker_period"):
+                    selected_period = self.parent.plot_widget.get_selected_marker_period()
+                    if selected_period:
+                        # Use the marker_index from the selected period
+                        period_slot = selected_period.marker_index
+                        logger.debug(f"Moving {marker_type} marker for period {period_slot} ({selected_period.marker_type.value})")
+
+                # Move the marker to the target timestamp
+                success = self.parent.plot_widget.move_marker_to_timestamp(marker_type, target_timestamp, period_slot)
+
+                if success:
+                    logger.info(f"Successfully moved {marker_type} marker for period {period_slot} to row {row}")
+                    # Auto-save after successful movement
+                    self.parent.auto_save_current_markers()
+                else:
+                    logger.warning(f"Failed to move {marker_type} marker for period {period_slot} to row {row}")
 
         except Exception as e:
             logger.error(f"Error moving {marker_type} marker from table click: {e}", exc_info=True)
@@ -272,16 +379,19 @@ class MarkerTableManager:
         target_dt = datetime.fromtimestamp(marker_timestamp)
         logger.debug("Marker at %s, index %d", target_dt.strftime("%Y-%m-%d %H:%M:%S"), marker_idx)
 
-        # Get various result arrays - use full 48hr results
-        sadeh_results = getattr(self.parent.plot_widget, "main_48h_sadeh_results", getattr(self.parent.plot_widget, "sadeh_results", []))
+        # Get sleep/wake algorithm results - use full 48hr results
+        # These are stored as "sadeh_results" for historical reasons but contain results from whichever algorithm is configured
+        sleep_score_results = getattr(self.parent.plot_widget, "main_48h_sadeh_results", getattr(self.parent.plot_widget, "sadeh_results", []))
 
-        # If no Sadeh results available, trigger algorithm calculation
-        if not sadeh_results:
-            logger.debug("No Sadeh results available, triggering algorithm calculation")
+        # If no sleep score results available, trigger algorithm calculation
+        if not sleep_score_results:
+            logger.debug("No sleep score results available, triggering algorithm calculation")
             if hasattr(self.parent.plot_widget, "plot_algorithms") and callable(self.parent.plot_widget.plot_algorithms):
                 try:
                     self.parent.plot_widget.plot_algorithms()
-                    sadeh_results = getattr(self.parent.plot_widget, "main_48h_sadeh_results", getattr(self.parent.plot_widget, "sadeh_results", []))
+                    sleep_score_results = getattr(
+                        self.parent.plot_widget, "main_48h_sadeh_results", getattr(self.parent.plot_widget, "sadeh_results", [])
+                    )
                 except Exception as e:
                     logger.exception("Failed to run algorithms for table: %s", e)
 
@@ -294,14 +404,15 @@ class MarkerTableManager:
             else []
         )
 
-        # Get 21 elements around marker (10 before + marker + 10 after)
-        start_idx = max(0, marker_idx - TableDimensions.ELEMENTS_AROUND_MARKER)
-        end_idx = min(len(full_48h_timestamps), marker_idx + TableDimensions.ELEMENTS_AROUND_MARKER + 1)
+        # Get elements around marker (±100 minutes = 200 rows max)
+        elements_around_marker = 100
+        start_idx = max(0, marker_idx - elements_around_marker)
+        end_idx = min(len(full_48h_timestamps), marker_idx + elements_around_marker + 1)
 
         for i in range(start_idx, end_idx):
             if i < len(full_48h_timestamps):
                 is_marker = i == marker_idx
-                sadeh_value = sadeh_results[i] if i < len(sadeh_results) else 0
+                sleep_value = sleep_score_results[i] if i < len(sleep_score_results) else 0
                 choi_value = choi_results[i] if i < len(choi_results) else 0
                 nwt_value = nonwear_sensor_results[i] if i < len(nonwear_sensor_results) else 0
 
@@ -314,7 +425,7 @@ class MarkerTableManager:
                         "timestamp": full_48h_timestamps[i].timestamp(),
                         "axis_y": axis_y_value,
                         "vm": vm_value,
-                        "sadeh": sadeh_value,
+                        "sleep_score": sleep_value,  # Generic key for any sleep/wake algorithm
                         "choi": choi_value,
                         "nwt_sensor": nwt_value,
                         "is_marker": is_marker,
@@ -363,14 +474,16 @@ class MarkerTableManager:
 
         logger.debug("Loading %d rows for pop-out table", len(full_48h_timestamps))
 
-        # Get result arrays
-        sadeh_results = getattr(self.parent.plot_widget, "main_48h_sadeh_results", getattr(self.parent.plot_widget, "sadeh_results", []))
+        # Get sleep/wake algorithm result arrays
+        sleep_score_results = getattr(self.parent.plot_widget, "main_48h_sadeh_results", getattr(self.parent.plot_widget, "sadeh_results", []))
 
-        if not sadeh_results:
+        if not sleep_score_results:
             if hasattr(self.parent.plot_widget, "plot_algorithms") and callable(self.parent.plot_widget.plot_algorithms):
                 try:
                     self.parent.plot_widget.plot_algorithms()
-                    sadeh_results = getattr(self.parent.plot_widget, "main_48h_sadeh_results", getattr(self.parent.plot_widget, "sadeh_results", []))
+                    sleep_score_results = getattr(
+                        self.parent.plot_widget, "main_48h_sadeh_results", getattr(self.parent.plot_widget, "sadeh_results", [])
+                    )
                 except Exception as e:
                     logger.exception("Failed to run algorithms for popout table: %s", e)
 
@@ -385,7 +498,7 @@ class MarkerTableManager:
 
         # Get ALL rows
         for i in range(len(full_48h_timestamps)):
-            sadeh_value = sadeh_results[i] if i < len(sadeh_results) else 0
+            sleep_value = sleep_score_results[i] if i < len(sleep_score_results) else 0
             choi_value = choi_results[i] if i < len(choi_results) else 0
             nwt_value = nonwear_sensor_results[i] if i < len(nonwear_sensor_results) else 0
 
@@ -405,7 +518,7 @@ class MarkerTableManager:
                     "timestamp": full_48h_timestamps[i].timestamp(),
                     "axis_y": axis_y_value,
                     "vm": vm_value,
-                    "sadeh": sadeh_value,
+                    "sleep_score": sleep_value,  # Generic key for any sleep/wake algorithm
                     "choi": choi_value,
                     "nwt_sensor": nwt_value,
                     "is_marker": is_marker,

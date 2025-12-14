@@ -18,6 +18,7 @@ from sleep_scoring_app.core.constants import (
     ConfigKey,
     DatabaseColumn,
     DefaultColumn,
+    DeleteStatus,
     ExportColumn,
     MarkerLimits,
     MarkerType,
@@ -25,6 +26,7 @@ from sleep_scoring_app.core.constants import (
     ParticipantGroup,
     ParticipantTimepoint,
     SadehDataSource,
+    StudyDataParadigm,
 )
 from sleep_scoring_app.utils.column_registry import column_registry
 
@@ -54,6 +56,9 @@ class ParticipantInfo:
     group: ParticipantGroup = ParticipantGroup.GROUP_1
     timepoint: ParticipantTimepoint = ParticipantTimepoint.T1
     date: str = ""
+    # Raw extracted strings (before enum conversion) for display purposes
+    group_str: str = "G1"
+    timepoint_str: str = "T1"
 
     @property
     def participant_key(self) -> str:
@@ -138,6 +143,40 @@ class FileInfo:
             display_name = file_path.name
 
         return cls(path=file_path, filename=file_path.name, display_name=display_name)
+
+
+@dataclass(frozen=True)
+class ImportedFileInfo:
+    """Information about an imported file in the database."""
+
+    filename: str
+    participant_id: str
+    date_range_start: str
+    date_range_end: str
+    record_count: int
+    import_date: str
+    has_metrics: bool
+
+
+@dataclass(frozen=True)
+class DeleteResult:
+    """Result of a single file deletion operation."""
+
+    status: DeleteStatus
+    filename: str
+    records_deleted: int = 0
+    metrics_deleted: int = 0
+    error_message: str | None = None
+
+
+@dataclass(frozen=True)
+class BatchDeleteResult:
+    """Result of a batch file deletion operation."""
+
+    total_requested: int
+    successful: int
+    failed: int
+    results: list[DeleteResult]
 
 
 @dataclass
@@ -243,6 +282,19 @@ class NonwearPeriod:
             DatabaseColumn.END_INDEX: self.end_index,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> NonwearPeriod:
+        """Create from dictionary data."""
+        return cls(
+            start_time=data.get(DatabaseColumn.START_TIME) or data.get("start_time"),
+            end_time=data.get(DatabaseColumn.END_TIME) or data.get("end_time"),
+            participant_id=data.get(DatabaseColumn.PARTICIPANT_ID) or data.get("participant_id", ""),
+            source=NonwearDataSource(data.get(DatabaseColumn.PERIOD_TYPE) or data.get("source", NonwearDataSource.MANUAL_NWT)),
+            duration_minutes=data.get(DatabaseColumn.DURATION_MINUTES) or data.get("duration_minutes"),
+            start_index=data.get(DatabaseColumn.START_INDEX) or data.get("start_index"),
+            end_index=data.get(DatabaseColumn.END_INDEX) or data.get("end_index"),
+        )
+
 
 @dataclass
 class DailySleepMarkers:
@@ -330,6 +382,215 @@ class DailySleepMarkers:
 
 
 @dataclass
+class ManualNonwearPeriod:
+    """
+    Individual manual nonwear period with timestamps.
+
+    Similar to SleepPeriod but for user-placed nonwear markers.
+    Uses dashed lines to distinguish from algorithmic nonwear.
+    """
+
+    start_timestamp: float | None = None
+    end_timestamp: float | None = None
+    marker_index: int = 1
+
+    @property
+    def is_complete(self) -> bool:
+        """Check if both markers are set."""
+        return self.start_timestamp is not None and self.end_timestamp is not None
+
+    @property
+    def duration_seconds(self) -> float | None:
+        """Calculate duration in seconds."""
+        if self.is_complete:
+            return self.end_timestamp - self.start_timestamp
+        return None
+
+    @property
+    def duration_minutes(self) -> float | None:
+        """Calculate duration in minutes."""
+        if self.duration_seconds is not None:
+            return self.duration_seconds / 60
+        return None
+
+    def to_list(self) -> list[float]:
+        """Convert to list format for compatibility."""
+        if self.is_complete:
+            return [self.start_timestamp, self.end_timestamp]
+        return []
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for storage."""
+        return {
+            "start_timestamp": self.start_timestamp,
+            "end_timestamp": self.end_timestamp,
+            "marker_index": self.marker_index,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ManualNonwearPeriod:
+        """Create from dictionary data."""
+        return cls(
+            start_timestamp=data.get("start_timestamp"),
+            end_timestamp=data.get("end_timestamp"),
+            marker_index=data.get("marker_index", 1),
+        )
+
+
+@dataclass
+class DailyNonwearMarkers:
+    """
+    Daily manual nonwear markers container with 10 period slots.
+
+    Follows the same fixed-slot pattern as DailySleepMarkers for consistency.
+    Supports up to 10 user-placed nonwear periods per sleep_date.
+    """
+
+    period_1: ManualNonwearPeriod | None = None
+    period_2: ManualNonwearPeriod | None = None
+    period_3: ManualNonwearPeriod | None = None
+    period_4: ManualNonwearPeriod | None = None
+    period_5: ManualNonwearPeriod | None = None
+    period_6: ManualNonwearPeriod | None = None
+    period_7: ManualNonwearPeriod | None = None
+    period_8: ManualNonwearPeriod | None = None
+    period_9: ManualNonwearPeriod | None = None
+    period_10: ManualNonwearPeriod | None = None
+
+    def get_all_periods(self) -> list[ManualNonwearPeriod]:
+        """Get all non-None nonwear periods."""
+        periods = [
+            self.period_1,
+            self.period_2,
+            self.period_3,
+            self.period_4,
+            self.period_5,
+            self.period_6,
+            self.period_7,
+            self.period_8,
+            self.period_9,
+            self.period_10,
+        ]
+        return [p for p in periods if p is not None]
+
+    def get_complete_periods(self) -> list[ManualNonwearPeriod]:
+        """Get all complete nonwear periods (both start and end set)."""
+        return [p for p in self.get_all_periods() if p.is_complete]
+
+    def count_periods(self) -> int:
+        """Count number of defined periods."""
+        return len(self.get_all_periods())
+
+    def has_space_for_new_period(self) -> bool:
+        """Check if we can add another period."""
+        return self.count_periods() < MarkerLimits.MAX_NONWEAR_PERIODS_PER_DAY
+
+    def get_next_available_slot(self) -> int | None:
+        """Get the next available slot number (1-10), or None if full."""
+        for i in range(1, 11):
+            if self.get_period_by_slot(i) is None:
+                return i
+        return None
+
+    def get_period_by_slot(self, slot: int) -> ManualNonwearPeriod | None:
+        """Get period by slot number (1-10)."""
+        slot_map = {
+            1: self.period_1,
+            2: self.period_2,
+            3: self.period_3,
+            4: self.period_4,
+            5: self.period_5,
+            6: self.period_6,
+            7: self.period_7,
+            8: self.period_8,
+            9: self.period_9,
+            10: self.period_10,
+        }
+        return slot_map.get(slot)
+
+    def set_period_by_slot(self, slot: int, period: ManualNonwearPeriod | None) -> None:
+        """Set period by slot number (1-10)."""
+        if slot == 1:
+            self.period_1 = period
+        elif slot == 2:
+            self.period_2 = period
+        elif slot == 3:
+            self.period_3 = period
+        elif slot == 4:
+            self.period_4 = period
+        elif slot == 5:
+            self.period_5 = period
+        elif slot == 6:
+            self.period_6 = period
+        elif slot == 7:
+            self.period_7 = period
+        elif slot == 8:
+            self.period_8 = period
+        elif slot == 9:
+            self.period_9 = period
+        elif slot == 10:
+            self.period_10 = period
+
+    def remove_period_by_slot(self, slot: int) -> None:
+        """Remove a period by slot number."""
+        self.set_period_by_slot(slot, None)
+
+    def check_overlap(self, new_start: float, new_end: float, exclude_slot: int | None = None) -> bool:
+        """
+        Check if a new period would overlap with existing periods.
+
+        Args:
+            new_start: Start timestamp of new period
+            new_end: End timestamp of new period
+            exclude_slot: Slot to exclude from check (for editing existing period)
+
+        Returns:
+            True if overlap detected, False otherwise
+
+        """
+        for i in range(1, 11):
+            if exclude_slot is not None and i == exclude_slot:
+                continue
+            period = self.get_period_by_slot(i)
+            if period and period.is_complete:
+                # Check for overlap: not (new_end <= existing_start or new_start >= existing_end)
+                if not (new_end <= period.start_timestamp or new_start >= period.end_timestamp):
+                    return True
+        return False
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for storage."""
+        return {
+            "period_1": self.period_1.to_dict() if self.period_1 else None,
+            "period_2": self.period_2.to_dict() if self.period_2 else None,
+            "period_3": self.period_3.to_dict() if self.period_3 else None,
+            "period_4": self.period_4.to_dict() if self.period_4 else None,
+            "period_5": self.period_5.to_dict() if self.period_5 else None,
+            "period_6": self.period_6.to_dict() if self.period_6 else None,
+            "period_7": self.period_7.to_dict() if self.period_7 else None,
+            "period_8": self.period_8.to_dict() if self.period_8 else None,
+            "period_9": self.period_9.to_dict() if self.period_9 else None,
+            "period_10": self.period_10.to_dict() if self.period_10 else None,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DailyNonwearMarkers:
+        """Create from dictionary data."""
+        return cls(
+            period_1=ManualNonwearPeriod.from_dict(data["period_1"]) if data.get("period_1") else None,
+            period_2=ManualNonwearPeriod.from_dict(data["period_2"]) if data.get("period_2") else None,
+            period_3=ManualNonwearPeriod.from_dict(data["period_3"]) if data.get("period_3") else None,
+            period_4=ManualNonwearPeriod.from_dict(data["period_4"]) if data.get("period_4") else None,
+            period_5=ManualNonwearPeriod.from_dict(data["period_5"]) if data.get("period_5") else None,
+            period_6=ManualNonwearPeriod.from_dict(data["period_6"]) if data.get("period_6") else None,
+            period_7=ManualNonwearPeriod.from_dict(data["period_7"]) if data.get("period_7") else None,
+            period_8=ManualNonwearPeriod.from_dict(data["period_8"]) if data.get("period_8") else None,
+            period_9=ManualNonwearPeriod.from_dict(data["period_9"]) if data.get("period_9") else None,
+            period_10=ManualNonwearPeriod.from_dict(data["period_10"]) if data.get("period_10") else None,
+        )
+
+
+@dataclass
 class SleepMetrics:
     """Comprehensive sleep scoring metrics."""
 
@@ -371,18 +632,15 @@ class SleepMetrics:
     # Algorithm-specific values (legacy columns - kept for backward compatibility)
     sadeh_onset: int | None = None
     sadeh_offset: int | None = None
-    choi_onset: int | None = None
-    choi_offset: int | None = None
-    total_choi_counts: int | None = None
 
     # Generic algorithm values (NEW - preferred for new code)
     sleep_algorithm_onset: int | None = None
     sleep_algorithm_offset: int | None = None
 
-    # NWT sensor data values
-    nwt_onset: int | None = None
-    nwt_offset: int | None = None
-    total_nwt_counts: int | None = None
+    # Overlapping nonwear minutes during sleep period
+    # These are the sum of 0/1 values per minute epoch = total nonwear minutes
+    overlapping_nonwear_minutes_algorithm: int | None = None
+    overlapping_nonwear_minutes_sensor: int | None = None
 
     # Registry-based dynamic fields
     _dynamic_fields: dict[str, Any] = field(default_factory=dict, init=False)
@@ -443,15 +701,15 @@ class SleepMetrics:
 
     def _create_export_row(self, sleep_period: SleepPeriod | None) -> dict[str, Any]:
         """Create a single export row for a specific sleep period."""
-        # Reconstruct full_id with correct format: ID + Timepoint + Group
-        correct_full_id = f"{self.participant.numerical_id} {self.participant.timepoint} {self.participant.group}"
+        # Reconstruct full_id with correct format: ID + Timepoint + Group (use _str fields for extracted values)
+        correct_full_id = f"{self.participant.numerical_id} {self.participant.timepoint_str} {self.participant.group_str}"
 
         # Base export data
         export_data = {
             ExportColumn.FULL_PARTICIPANT_ID: correct_full_id,
             ExportColumn.NUMERICAL_PARTICIPANT_ID: self.participant.numerical_id,
-            ExportColumn.PARTICIPANT_GROUP: self.participant.group,
-            ExportColumn.PARTICIPANT_TIMEPOINT: self.participant.timepoint,
+            ExportColumn.PARTICIPANT_GROUP: self.participant.group_str,
+            ExportColumn.PARTICIPANT_TIMEPOINT: self.participant.timepoint_str,
             ExportColumn.SLEEP_ALGORITHM: self.algorithm_type,
             ExportColumn.SLEEP_DATE: self.analysis_date,  # The date/night being analyzed (from UI dropdown)
             ExportColumn.SAVED_AT: self.updated_at,
@@ -508,15 +766,15 @@ class SleepMetrics:
 
     def _create_no_sleep_export_row(self) -> dict[str, Any]:
         """Create export row for NO_SLEEP case."""
-        # Reconstruct full_id with correct format: ID + Timepoint + Group
-        correct_full_id = f"{self.participant.numerical_id} {self.participant.timepoint} {self.participant.group}"
+        # Reconstruct full_id with correct format: ID + Timepoint + Group (use _str fields for extracted values)
+        correct_full_id = f"{self.participant.numerical_id} {self.participant.timepoint_str} {self.participant.group_str}"
 
         # Base export data
         export_data = {
             ExportColumn.FULL_PARTICIPANT_ID: correct_full_id,
             ExportColumn.NUMERICAL_PARTICIPANT_ID: self.participant.numerical_id,
-            ExportColumn.PARTICIPANT_GROUP: self.participant.group,
-            ExportColumn.PARTICIPANT_TIMEPOINT: self.participant.timepoint,
+            ExportColumn.PARTICIPANT_GROUP: self.participant.group_str,
+            ExportColumn.PARTICIPANT_TIMEPOINT: self.participant.timepoint_str,
             ExportColumn.SLEEP_ALGORITHM: self.algorithm_type,
             ExportColumn.SLEEP_DATE: self.analysis_date,  # The date/night being analyzed (from UI dropdown)
             ExportColumn.SAVED_AT: self.updated_at,
@@ -627,56 +885,8 @@ class SleepMetrics:
             elif value == 1:
                 export_data[ExportColumn.SADEH_OFFSET] = AlgorithmResult.SLEEP
 
-        # Convert Choi algorithm values (0=On, 1=Off - accelerometer on/off logic)
-        if ExportColumn.CHOI_ONSET in export_data:
-            value = export_data[ExportColumn.CHOI_ONSET]
-            if value == 0:
-                export_data[ExportColumn.CHOI_ONSET] = AlgorithmResult.WEARING  # 0 = accelerometer On
-            elif value == 1:
-                export_data[ExportColumn.CHOI_ONSET] = AlgorithmResult.NOT_WEARING  # 1 = accelerometer Off
-
-        if ExportColumn.CHOI_OFFSET in export_data:
-            value = export_data[ExportColumn.CHOI_OFFSET]
-            if value == 0:
-                export_data[ExportColumn.CHOI_OFFSET] = AlgorithmResult.WEARING  # 0 = accelerometer On
-            elif value == 1:
-                export_data[ExportColumn.CHOI_OFFSET] = AlgorithmResult.NOT_WEARING  # 1 = accelerometer Off
-
-        # Total Choi Counts should remain as integer but we can format it nicely
-        if ExportColumn.TOTAL_CHOI_COUNTS in export_data:
-            value = export_data[ExportColumn.TOTAL_CHOI_COUNTS]
-            if value is not None:
-                # Ensure it's displayed as an integer (no decimal places)
-                # Safe type conversion with validation
-                try:
-                    export_data[ExportColumn.TOTAL_CHOI_COUNTS] = int(value) if value is not None and value != 0 else 0
-                except (ValueError, TypeError):
-                    export_data[ExportColumn.TOTAL_CHOI_COUNTS] = 0
-
-        # Convert NWT sensor values (similar logic to Choi algorithm)
-        if ExportColumn.NWT_ONSET in export_data:
-            value = export_data[ExportColumn.NWT_ONSET]
-            if value == 0:
-                export_data[ExportColumn.NWT_ONSET] = AlgorithmResult.WEARING  # 0 = sensor detected
-            elif value == 1:
-                export_data[ExportColumn.NWT_ONSET] = AlgorithmResult.NOT_WEARING  # 1 = sensor not detected
-
-        if ExportColumn.NWT_OFFSET in export_data:
-            value = export_data[ExportColumn.NWT_OFFSET]
-            if value == 0:
-                export_data[ExportColumn.NWT_OFFSET] = AlgorithmResult.WEARING  # 0 = sensor detected
-            elif value == 1:
-                export_data[ExportColumn.NWT_OFFSET] = AlgorithmResult.NOT_WEARING  # 1 = sensor not detected
-
-        # Total NWT Counts should remain as integer
-        if ExportColumn.TOTAL_NWT_COUNTS in export_data:
-            value = export_data[ExportColumn.TOTAL_NWT_COUNTS]
-            if value is not None:
-                # Ensure it's displayed as an integer (no decimal places)
-                try:
-                    export_data[ExportColumn.TOTAL_NWT_COUNTS] = int(value) if value is not None and value != 0 else 0
-                except (ValueError, TypeError):
-                    export_data[ExportColumn.TOTAL_NWT_COUNTS] = 0
+        # Overlapping nonwear minutes are already integers representing minutes
+        # No conversion needed - they are displayed as-is
 
     def to_database_dict(self) -> dict[str, Any]:
         """Convert to database storage format using column registry."""
@@ -685,8 +895,8 @@ class SleepMetrics:
             DatabaseColumn.FILENAME: self.filename,
             DatabaseColumn.PARTICIPANT_KEY: self.participant.participant_key,  # Add composite key
             DatabaseColumn.PARTICIPANT_ID: self.participant.numerical_id,
-            DatabaseColumn.PARTICIPANT_GROUP: self.participant.group,
-            DatabaseColumn.PARTICIPANT_TIMEPOINT: self.participant.timepoint,
+            DatabaseColumn.PARTICIPANT_GROUP: self.participant.group_str,
+            DatabaseColumn.PARTICIPANT_TIMEPOINT: self.participant.timepoint_str,
             DatabaseColumn.ANALYSIS_DATE: self.analysis_date,
             DatabaseColumn.UPDATED_AT: self.updated_at,
         }
@@ -731,9 +941,8 @@ class SleepMetrics:
                 "sleep_fragmentation_index": self.sleep_fragmentation_index,
                 "sadeh_onset": self.sadeh_onset,
                 "sadeh_offset": self.sadeh_offset,
-                "choi_onset": self.choi_onset,
-                "choi_offset": self.choi_offset,
-                "total_choi_counts": self.total_choi_counts,
+                "overlapping_nonwear_minutes_algorithm": self.overlapping_nonwear_minutes_algorithm,
+                "overlapping_nonwear_minutes_sensor": self.overlapping_nonwear_minutes_sensor,
                 "created_at": self.created_at,
                 "updated_at": self.updated_at,
             },
@@ -744,8 +953,8 @@ class SleepMetrics:
             {
                 "participant_numerical_id": self.participant.numerical_id,
                 "participant_full_id": self.participant.full_id,
-                "participant_group": self.participant.group,
-                "participant_timepoint": self.participant.timepoint,
+                "participant_group": self.participant.group_str,
+                "participant_timepoint": self.participant.timepoint_str,
             },
         )
 
@@ -814,15 +1023,12 @@ class SleepMetrics:
             # Legacy algorithm columns
             "sadeh_onset": self.sadeh_onset,
             "sadeh_offset": self.sadeh_offset,
-            "choi_onset": self.choi_onset,
-            "choi_offset": self.choi_offset,
-            "total_choi_counts": self.total_choi_counts,
             # Generic algorithm columns (maps to same values as sadeh for now)
             "sleep_algorithm_onset": self.sleep_algorithm_onset if self.sleep_algorithm_onset is not None else self.sadeh_onset,
             "sleep_algorithm_offset": self.sleep_algorithm_offset if self.sleep_algorithm_offset is not None else self.sadeh_offset,
-            "nwt_onset": self.nwt_onset,
-            "nwt_offset": self.nwt_offset,
-            "total_nwt_counts": self.total_nwt_counts,
+            # Overlapping nonwear minutes during sleep period
+            "overlapping_nonwear_minutes_algorithm": self.overlapping_nonwear_minutes_algorithm,
+            "overlapping_nonwear_minutes_sensor": self.overlapping_nonwear_minutes_sensor,
             "onset_timestamp": self.daily_sleep_markers.get_main_sleep().onset_timestamp if self.daily_sleep_markers.get_main_sleep() else None,
             "offset_timestamp": self.daily_sleep_markers.get_main_sleep().offset_timestamp if self.daily_sleep_markers.get_main_sleep() else None,
             "onset_time": self.onset_time,
@@ -831,8 +1037,8 @@ class SleepMetrics:
             "saved_date": self.updated_at,
             "participant_id": self.participant.numerical_id,
             "full_participant_id": self.participant.full_id,
-            "participant_group": self.participant.group,
-            "participant_timepoint": self.participant.timepoint,
+            "participant_group": self.participant.group_str,
+            "participant_timepoint": self.participant.timepoint_str,
             # Nap-related fields from diary data (stored in dynamic fields)
             "nap_occurred": self._dynamic_fields.get("nap_occurred"),
             "nap_onset_time": self._dynamic_fields.get("nap_onset_time"),
@@ -864,12 +1070,8 @@ class SleepMetrics:
                 "sleep_fragmentation_index",
                 "sadeh_onset",
                 "sadeh_offset",
-                "choi_onset",
-                "choi_offset",
-                "total_choi_counts",
-                "nwt_onset",
-                "nwt_offset",
-                "total_nwt_counts",
+                "overlapping_nonwear_minutes_algorithm",
+                "overlapping_nonwear_minutes_sensor",
             }
             if field_name in period_specific_metrics:
                 return None
@@ -909,9 +1111,6 @@ class SleepMetrics:
             # Legacy algorithm columns
             "sadeh_onset": period_metrics.get("sadeh_onset") if period_metrics else (self.sadeh_onset if is_main_sleep else None),
             "sadeh_offset": period_metrics.get("sadeh_offset") if period_metrics else (self.sadeh_offset if is_main_sleep else None),
-            "choi_onset": period_metrics.get("choi_onset") if period_metrics else (self.choi_onset if is_main_sleep else None),
-            "choi_offset": period_metrics.get("choi_offset") if period_metrics else (self.choi_offset if is_main_sleep else None),
-            "total_choi_counts": period_metrics.get("total_choi_counts") if period_metrics else (self.total_choi_counts if is_main_sleep else None),
             # Generic algorithm columns
             "sleep_algorithm_onset": period_metrics.get("sleep_algorithm_onset")
             if period_metrics
@@ -919,9 +1118,13 @@ class SleepMetrics:
             "sleep_algorithm_offset": period_metrics.get("sleep_algorithm_offset")
             if period_metrics
             else (self.sleep_algorithm_offset if self.sleep_algorithm_offset is not None else (self.sadeh_offset if is_main_sleep else None)),
-            "nwt_onset": self._calculate_nwt_from_database(sleep_period, "onset") if sleep_period and sleep_period.is_complete else None,
-            "nwt_offset": self._calculate_nwt_from_database(sleep_period, "offset") if sleep_period and sleep_period.is_complete else None,
-            "total_nwt_counts": self._calculate_nwt_from_database(sleep_period, "total") if sleep_period and sleep_period.is_complete else None,
+            # Overlapping nonwear minutes during sleep period
+            "overlapping_nonwear_minutes_algorithm": period_metrics.get("overlapping_nonwear_minutes_algorithm")
+            if period_metrics
+            else (self.overlapping_nonwear_minutes_algorithm if is_main_sleep else None),
+            "overlapping_nonwear_minutes_sensor": self._calculate_nwt_overlapping_minutes(sleep_period)
+            if sleep_period and sleep_period.is_complete
+            else None,
             # Period-specific timestamps
             "onset_timestamp": sleep_period.onset_timestamp if sleep_period and sleep_period.is_complete else None,
             "offset_timestamp": sleep_period.offset_timestamp if sleep_period and sleep_period.is_complete else None,
@@ -934,8 +1137,8 @@ class SleepMetrics:
             "saved_date": self.updated_at,
             "participant_id": self.participant.numerical_id,
             "full_participant_id": self.participant.full_id,
-            "participant_group": self.participant.group,
-            "participant_timepoint": self.participant.timepoint,
+            "participant_group": self.participant.group_str,
+            "participant_timepoint": self.participant.timepoint_str,
             # Nap-related fields from diary data (stored in dynamic fields) - same for all periods
             "nap_occurred": self._dynamic_fields.get("nap_occurred"),
             "nap_onset_time": self._dynamic_fields.get("nap_onset_time"),
@@ -970,12 +1173,8 @@ class SleepMetrics:
                 "sleep_fragmentation_index": self.sleep_fragmentation_index,
                 "sadeh_onset": self.sadeh_onset,
                 "sadeh_offset": self.sadeh_offset,
-                "choi_onset": self.choi_onset,
-                "choi_offset": self.choi_offset,
-                "total_choi_counts": self.total_choi_counts,
-                "nwt_onset": self.nwt_onset,
-                "nwt_offset": self.nwt_offset,
-                "total_nwt_counts": self.total_nwt_counts,
+                "overlapping_nonwear_minutes_algorithm": self.overlapping_nonwear_minutes_algorithm,
+                "overlapping_nonwear_minutes_sensor": self.overlapping_nonwear_minutes_sensor,
             }
 
         return stored_metrics
@@ -988,8 +1187,13 @@ class SleepMetrics:
         period_key = f"period_{sleep_period.marker_index}_metrics"
         self._dynamic_fields[period_key] = metrics
 
-    def _calculate_nwt_from_database(self, sleep_period: SleepPeriod, metric_type: str) -> int | None:
-        """Calculate NWT sensor values from database using sleep period timestamps."""
+    def _calculate_nwt_overlapping_minutes(self, sleep_period: SleepPeriod) -> int | None:
+        """
+        Calculate total overlapping nonwear minutes from NWT sensor data.
+
+        Returns the total minutes of NWT sensor-detected nonwear that overlap
+        with the sleep period.
+        """
         if not sleep_period or not sleep_period.is_complete:
             return None
 
@@ -1007,54 +1211,35 @@ class SleepMetrics:
             nonwear_service = NonwearDataService(_cached_db_manager)
 
             # Convert timestamps to datetime objects
-            start_time = datetime.fromtimestamp(sleep_period.onset_timestamp)
-            end_time = datetime.fromtimestamp(sleep_period.offset_timestamp)
+            sleep_start = datetime.fromtimestamp(sleep_period.onset_timestamp)
+            sleep_end = datetime.fromtimestamp(sleep_period.offset_timestamp)
 
             # Query NWT sensor periods for this file and time range
             nwt_periods = nonwear_service.get_nonwear_periods_for_file(
-                filename=self.filename, source=NonwearDataSource.NONWEAR_SENSOR, start_time=start_time, end_time=end_time
+                filename=self.filename, source=NonwearDataSource.NONWEAR_SENSOR, start_time=sleep_start, end_time=sleep_end
             )
 
-            if metric_type == "onset":
-                # Check if onset time falls within any NWT period
-                for period in nwt_periods:
-                    # Handle both datetime objects and string timestamps
-                    period_start = period.start_time if isinstance(period.start_time, datetime) else datetime.fromisoformat(period.start_time)
-                    period_end = period.end_time if isinstance(period.end_time, datetime) else datetime.fromisoformat(period.end_time)
-                    if period_start <= start_time <= period_end:
-                        return 1  # Not wearing (in nonwear period)
-                return 0  # Wearing (not in nonwear period)
+            # Calculate total overlapping minutes
+            total_overlapping_minutes = 0
+            for period in nwt_periods:
+                # Handle both datetime objects and string timestamps
+                period_start = period.start_time if isinstance(period.start_time, datetime) else datetime.fromisoformat(period.start_time)
+                period_end = period.end_time if isinstance(period.end_time, datetime) else datetime.fromisoformat(period.end_time)
 
-            if metric_type == "offset":
-                # Check if offset time falls within any NWT period
-                for period in nwt_periods:
-                    # Handle both datetime objects and string timestamps
-                    period_start = period.start_time if isinstance(period.start_time, datetime) else datetime.fromisoformat(period.start_time)
-                    period_end = period.end_time if isinstance(period.end_time, datetime) else datetime.fromisoformat(period.end_time)
-                    if period_start <= end_time <= period_end:
-                        return 1  # Not wearing (in nonwear period)
-                return 0  # Wearing (not in nonwear period)
+                # Calculate the overlap between sleep period and nonwear period
+                overlap_start = max(sleep_start, period_start)
+                overlap_end = min(sleep_end, period_end)
 
-            if metric_type == "total":
-                # Count total number of NWT periods that overlap with sleep period
-                overlapping_periods = 0
-                for period in nwt_periods:
-                    # Handle both datetime objects and string timestamps
-                    period_start = period.start_time if isinstance(period.start_time, datetime) else datetime.fromisoformat(period.start_time)
-                    period_end = period.end_time if isinstance(period.end_time, datetime) else datetime.fromisoformat(period.end_time)
-                    # Check for any overlap between sleep period and NWT period
-                    if not (period_end < start_time or period_start > end_time):
-                        overlapping_periods += 1
-                return overlapping_periods
+                if overlap_start < overlap_end:
+                    # There is an overlap - calculate minutes
+                    overlap_seconds = (overlap_end - overlap_start).total_seconds()
+                    total_overlapping_minutes += int(overlap_seconds / 60)
+
+            return total_overlapping_minutes
 
         except Exception as e:
-            import logging
-
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Error calculating NWT {metric_type} from database: {e}")
+            logger.warning("Error calculating NWT overlapping minutes: %s", e)
             return None
-
-        return None
 
     def set_dynamic_field(self, field_name: str, value: Any) -> None:
         """Set a dynamic field value."""
@@ -1102,6 +1287,7 @@ class AppConfig:
     include_metadata: bool = True
     include_config_in_metadata: bool = True  # Include config settings in CSV metadata header
     export_config_sidecar: bool = True  # Export config as separate .config.csv file
+    export_nonwear_separate: bool = True  # Export nonwear markers to separate file
 
     # Hardcoded import settings
     nwt_data_folder: str = ""  # NWT sensor data folder
@@ -1152,6 +1338,9 @@ class AppConfig:
     night_end_hour: int = 7
     max_sleep_periods: int = 4  # 1 main sleep + up to 3 naps (hardcoded, not configurable)
     choi_axis: str = ActivityDataPreference.VECTOR_MAGNITUDE
+
+    # Data Paradigm Selection (controls file types and available algorithms)
+    data_paradigm: str = StudyDataParadigm.EPOCH_BASED  # StudyDataParadigm enum value
 
     # Sleep Scoring Algorithm Selection (DI pattern)
     sleep_algorithm_id: str = "sadeh_1994_actilife"  # Algorithm identifier for factory

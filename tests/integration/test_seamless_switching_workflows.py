@@ -430,16 +430,15 @@ class TestCompleteWorkflowSwitching:
         assert y_diff <= tolerance, f"Y range difference {y_diff:.3f} exceeds tolerance {tolerance}"
 
 
-@pytest.mark.skip(reason="Complex integration tests requiring MainWindow instantiation - needs dedicated integration test infrastructure")
 class TestConcurrentSwitchingOperations:
     """Test concurrent and overlapping switching operations."""
 
     @pytest.fixture
-    def concurrent_test_setup(self, qt_app, temp_database):
+    def concurrent_test_setup(self, qt_app):
         """Setup for concurrent switching tests."""
         window = Mock()
-        window.plot_widget = Mock(spec=ActivityPlotWidget)
-        window.data_service = Mock(spec=UnifiedDataService)
+        window.plot_widget = Mock()
+        window.data_service = Mock()
 
         # Track operation states
         window.switching_in_progress = False
@@ -448,33 +447,42 @@ class TestConcurrentSwitchingOperations:
         return window
 
     def test_overlapping_switch_requests(self, concurrent_test_setup):
-        """Test handling of overlapping switch requests."""
+        """Test handling of overlapping switch requests when a switch is in progress."""
         window = concurrent_test_setup
 
-        # Simulate slow loading operation
-        def slow_load_simulation(participant_key, view_mode):
+        call_count = 0
+
+        # Simulate loading operation that checks switching_in_progress state
+        def load_simulation(participant_key, view_mode):
+            nonlocal call_count
+            call_count += 1
+
             if window.switching_in_progress:
+                # Queue the request if a switch is already in progress
                 window.pending_switches.append((participant_key, view_mode))
                 return False
 
+            # Mark as in progress (would stay True until async operation completes)
             window.switching_in_progress = True
-            time.sleep(0.1)  # Simulate slow operation
-            window.switching_in_progress = False
             return True
 
-        window.data_service.load_participant_data.side_effect = slow_load_simulation
+        window.data_service.load_participant_data.side_effect = load_simulation
 
-        # Submit overlapping requests
+        # Submit requests
         participant1 = ParticipantKey("4000", "BO", "G1")
         participant2 = ParticipantKey("4001", "P2", "G2")
 
-        # First request should succeed
+        # First request should succeed and mark switching_in_progress
         result1 = window.data_service.load_participant_data(participant1, ViewMode.HOURS_24)
         assert result1, "First request should succeed"
+        assert window.switching_in_progress, "Should be marked as in progress after first call"
 
-        # Overlapping requests should be queued
+        # Second request should be queued (switching_in_progress is still True)
         result2 = window.data_service.load_participant_data(participant2, ViewMode.HOURS_48)
         assert not result2, "Overlapping request should be queued"
+
+        # Verify both calls were made
+        assert call_count == 2, f"Expected 2 calls, got {call_count}"
 
         # Verify pending queue
         assert len(window.pending_switches) == 1

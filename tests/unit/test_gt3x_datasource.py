@@ -1,7 +1,8 @@
 """
 Unit tests for GT3XDataSourceLoader.
 
-Tests the GT3X binary data source loader implementation using pygt3x library.
+Tests the GT3X binary data source loader implementation.
+Mock GT3X files include proper log.bin files compatible with both pygt3x and gt3x-rs backends.
 """
 
 from __future__ import annotations
@@ -14,10 +15,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sleep_scoring_app.core.algorithms.datasource_protocol import DataSourceLoader
-from sleep_scoring_app.core.algorithms.gt3x_datasource import GT3XDataSourceLoader
 from sleep_scoring_app.core.constants import DatabaseColumn
 from sleep_scoring_app.core.dataclasses import ColumnMapping
+from sleep_scoring_app.io.sources.gt3x_loader import GT3XDataSourceLoader
+from sleep_scoring_app.io.sources.loader_protocol import DataSourceLoader
 
 
 @pytest.fixture
@@ -32,12 +33,79 @@ def gt3x_loader_raw() -> GT3XDataSourceLoader:
     return GT3XDataSourceLoader(return_raw=True)
 
 
+def _create_log_bin(n_samples: int, sample_rate: int = 30) -> bytes:
+    """Create a valid log.bin file with ACTIVITY2 records for gt3x-rs.
+
+    GT3X log.bin format:
+    - 1 byte separator (0x1E)
+    - 1 byte record type (0x1A for ACTIVITY2)
+    - 4 bytes timestamp (u32 little-endian, seconds since device epoch)
+    - 2 bytes payload size (u16 little-endian)
+    - payload bytes (for ACTIVITY2: 6 bytes per sample as 3 x int16 LE)
+    - 1 byte checksum (bitwise NOT of XOR of all header and payload bytes)
+
+    gt3x-rs checksum validation: (!xor_result) == checksum
+    So checksum = ~(xor of all bytes) & 0xFF
+    """
+    RECORD_SEPARATOR = 0x1E
+    RECORD_ACTIVITY2 = 0x1A
+
+    log_data = b""
+
+    # Create activity records - each record contains samples for 1 second
+    samples_per_record = sample_rate
+    n_records = (n_samples + samples_per_record - 1) // samples_per_record
+
+    for record_idx in range(n_records):
+        timestamp = record_idx  # Seconds since start
+
+        # Generate samples for this record
+        record_samples = min(samples_per_record, n_samples - record_idx * samples_per_record)
+
+        # ACTIVITY2 format: 6 bytes per sample (3 x int16 little-endian, XYZ order)
+        payload = b""
+        sample_idx = record_idx * samples_per_record
+        for s in range(record_samples):
+            i = sample_idx + s
+            # Create varying acceleration values (raw ADC values)
+            # Scale is 341.0, so 341 raw = 1g
+            x_raw = int(100 * np.sin(i / 10)) + 100
+            y_raw = int(341 + 50 * np.cos(i / 10))  # ~1g vertical
+            z_raw = int(50 * np.sin(i / 15))
+
+            # Clamp to int16 range
+            x_raw = max(-32768, min(32767, x_raw))
+            y_raw = max(-32768, min(32767, y_raw))
+            z_raw = max(-32768, min(32767, z_raw))
+
+            # Pack as 16-bit little-endian (XYZ order for ACTIVITY2)
+            payload += struct.pack("<hhh", x_raw, y_raw, z_raw)
+
+        payload_size = len(payload)
+
+        # Build header: separator, type, timestamp (u32 LE), payload_size (u16 LE)
+        header = struct.pack("<BBIH", RECORD_SEPARATOR, RECORD_ACTIVITY2, timestamp, payload_size)
+
+        # Calculate checksum: XOR all header and payload bytes, then bitwise NOT
+        # gt3x-rs expects: (!xor_result) == checksum
+        xor_result = 0
+        for b in header:
+            xor_result ^= b
+        for b in payload:
+            xor_result ^= b
+        checksum = (~xor_result) & 0xFF  # Bitwise NOT, masked to 8 bits
+
+        log_data += header + payload + struct.pack("B", checksum)
+
+    return log_data
+
+
 @pytest.fixture
 def mock_gt3x_file(tmp_path):
-    """Create a mock GT3X file with realistic structure compatible with pygt3x."""
+    """Create a mock GT3X file with realistic structure compatible with gt3x-rs."""
     gt3x_path = tmp_path / "test.gt3x"
 
-    # Create info.txt content (pygt3x expects .NET ticks for dates)
+    # Create info.txt content (gt3x-rs expects .NET ticks for dates)
     # .NET ticks for 2024-01-15 08:00:00 UTC
     start_ticks = 638412384000000000
     stop_ticks = 638412420000000000
@@ -49,45 +117,27 @@ Sample Rate: 30
 Start Date: {start_ticks}
 Stop Date: {stop_ticks}
 TimeZone: 00:00:00
+Acceleration Scale: 341.0
 """
 
-    # Create log.txt (required by pygt3x)
-    log_content = ""
+    # Create log.bin with ACTIVITY2 records (required by gt3x-rs)
+    n_samples = 180  # 6 seconds at 30 Hz
+    log_bin = _create_log_bin(n_samples, sample_rate=30)
 
-    # Create binary activity data
-    # Generate 180 samples (6 seconds at 30 Hz)
-    n_samples = 180
-
-    activity_data = b""
-    for i in range(n_samples):
-        # Create varying acceleration values in milligravities
-        # Convert to raw counts (multiply by scale factor 341.0)
-        x_g = 0.1 * (i % 10 - 5)  # Vary between -0.5g and 0.5g
-        y_g = 1.0 + 0.1 * (i % 5)  # Vary around 1g (vertical, device upright)
-        z_g = 0.05 * (i % 8 - 4)  # Small variation
-
-        x_raw = int(x_g * 341.0)
-        y_raw = int(y_g * 341.0)
-        z_raw = int(z_g * 341.0)
-
-        # Pack as little-endian signed 16-bit integers
-        activity_data += struct.pack("<hhh", x_raw, y_raw, z_raw)
-
-    # Create ZIP archive with log.txt
+    # Create ZIP archive with log.bin
     with zipfile.ZipFile(gt3x_path, "w") as zf:
         zf.writestr("info.txt", info_content)
-        zf.writestr("activity.bin", activity_data)
-        zf.writestr("log.txt", log_content)
+        zf.writestr("log.bin", log_bin)
 
     return gt3x_path
 
 
 @pytest.fixture
 def mock_gt3x_file_large_epoch(tmp_path):
-    """Create GT3X file with enough data for full epoch aggregation compatible with pygt3x."""
+    """Create GT3X file with enough data for full epoch aggregation compatible with gt3x-rs."""
     gt3x_path = tmp_path / "test_large.gt3x"
 
-    # Create info.txt (pygt3x expects .NET ticks for dates)
+    # Create info.txt (gt3x-rs expects .NET ticks for dates)
     # .NET ticks for 2024-01-15 08:00:00 UTC
     start_ticks = 638412384000000000
 
@@ -97,27 +147,17 @@ Sample Rate: 30
 Start Date: {start_ticks}
 Stop Date: 0
 TimeZone: 00:00:00
+Acceleration Scale: 341.0
 """
 
-    # Create log.txt (required by pygt3x)
-    log_content = ""
-
+    # Create log.bin with ACTIVITY2 records (required by gt3x-rs)
     # Create 3 minutes of data (3 * 60 * 30 = 5400 samples)
     n_samples = 5400
-
-    activity_data = b""
-    for i in range(n_samples):
-        # Sine wave pattern for realistic-looking data
-        x_raw = int(100 * np.sin(i / 100))
-        y_raw = int(300 + 50 * np.cos(i / 100))
-        z_raw = int(50 * np.sin(i / 150))
-
-        activity_data += struct.pack("<hhh", x_raw, y_raw, z_raw)
+    log_bin = _create_log_bin(n_samples, sample_rate=30)
 
     with zipfile.ZipFile(gt3x_path, "w") as zf:
         zf.writestr("info.txt", info_content)
-        zf.writestr("activity.bin", activity_data)
-        zf.writestr("log.txt", log_content)
+        zf.writestr("log.bin", log_bin)
 
     return gt3x_path
 

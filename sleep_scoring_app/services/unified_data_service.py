@@ -1378,7 +1378,7 @@ class UnifiedDataService:
             # Extract participant ID from filename using centralized extractor
             filename = Path(self.main_window.selected_file).name
             participant_info = extract_participant_info(filename)
-            participant_id = participant_info.full_id if participant_info.numerical_id != "Unknown" else None
+            participant_id = participant_info.full_id if participant_info.numerical_id != "UNKNOWN" else None
 
             if not participant_id:
                 logger.debug(f"No participant ID found in filename: {filename}")
@@ -1426,7 +1426,7 @@ class UnifiedDataService:
             # Extract participant ID from filename using centralized extractor
             filename = Path(self.main_window.selected_file).name
             participant_info = extract_participant_info(filename)
-            participant_id = participant_info.full_id if participant_info.numerical_id != "Unknown" else None
+            participant_id = participant_info.full_id if participant_info.numerical_id != "UNKNOWN" else None
 
             if not participant_id:
                 return None
@@ -1467,7 +1467,7 @@ class UnifiedDataService:
         try:
             filename = Path(self.main_window.selected_file).name
             participant_info = extract_participant_info(filename)
-            participant_id = participant_info.full_id if participant_info.numerical_id != "Unknown" else None
+            participant_id = participant_info.full_id if participant_info.numerical_id != "UNKNOWN" else None
 
             if not participant_id:
                 return False
@@ -1498,6 +1498,54 @@ class UnifiedDataService:
             logger.debug("Diary data cache cleared")
         except Exception as e:
             logger.exception(f"Failed to clear diary cache: {e}")
+
+    def clear_file_cache(self, filename: str) -> None:
+        """
+        Clear all cached data for a specific file.
+
+        This is called when a file is deleted to ensure no stale data remains.
+
+        Args:
+            filename: Name of the file that was deleted
+
+        """
+        try:
+            # Clear from main 48h data cache
+            if hasattr(self, "main_48h_data_cache"):
+                # Cache keys are filenames, so remove this specific file
+                if filename in self.main_48h_data_cache.cache:
+                    del self.main_48h_data_cache.cache[filename]
+                    logger.debug("Removed %s from main_48h_data_cache", filename)
+
+            # Clear from date ranges cache
+            if hasattr(self, "_cached_date_ranges"):
+                if filename in self._cached_date_ranges.cache:
+                    del self._cached_date_ranges.cache[filename]
+                    logger.debug("Removed %s from _cached_date_ranges", filename)
+
+            # Clear from marker status cache
+            if hasattr(self, "marker_status_cache"):
+                if filename in self.marker_status_cache.cache:
+                    del self.marker_status_cache.cache[filename]
+                    logger.debug("Removed %s from marker_status_cache", filename)
+
+            # Clear current data if it matches the deleted file
+            if hasattr(self, "main_48h_data") and self.main_48h_data:
+                # Check if this is the current file
+                if hasattr(self.data_manager, "current_file_info"):
+                    current_file = self.data_manager.current_file_info
+                    if current_file and current_file.get("filename") == filename:
+                        self.main_48h_data = None
+                        self.data_manager.clear_current_data()
+                        logger.debug("Cleared current data for deleted file %s", filename)
+
+            # Clear algorithm caches to ensure fresh data on next load
+            self._clear_all_algorithm_caches()
+
+            logger.info("Cleared all caches for deleted file: %s", filename)
+
+        except Exception as e:
+            logger.exception("Failed to clear cache for file %s: %s", filename, e)
 
     # === ActiLife Integration Stubs ===
     # These methods are called by export functionality but not implemented

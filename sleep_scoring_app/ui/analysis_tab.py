@@ -135,6 +135,18 @@ class AnalysisTab(QWidget):
         else:
             logger.warning("Parent does not have handle_sleep_markers_changed method")
 
+        # Connect nonwear markers signal only if parent has the handler
+        if hasattr(self.parent, "handle_nonwear_markers_changed"):
+            self.plot_widget.nonwear_markers_changed.connect(self.parent.handle_nonwear_markers_changed)
+        else:
+            logger.debug("Parent does not have handle_nonwear_markers_changed method (optional)")
+
+        # Connect nonwear marker selection signal for table updates
+        if hasattr(self.parent, "handle_nonwear_marker_selected"):
+            self.plot_widget.nonwear_marker_selected.connect(self.parent.handle_nonwear_marker_selected)
+        else:
+            logger.debug("Parent does not have handle_nonwear_marker_selected method (optional)")
+
         # Create top-level vertical splitter to separate file selection from plot area
         top_level_splitter = QSplitter(Qt.Orientation.Vertical)
 
@@ -158,12 +170,30 @@ class AnalysisTab(QWidget):
         # Create vertical splitter for plot area and diary table
         main_splitter = QSplitter(Qt.Orientation.Vertical)
 
-        # Create horizontal layout for plot and data tables (top section)
-        plot_and_tables_widget = QWidget()
-        plot_and_tables_layout = QHBoxLayout(plot_and_tables_widget)
-        plot_and_tables_layout.setContentsMargins(0, 0, 0, 0)
+        # Create horizontal splitter for plot and data tables (top section)
+        # This allows users to resize the side tables by dragging
+        plot_and_tables_splitter = QSplitter(Qt.Orientation.Horizontal)
+        plot_and_tables_splitter.setChildrenCollapsible(False)
+        plot_and_tables_splitter.setHandleWidth(6)
 
-        # Left data table (onset/first marker) - fixed width
+        # Style the horizontal splitter handles
+        plot_and_tables_splitter.setStyleSheet("""
+            QSplitter::handle:horizontal {
+                background-color: #c0c0c0;
+                border: 1px solid #a0a0a0;
+                width: 6px;
+            }
+            QSplitter::handle:horizontal:hover {
+                background-color: #a0a0ff;
+                border: 1px solid #7070ff;
+            }
+            QSplitter::handle:horizontal:pressed {
+                background-color: #7070ff;
+                border: 1px solid #4040ff;
+            }
+        """)
+
+        # Left data table (onset/first marker) - resizable via splitter
         # Create wrapper to place button outside table container
         onset_wrapper = QWidget()
         onset_wrapper_layout = QVBoxLayout(onset_wrapper)
@@ -173,10 +203,10 @@ class AnalysisTab(QWidget):
         # Add pop-out button above the table (center-aligned)
         onset_button_layout = QHBoxLayout()
         onset_button_layout.setContentsMargins(5, 0, 5, 2)
-        onset_popout_button = QPushButton("⬈ Pop Out")
-        onset_popout_button.setMaximumWidth(80)
-        onset_popout_button.setFixedHeight(22)
-        onset_popout_button.setStyleSheet("""
+        self.onset_popout_button = QPushButton("⬈ Pop Out")
+        self.onset_popout_button.setMaximumWidth(80)
+        self.onset_popout_button.setFixedHeight(22)
+        self.onset_popout_button.setStyleSheet("""
             QPushButton {
                 background-color: #4a90e2;
                 color: white;
@@ -193,18 +223,22 @@ class AnalysisTab(QWidget):
             }
         """)
         onset_button_layout.addStretch()
-        onset_button_layout.addWidget(onset_popout_button)
+        onset_button_layout.addWidget(self.onset_popout_button)
         onset_button_layout.addStretch()
         onset_wrapper_layout.addLayout(onset_button_layout)
 
         # Add the table to the wrapper
-        self.onset_table = create_marker_data_table("Sleep Onset Data")
+        # Get the algorithm name from config for dynamic column header
+        sleep_algorithm_name = self._get_sleep_algorithm_display_name()
+        self.onset_table = create_marker_data_table("Sleep Onset Data", sleep_algorithm_name)
         onset_wrapper_layout.addWidget(self.onset_table)
 
-        plot_and_tables_layout.addWidget(onset_wrapper)
+        # Set minimum and preferred width for onset wrapper
+        onset_wrapper.setMinimumWidth(120)
+        plot_and_tables_splitter.addWidget(onset_wrapper)
 
         # Connect onset pop-out button
-        onset_popout_button.clicked.connect(self._on_onset_popout_clicked)
+        self.onset_popout_button.clicked.connect(self._on_onset_popout_clicked)
 
         # Center widget containing filename label and plot
         center_widget = QWidget()
@@ -234,10 +268,11 @@ class AnalysisTab(QWidget):
         # Pass the filename label reference to the plot widget
         self.plot_widget.external_filename_label = self.filename_label
 
-        # Add center widget to the main layout - takes remaining space
-        plot_and_tables_layout.addWidget(center_widget, stretch=1)
+        # Add center widget to the splitter - takes remaining space
+        center_widget.setMinimumWidth(400)
+        plot_and_tables_splitter.addWidget(center_widget)
 
-        # Right data table (offset/last marker) - fixed width
+        # Right data table (offset/last marker) - resizable via splitter
         # Create wrapper to place button outside table container
         offset_wrapper = QWidget()
         offset_wrapper_layout = QVBoxLayout(offset_wrapper)
@@ -247,10 +282,10 @@ class AnalysisTab(QWidget):
         # Add pop-out button above the table (center-aligned)
         offset_button_layout = QHBoxLayout()
         offset_button_layout.setContentsMargins(5, 0, 5, 2)
-        offset_popout_button = QPushButton("⬈ Pop Out")
-        offset_popout_button.setMaximumWidth(80)
-        offset_popout_button.setFixedHeight(22)
-        offset_popout_button.setStyleSheet("""
+        self.offset_popout_button = QPushButton("⬈ Pop Out")
+        self.offset_popout_button.setMaximumWidth(80)
+        self.offset_popout_button.setFixedHeight(22)
+        self.offset_popout_button.setStyleSheet("""
             QPushButton {
                 background-color: #4a90e2;
                 color: white;
@@ -267,24 +302,33 @@ class AnalysisTab(QWidget):
             }
         """)
         offset_button_layout.addStretch()
-        offset_button_layout.addWidget(offset_popout_button)
+        offset_button_layout.addWidget(self.offset_popout_button)
         offset_button_layout.addStretch()
         offset_wrapper_layout.addLayout(offset_button_layout)
 
         # Add the table to the wrapper
-        self.offset_table = create_marker_data_table("Sleep Offset Data")
+        self.offset_table = create_marker_data_table("Sleep Offset Data", sleep_algorithm_name)
         offset_wrapper_layout.addWidget(self.offset_table)
 
-        plot_and_tables_layout.addWidget(offset_wrapper)
+        # Set minimum and preferred width for offset wrapper
+        offset_wrapper.setMinimumWidth(120)
+        plot_and_tables_splitter.addWidget(offset_wrapper)
 
         # Connect offset pop-out button
-        offset_popout_button.clicked.connect(self._on_offset_popout_clicked)
+        self.offset_popout_button.clicked.connect(self._on_offset_popout_clicked)
+
+        # Set initial sizes for horizontal splitter (side tables smaller, plot larger)
+        # Left table: 150px, Plot: stretch, Right table: 150px
+        plot_and_tables_splitter.setSizes([150, 800, 150])
+        plot_and_tables_splitter.setStretchFactor(0, 0)  # Left table fixed
+        plot_and_tables_splitter.setStretchFactor(1, 1)  # Plot stretches
+        plot_and_tables_splitter.setStretchFactor(2, 0)  # Right table fixed
 
         # Create diary table (bottom section)
         self.diary_table_widget = self._create_diary_table()
 
-        # Add both sections to the splitter
-        main_splitter.addWidget(plot_and_tables_widget)
+        # Add both sections to the vertical splitter
+        main_splitter.addWidget(plot_and_tables_splitter)
         main_splitter.addWidget(self.diary_table_widget)
 
         # Configure splitter behavior
@@ -308,7 +352,7 @@ class AnalysisTab(QWidget):
         """)
 
         # Set minimum sizes for both sections
-        plot_and_tables_widget.setMinimumHeight(200)  # Plot area minimum
+        plot_and_tables_splitter.setMinimumHeight(200)  # Plot area minimum
         self.diary_table_widget.setMinimumHeight(100)  # Diary table minimum
 
         # Set initial splitter sizes (plot area gets more space initially)
@@ -365,6 +409,9 @@ class AnalysisTab(QWidget):
         self.parent.onset_table = self.onset_table
         self.parent.offset_table = self.offset_table
         self.parent.diary_table_widget = self.diary_table_widget
+
+        # Hide diary section by default until we know participant has diary data
+        self.diary_table_widget.setVisible(False)
 
         # Initialize the activity source dropdown with current preferences
         # Use QTimer.singleShot to ensure parent window is fully initialized
@@ -726,6 +773,44 @@ class AnalysisTab(QWidget):
         self.clear_markers_btn.setStyleSheet(ButtonStyle.CLEAR_MARKERS_RED)
         row2.addWidget(self.clear_markers_btn)
 
+        row2.addSpacing(20)
+
+        # Separator
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.VLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        row2.addWidget(separator)
+
+        row2.addSpacing(10)
+
+        # Marker Mode selection (Sleep vs Nonwear)
+        row2.addWidget(QLabel("Mode:"))
+
+        self.sleep_mode_btn = QRadioButton("Sleep")
+        self.sleep_mode_btn.setChecked(True)
+        self.sleep_mode_btn.setToolTip("Click to place sleep onset/offset markers")
+        self.sleep_mode_btn.toggled.connect(self._on_marker_mode_changed)
+        row2.addWidget(self.sleep_mode_btn)
+
+        self.nonwear_mode_btn = QRadioButton("Nonwear")
+        self.nonwear_mode_btn.setChecked(False)
+        self.nonwear_mode_btn.setToolTip("Click to place manual nonwear start/end markers")
+        self.nonwear_mode_btn.toggled.connect(self._on_marker_mode_changed)
+        row2.addWidget(self.nonwear_mode_btn)
+
+        self.marker_mode_group = QButtonGroup()
+        self.marker_mode_group.addButton(self.sleep_mode_btn, 0)  # 0 = SLEEP
+        self.marker_mode_group.addButton(self.nonwear_mode_btn, 1)  # 1 = NONWEAR
+
+        row2.addSpacing(10)
+
+        # Show manual nonwear markers checkbox
+        self.show_manual_nonwear_checkbox = QCheckBox("Show NW Markers")
+        self.show_manual_nonwear_checkbox.setToolTip("Show/hide manual nonwear markers on the plot")
+        self.show_manual_nonwear_checkbox.setChecked(True)
+        self.show_manual_nonwear_checkbox.toggled.connect(self._on_manual_nonwear_visibility_changed)
+        row2.addWidget(self.show_manual_nonwear_checkbox)
+
         row2.addStretch()
 
         main_layout.addLayout(row2)
@@ -742,6 +827,11 @@ class AnalysisTab(QWidget):
         self.parent.no_sleep_btn = self.no_sleep_btn
         self.parent.clear_markers_btn = self.clear_markers_btn
         self.parent.total_duration_label = self.total_duration_label
+        # Marker mode controls
+        self.parent.sleep_mode_btn = self.sleep_mode_btn
+        self.parent.nonwear_mode_btn = self.nonwear_mode_btn
+        self.parent.marker_mode_group = self.marker_mode_group
+        self.parent.show_manual_nonwear_checkbox = self.show_manual_nonwear_checkbox
 
         return panel
 
@@ -1244,26 +1334,34 @@ class AnalysisTab(QWidget):
         return container
 
     def update_diary_display(self) -> None:
-        """Update diary table with data for current participant."""
+        """
+        Update diary table with data for current participant.
+
+        Hides the diary section completely if no diary data is available
+        for the current participant.
+        """
         if not hasattr(self.parent, "data_service"):
-            self._show_diary_error("Data service not available")
+            self._hide_diary_section()
             return
 
         try:
+            # First check if participant has any diary data at all
+            has_data = self.parent.data_service.check_current_participant_has_diary_data()
+
+            if not has_data:
+                # Hide the entire diary section if no diary data for this participant
+                self._hide_diary_section()
+                return
+
+            # Show the diary section since participant has data
+            self._show_diary_section()
+
             # Load diary data for current file
             diary_entries = self.parent.data_service.load_diary_data_for_current_file()
 
             if not diary_entries:
-                # Check if participant has data at all
-                has_data = self.parent.data_service.check_current_participant_has_diary_data()
-                if has_data:
-                    self._show_diary_info("No diary data for current date range")
-                else:
-                    participant_id = self._get_current_participant_id()
-                    if participant_id:
-                        self._show_diary_error(f"No diary data found for participant {participant_id}")
-                    else:
-                        self._show_diary_error("Could not extract participant ID from input, using default value")
+                # Participant has diary data but not for this date range
+                self._show_diary_info("No diary data for current date range")
                 self._clear_diary_table()
                 return
 
@@ -1273,6 +1371,18 @@ class AnalysisTab(QWidget):
         except Exception as e:
             self._show_diary_error(f"Error loading diary data: {e!s}")
             self._clear_diary_table()
+
+    def _hide_diary_section(self) -> None:
+        """Hide the diary table section completely."""
+        if hasattr(self, "diary_table_widget"):
+            self.diary_table_widget.setVisible(False)
+            logger.debug("Diary section hidden - no diary data available for participant")
+
+    def _show_diary_section(self) -> None:
+        """Show the diary table section."""
+        if hasattr(self, "diary_table_widget"):
+            self.diary_table_widget.setVisible(True)
+            logger.debug("Diary section shown")
 
     def _populate_diary_table(self, diary_entries) -> None:
         """Populate diary table with actual data."""
@@ -1403,7 +1513,33 @@ class AnalysisTab(QWidget):
 
         filename = Path(self.parent.selected_file).name
         participant_info = extract_participant_info(filename)
-        return participant_info.full_id if participant_info.numerical_id != "Unknown" else None
+        return participant_info.full_id if participant_info.numerical_id != "UNKNOWN" else None
+
+    def _get_sleep_algorithm_display_name(self) -> str:
+        """
+        Get the display name of the currently configured sleep/wake algorithm.
+
+        Returns:
+            Display name of the algorithm (e.g., "Sadeh", "Cole-Kripke")
+
+        """
+        try:
+            # Get config from parent main window
+            if hasattr(self.parent, "config_manager") and self.parent.config_manager:
+                config = self.parent.config_manager.config
+                if config and hasattr(config, "sleep_algorithm_id") and config.sleep_algorithm_id:
+                    # Get the display name from the factory
+                    from sleep_scoring_app.core.algorithms import AlgorithmFactory
+
+                    available = AlgorithmFactory.get_available_algorithms()
+                    algorithm_id = config.sleep_algorithm_id
+                    if algorithm_id in available:
+                        return available[algorithm_id]
+        except Exception as e:
+            logger.warning("Failed to get sleep algorithm name: %s", e)
+
+        # Default fallback
+        return "Sadeh"
 
     @pyqtSlot(int)
     def _on_view_mode_changed(self, hours: int) -> None:
@@ -1417,6 +1553,39 @@ class AnalysisTab(QWidget):
         logger.info(f"Adjacent day markers toggled: {checked}")
         if hasattr(self.parent, "toggle_adjacent_day_markers"):
             self.parent.toggle_adjacent_day_markers(checked)
+
+    @pyqtSlot(bool)
+    def _on_marker_mode_changed(self, checked: bool) -> None:
+        """Handle marker mode radio button change (Sleep vs Nonwear)."""
+        # Only process when a button is checked (not when unchecked)
+        if not checked:
+            return
+
+        from sleep_scoring_app.core.constants import MarkerCategory
+
+        if self.sleep_mode_btn.isChecked():
+            category = MarkerCategory.SLEEP
+            logger.debug("Marker mode changed to SLEEP")
+        else:
+            category = MarkerCategory.NONWEAR
+            logger.debug("Marker mode changed to NONWEAR")
+
+        # Update plot widget's active marker category
+        if hasattr(self, "plot_widget") and self.plot_widget is not None:
+            self.plot_widget.set_active_marker_category(category)
+        elif hasattr(self.parent, "plot_widget") and self.parent.plot_widget is not None:
+            self.parent.plot_widget.set_active_marker_category(category)
+
+    @pyqtSlot(bool)
+    def _on_manual_nonwear_visibility_changed(self, visible: bool) -> None:
+        """Handle manual nonwear markers visibility checkbox toggle."""
+        logger.debug(f"Manual nonwear markers visibility: {visible}")
+
+        # Update plot widget's nonwear marker visibility
+        if hasattr(self, "plot_widget") and self.plot_widget is not None:
+            self.plot_widget.set_nonwear_markers_visibility(visible)
+        elif hasattr(self.parent, "plot_widget") and self.parent.plot_widget is not None:
+            self.parent.plot_widget.set_nonwear_markers_visibility(visible)
 
     @pyqtSlot()
     def _on_time_field_return_pressed(self) -> None:

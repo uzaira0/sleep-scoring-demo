@@ -33,6 +33,7 @@ from sleep_scoring_app.core.constants import (
     FeatureFlags,
     InfoMessage,
     SleepStatusValue,
+    StudyDataParadigm,
     SuccessMessage,
     TableDimensions,
     WindowTitle,
@@ -149,6 +150,11 @@ class SleepScoringMainWindow(QMainWindow):
         self.diary_manager = DiaryIntegrationManager(self)
         self.time_manager = TimeFieldManager(self)
 
+        # Initialize algorithm-data compatibility helper
+        from sleep_scoring_app.ui.algorithm_compatibility_ui import AlgorithmCompatibilityUIHelper
+
+        self.compatibility_helper = AlgorithmCompatibilityUIHelper(self)
+
         # Cache for loaded metrics to avoid redundant database queries
         self._cached_metrics = None
 
@@ -250,6 +256,11 @@ class SleepScoringMainWindow(QMainWindow):
         """)
 
         # Create permanent status widgets
+        self.algorithm_compat_label = QLabel("")
+        self.algorithm_compat_label.setStyleSheet("padding: 0 10px; font-weight: bold;")
+        self.algorithm_compat_label.setToolTip("Algorithm compatibility status")
+        self.status_bar.addPermanentWidget(self.algorithm_compat_label)
+
         self.data_source_label = QLabel("Data Source: Not configured")
         self.data_source_label.setStyleSheet("padding: 0 10px;")
         self.status_bar.addPermanentWidget(self.data_source_label)
@@ -408,6 +419,10 @@ class SleepScoringMainWindow(QMainWindow):
         """Handle file selection from table widget."""
         self.nav_manager.on_file_selected_from_table(file_info)
 
+        # Update compatibility checking with new file
+        if hasattr(self, "compatibility_helper") and file_info.get("file_path"):
+            self.compatibility_helper.on_file_loaded(file_info["file_path"])
+
     def on_date_dropdown_changed(self, index) -> None:
         """Handle date dropdown selection change."""
         if index >= 0 and index < len(self.available_dates) and index != self.current_date_index:
@@ -432,8 +447,8 @@ class SleepScoringMainWindow(QMainWindow):
         Check if there are unsaved markers and handle user interaction.
         Returns True if navigation should proceed, False if it should be canceled.
         """
-        # Check if there are any markers placed
-        has_markers = (
+        # Check if there are any complete markers placed
+        has_complete_markers = (
             hasattr(self.plot_widget, "daily_sleep_markers")
             and self.plot_widget.daily_sleep_markers
             and self.plot_widget.daily_sleep_markers.get_complete_periods()
@@ -442,8 +457,40 @@ class SleepScoringMainWindow(QMainWindow):
         # Check if markers are NOT saved
         markers_not_saved = not getattr(self.plot_widget, "markers_saved", False)
 
-        # If there are unsaved markers, show warning dialog
-        if has_markers and markers_not_saved:
+        # Check for incomplete sleep marker being placed
+        has_incomplete_sleep_marker = (
+            hasattr(self.plot_widget, "current_marker_being_placed") and self.plot_widget.current_marker_being_placed is not None
+        )
+
+        # Check for incomplete nonwear marker being placed
+        has_incomplete_nonwear_marker = (
+            hasattr(self.plot_widget, "_current_nonwear_marker_being_placed") and self.plot_widget._current_nonwear_marker_being_placed is not None
+        )
+
+        # Warn about incomplete markers separately (they will be lost)
+        if has_incomplete_sleep_marker or has_incomplete_nonwear_marker:
+            incomplete_type = "sleep" if has_incomplete_sleep_marker else "nonwear"
+            reply = QMessageBox.warning(
+                self,
+                "Incomplete Marker",
+                f"You have an incomplete {incomplete_type} marker (only onset/start placed).\n\n"
+                "This marker will be lost if you navigate away.\n\n"
+                "Do you want to continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return False
+            # User wants to continue, cancel the incomplete markers
+            if has_incomplete_sleep_marker:
+                self.plot_widget.current_marker_being_placed = None
+                self.plot_widget.marker_renderer.redraw_markers()
+            if has_incomplete_nonwear_marker:
+                self.plot_widget._current_nonwear_marker_being_placed = None
+                self.plot_widget.marker_renderer.redraw_nonwear_markers()
+
+        # If there are unsaved complete markers, show warning dialog
+        if has_complete_markers and markers_not_saved:
             # Create a custom message box with HTML for colored text
             msg = QMessageBox(self)
             msg.setWindowTitle("Unsaved Markers")
@@ -538,11 +585,78 @@ class SleepScoringMainWindow(QMainWindow):
         """Handle sleep marker changes - combines both info update and table update."""
         self.state_manager.handle_sleep_markers_changed(daily_sleep_markers)
 
-    def autosave_on_marker_change(self, markers) -> None:
-        """Autosave when markers are changed (not just when saved)."""
-        if not FeatureFlags.ENABLE_AUTOSAVE:
+    def handle_nonwear_markers_changed(self, daily_nonwear_markers) -> None:
+        """
+        Handle nonwear marker changes - save to database immediately.
+
+        Note: Nonwear markers are always saved immediately when placed,
+        independent of the ENABLE_AUTOSAVE feature flag (which controls
+        sleep marker autosaving behavior).
+        """
+        try:
+            # Get current file and date
+            if not self.selected_file or not hasattr(self, "current_date_index"):
+                return
+
+            current_date = self.available_dates[self.current_date_index]
+            filename = Path(self.selected_file).name
+
+            # Extract participant info
+            from sleep_scoring_app.utils.participant_extractor import extract_participant_info
+
+            participant_info = extract_participant_info(filename)
+            participant_id = participant_info.numerical_id
+
+            # Save nonwear markers to database
+            self.db_manager.save_manual_nonwear_markers(
+                filename=filename,
+                participant_id=participant_id,
+                sleep_date=current_date,
+                daily_nonwear_markers=daily_nonwear_markers,
+            )
+            logger.debug("Auto-saved nonwear markers for %s on %s", filename, current_date)
+
+        except Exception as e:
+            logger.warning("Error auto-saving nonwear markers: %s", e)
+
+    def handle_nonwear_marker_selected(self, nonwear_period) -> None:
+        """
+        Handle nonwear marker selection - update side tables with start/end data.
+
+        Args:
+            nonwear_period: The selected ManualNonwearPeriod, or None if deselected.
+
+        """
+        if nonwear_period is None or not nonwear_period.is_complete:
+            # Clear tables when no nonwear marker is selected
+            self.update_marker_tables([], [])
             return
 
+        try:
+            # Get data around the start and end timestamps (similar to onset/offset for sleep)
+            start_data = self._get_marker_data_cached(nonwear_period.start_timestamp, None)
+            end_data = self._get_marker_data_cached(nonwear_period.end_timestamp, None)
+
+            # Update the tables - reusing the onset/offset tables for start/end
+            self.update_marker_tables(start_data, end_data)
+
+            logger.debug(
+                "Updated tables for nonwear marker %d: start=%s, end=%s",
+                nonwear_period.marker_index,
+                len(start_data),
+                len(end_data),
+            )
+
+        except Exception as e:
+            logger.warning("Error updating tables for nonwear marker selection: %s", e)
+
+    def autosave_on_marker_change(self, markers) -> None:
+        """
+        Autosave when markers are changed (not just when saved).
+
+        Note: This is always enabled to match NWT marker behavior.
+        Sleep markers are auto-saved to ensure data is not lost.
+        """
         try:
             # Calculate comprehensive sleep metrics
             self.data_manager.extract_enhanced_participant_info(self.selected_file)
@@ -764,38 +878,69 @@ class SleepScoringMainWindow(QMainWindow):
         """
         Move a marker to a specific timestamp (for pop-out table clicks).
 
+        This method checks the active marker category and moves either sleep or nonwear markers.
+        For sleep markers: marker_type is "onset" or "offset"
+        For nonwear markers: marker_type is mapped from "onset"/"offset" to "start"/"end"
+
         Args:
-            marker_type: "onset" or "offset"
+            marker_type: "onset" or "offset" (mapped to "start"/"end" for nonwear)
             timestamp: Unix timestamp to move the marker to
 
         """
+        from sleep_scoring_app.core.constants import MarkerCategory
+
         try:
             # Check if we have plot widget and it's ready
             if not hasattr(self, "plot_widget") or not self.plot_widget:
                 logger.warning("Plot widget not available for marker movement")
                 return
 
-            # Get the currently selected period to determine which period to move
-            selected_period = None
-            period_slot = None
+            # Check active marker category
+            active_category = self.plot_widget.get_active_marker_category()
 
-            if hasattr(self.plot_widget, "get_selected_marker_period"):
-                selected_period = self.plot_widget.get_selected_marker_period()
-                if selected_period:
-                    # Use the marker_index from the selected period
-                    period_slot = selected_period.marker_index
-                    logger.debug(f"Moving {marker_type} marker for period {period_slot} ({selected_period.marker_type.value})")
+            if active_category == MarkerCategory.NONWEAR:
+                # Move nonwear marker
+                # Map onset/offset to start/end for nonwear markers
+                nonwear_marker_type = "start" if marker_type == "onset" else "end"
 
-            # Move the marker to the target timestamp
-            # Pass the period_slot to move the correct period (main sleep or nap)
-            success = self.plot_widget.move_marker_to_timestamp(marker_type, timestamp, period_slot)
+                selected_period = self.plot_widget.marker_renderer.get_selected_nonwear_period()
+                period_slot = selected_period.marker_index if selected_period else None
 
-            if success:
-                logger.info(f"Successfully moved {marker_type} marker for period {period_slot} to timestamp {timestamp}")
-                # Auto-save after successful movement
-                self.auto_save_current_markers()
+                if not selected_period:
+                    logger.warning("No nonwear period selected to move marker for")
+                    return
+
+                logger.debug(f"Moving nonwear {nonwear_marker_type} marker for period {period_slot}")
+
+                success = self.plot_widget.move_nonwear_marker_to_timestamp(nonwear_marker_type, timestamp, period_slot)
+
+                if success:
+                    logger.info(f"Successfully moved nonwear {nonwear_marker_type} marker for period {period_slot} to timestamp {timestamp}")
+                else:
+                    logger.warning(f"Failed to move nonwear {nonwear_marker_type} marker for period {period_slot} to timestamp {timestamp}")
+
             else:
-                logger.warning(f"Failed to move {marker_type} marker for period {period_slot} to timestamp {timestamp}")
+                # Move sleep marker (default behavior)
+                selected_period = None
+                period_slot = None
+
+                if hasattr(self.plot_widget, "get_selected_marker_period"):
+                    selected_period = self.plot_widget.get_selected_marker_period()
+                    if selected_period:
+                        # Use the marker_index from the selected period
+                        period_slot = selected_period.marker_index
+                        logger.debug(f"Moving {marker_type} marker for period {period_slot} ({selected_period.marker_type.value})")
+
+                # Move the marker to the target timestamp
+                # Pass the period_slot to move the correct period (main sleep or nap)
+                success = self.plot_widget.move_marker_to_timestamp(marker_type, timestamp, period_slot)
+
+                if success:
+                    logger.info(f"Successfully moved {marker_type} marker for period {period_slot} to timestamp {timestamp}")
+                    # Auto-save after successful movement
+                    self.auto_save_current_markers()
+                else:
+                    logger.warning(f"Failed to move {marker_type} marker for period {period_slot} to timestamp {timestamp}")
 
         except Exception as e:
             logger.error(f"Error moving {marker_type} marker to timestamp: {e}", exc_info=True)
@@ -1205,6 +1350,31 @@ class SleepScoringMainWindow(QMainWindow):
     def load_saved_markers(self) -> None:
         """Load saved markers for current file and date."""
         self.state_manager.load_saved_markers()
+        # Also load nonwear markers
+        self.load_saved_nonwear_markers()
+
+    def load_saved_nonwear_markers(self) -> None:
+        """Load saved nonwear markers for current file and date."""
+        try:
+            if not self.selected_file or not hasattr(self, "current_date_index"):
+                return
+
+            current_date = self.available_dates[self.current_date_index]
+            filename = Path(self.selected_file).name
+
+            # Load nonwear markers from database
+            daily_nonwear_markers = self.db_manager.load_manual_nonwear_markers(
+                filename=filename,
+                sleep_date=current_date,
+            )
+
+            # Load into plot widget
+            if hasattr(self.plot_widget, "load_daily_nonwear_markers"):
+                self.plot_widget.load_daily_nonwear_markers(daily_nonwear_markers, markers_saved=True)
+                logger.debug("Loaded nonwear markers for %s on %s", filename, current_date)
+
+        except Exception as e:
+            logger.warning("Error loading nonwear markers: %s", e)
 
     def load_all_saved_markers_on_startup(self) -> None:
         """Load all saved markers from database on application startup."""
@@ -1391,11 +1561,15 @@ class SleepScoringMainWindow(QMainWindow):
         """Browse for activity data files (multi-select)."""
         # Start from last used activity directory or home directory
         start_dir = self.config_manager.config.import_activity_directory or str(Path.home())
+
+        # Build file filter based on current data paradigm
+        file_filter = self._get_paradigm_file_filter()
+
         files, _ = QFileDialog.getOpenFileNames(
             self,
             "Select Activity Data Files",
             start_dir,
-            "CSV Files (*.csv);;All Files (*)",
+            file_filter,
         )
 
         if files and hasattr(self, "data_settings_tab") and hasattr(self.data_settings_tab, "activity_import_files_label"):
@@ -1409,6 +1583,28 @@ class SleepScoringMainWindow(QMainWindow):
             # Save directory of first file to config for next browse
             self.config_manager.config.import_activity_directory = str(Path(files[0]).parent)
             self.config_manager.save_config()
+
+    def _get_paradigm_file_filter(self) -> str:
+        """
+        Build file filter string based on current data paradigm.
+
+        Returns:
+            File filter string for QFileDialog based on paradigm setting.
+            - EPOCH_BASED: CSV and Excel files only
+            - RAW_ACCELEROMETER: GT3X, CSV, and Excel files
+
+        """
+        try:
+            paradigm_value = self.config_manager.config.data_paradigm
+            paradigm = StudyDataParadigm(paradigm_value)
+        except (ValueError, AttributeError):
+            paradigm = StudyDataParadigm.get_default()
+
+        if paradigm == StudyDataParadigm.RAW_ACCELEROMETER:
+            # Raw accelerometer mode - GT3X files primary, CSV/Excel secondary
+            return "Supported Files (*.gt3x *.csv *.xlsx *.xls);;GT3X Files (*.gt3x);;CSV Files (*.csv);;Excel Files (*.xlsx *.xls);;All Files (*)"
+        # Default: EPOCH_BASED - CSV and Excel files only
+        return "Epoch Data Files (*.csv *.xlsx *.xls);;CSV Files (*.csv);;Excel Files (*.xlsx *.xls);;All Files (*)"
 
     def browse_nonwear_files(self) -> None:
         """Browse for nonwear sensor files (multi-select)."""
@@ -1433,6 +1629,36 @@ class SleepScoringMainWindow(QMainWindow):
             self.config_manager.config.import_nonwear_directory = str(Path(files[0]).parent)
             self.config_manager.save_config()
 
+    def _validate_files_against_paradigm(self, files: list[Path]) -> tuple[list[Path], list[Path]]:
+        """
+        Validate selected files against the current data paradigm.
+
+        Args:
+            files: List of file paths to validate
+
+        Returns:
+            Tuple of (compatible_files, incompatible_files)
+
+        """
+        try:
+            paradigm_value = self.config_manager.config.data_paradigm
+            paradigm = StudyDataParadigm(paradigm_value)
+        except (ValueError, AttributeError):
+            paradigm = StudyDataParadigm.get_default()
+
+        compatible_extensions = paradigm.get_compatible_file_extensions()
+        compatible_files = []
+        incompatible_files = []
+
+        for file_path in files:
+            ext = file_path.suffix.lower()
+            if ext in compatible_extensions:
+                compatible_files.append(file_path)
+            else:
+                incompatible_files.append(file_path)
+
+        return compatible_files, incompatible_files
+
     def start_activity_import(self) -> None:
         """Start the activity data import process."""
         if not hasattr(self, "data_settings_tab"):
@@ -1446,6 +1672,53 @@ class SleepScoringMainWindow(QMainWindow):
                 "Please select activity data files to import",
             )
             return
+
+        # Validate files against current paradigm
+        compatible_files, incompatible_files = self._validate_files_against_paradigm(self._selected_activity_files)
+
+        if incompatible_files:
+            # Get current paradigm for message
+            try:
+                paradigm_value = self.config_manager.config.data_paradigm
+                paradigm = StudyDataParadigm(paradigm_value)
+            except (ValueError, AttributeError):
+                paradigm = StudyDataParadigm.get_default()
+
+            paradigm_name = paradigm.get_display_name()
+            compatible_exts = ", ".join(paradigm.get_compatible_file_extensions())
+            incompatible_names = "\n".join(f"  - {f.name}" for f in incompatible_files[:10])
+            if len(incompatible_files) > 10:
+                incompatible_names += f"\n  ... and {len(incompatible_files) - 10} more"
+
+            if compatible_files:
+                # Some files are compatible - ask user what to do
+                msg = (
+                    f"The following files are not compatible with the current paradigm "
+                    f"({paradigm_name}):\n\n{incompatible_names}\n\n"
+                    f"Compatible file types: {compatible_exts}\n\n"
+                    f"Do you want to import only the {len(compatible_files)} compatible file(s)?"
+                )
+                reply = QMessageBox.question(
+                    self,
+                    "Incompatible Files",
+                    msg,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                if reply == QMessageBox.StandardButton.No:
+                    return
+                # Use only compatible files
+                self._selected_activity_files = compatible_files
+            else:
+                # No compatible files at all
+                QMessageBox.warning(
+                    self,
+                    "Incompatible Files",
+                    f"None of the selected files are compatible with the current paradigm "
+                    f"({paradigm_name}).\n\n"
+                    f"Compatible file types: {compatible_exts}\n\n"
+                    f"Please select different files or change the data paradigm in Study Settings.",
+                )
+                return
 
         tab = self.data_settings_tab
 
@@ -1582,6 +1855,10 @@ class SleepScoringMainWindow(QMainWindow):
             # Refresh file list
             self.load_available_files(preserve_selection=False)
 
+            # Auto-refresh imported files table
+            if hasattr(tab, "file_management_widget"):
+                tab.file_management_widget.refresh_files()
+
     def nonwear_import_finished(self, progress) -> None:
         """Handle nonwear import completion."""
         if hasattr(self, "data_settings_tab"):
@@ -1668,6 +1945,10 @@ class SleepScoringMainWindow(QMainWindow):
                 tab.include_headers_checkbox.isChecked(),
                 tab.include_metadata_checkbox.isChecked(),
             )
+            # Save nonwear separate file option
+            if hasattr(tab, "separate_nonwear_file_checkbox"):
+                self.config_manager.config.export_nonwear_separate = tab.separate_nonwear_file_checkbox.isChecked()
+                self.config_manager.save_config()
 
     def browse_export_output_directory(self) -> None:
         """Handle directory selection for export."""
@@ -1722,6 +2003,9 @@ class SleepScoringMainWindow(QMainWindow):
             # Save current preferences
             self.config_manager.update_export_grouping(self.export_grouping_group.checkedId())
 
+            # Check if nonwear should be exported separately
+            export_nonwear_separate = hasattr(self, "separate_nonwear_file_checkbox") and self.separate_nonwear_file_checkbox.isChecked()
+
             # Perform the export directly with data
             success = self.export_manager.perform_direct_export(
                 all_sleep_metrics,
@@ -1730,6 +2014,7 @@ class SleepScoringMainWindow(QMainWindow):
                 self.selected_export_columns,
                 self.include_headers_checkbox.isChecked(),
                 self.include_metadata_checkbox.isChecked(),
+                export_nonwear_separate=export_nonwear_separate,
             )
 
             if success:

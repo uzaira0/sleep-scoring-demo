@@ -2,22 +2,138 @@
 """
 Shared test fixtures for the sleep scoring application.
 Provides common test setup and utilities.
+
+IMPORTANT: Tests use isolated database and QSettings to avoid affecting real app data.
 """
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 from typing import Any
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
+from PyQt6.QtCore import QSettings
 from PyQt6.QtWidgets import QApplication, QWidget
 
 from sleep_scoring_app.core.dataclasses import ParticipantInfo
 from sleep_scoring_app.data.database import DatabaseManager
 from sleep_scoring_app.services.unified_data_service import UnifiedDataService
 from sleep_scoring_app.utils.config import ConfigManager
+
+# ============================================================================
+# TEST ISOLATION: Use separate database and QSettings for all tests
+# ============================================================================
+
+
+@pytest.fixture(scope="session", autouse=True)
+def isolated_test_environment(tmp_path_factory):
+    """
+    Session-scoped fixture that isolates ALL tests from real app data.
+
+    This fixture:
+    1. Creates a temporary directory for test databases
+    2. Configures QSettings to use a test-specific scope
+    3. Patches the database path function to use temp location
+
+    This runs automatically for all tests (autouse=True).
+    """
+    # Create session-wide temp directory for test data
+    test_data_dir = tmp_path_factory.mktemp("sleep_scoring_test_data")
+    test_db_path = test_data_dir / "test_sleep_scoring.db"
+
+    # Store original environment
+    original_env = os.environ.copy()
+
+    # Set environment variable to signal test mode
+    os.environ["SLEEP_SCORING_TEST_MODE"] = "1"
+    os.environ["SLEEP_SCORING_TEST_DB_PATH"] = str(test_db_path)
+
+    # Configure QSettings to use test-specific organization/app name
+    # This ensures tests don't read/write real user settings
+    QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+
+    # Patch the database path function to return test path
+    def get_test_database_path():
+        return test_db_path
+
+    with patch("sleep_scoring_app.data.database.get_database_path", get_test_database_path):
+        yield {
+            "test_data_dir": test_data_dir,
+            "test_db_path": test_db_path,
+        }
+
+    # Restore original environment
+    os.environ.clear()
+    os.environ.update(original_env)
+
+
+@pytest.fixture(autouse=True)
+def isolated_qsettings(tmp_path):
+    """
+    Function-scoped fixture that gives each test its own QSettings.
+
+    This ensures tests don't interfere with each other's settings.
+    """
+    from threading import Lock
+
+    from sleep_scoring_app.utils.resource_resolver import get_config_path
+
+    # Create a unique settings file for this test
+    settings_path = tmp_path / "test_settings.ini"
+
+    # Create QSettings pointing to test file
+    test_settings = QSettings(str(settings_path), QSettings.Format.IniFormat)
+
+    # Patch ConfigManager to use test settings
+    original_init = ConfigManager.__init__
+
+    def patched_init(self):
+        self._lock = Lock()
+        self.settings = QSettings(str(settings_path), QSettings.Format.IniFormat)
+        self.config = None
+        self.config_file = get_config_path()
+        self.config_dir = self.config_file.parent
+        self.config_dir.mkdir(exist_ok=True)
+        self.config = self.try_load_config()
+
+    with patch.object(ConfigManager, "__init__", patched_init):
+        yield test_settings
+
+    # Clean up settings
+    test_settings.clear()
+    test_settings.sync()
+
+
+@pytest.fixture
+def test_database(tmp_path):
+    """
+    Create a fresh test database for tests that need direct database access.
+
+    Returns a DatabaseManager instance pointing to a temporary database.
+    """
+    db_path = tmp_path / "test.db"
+    return DatabaseManager(db_path=db_path)
+    # Cleanup happens automatically when tmp_path is cleaned up
+
+
+@pytest.fixture
+def test_config_manager(isolated_qsettings, tmp_path):
+    """
+    Create a ConfigManager that uses isolated test settings.
+
+    Note: The isolated_qsettings fixture already patches ConfigManager.__init__
+    to use test-specific QSettings, so we can just instantiate normally.
+    """
+    config_manager = ConfigManager()
+    yield config_manager
+
+    # Cleanup
+    if config_manager.settings:
+        config_manager.settings.clear()
+        config_manager.settings.sync()
 
 
 @pytest.fixture(scope="session")

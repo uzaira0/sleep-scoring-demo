@@ -24,7 +24,14 @@ from sleep_scoring_app.core.constants import (
     ParticipantGroup,
     ParticipantTimepoint,
 )
-from sleep_scoring_app.core.dataclasses import DailySleepMarkers, ParticipantInfo, SleepMetrics, SleepPeriod
+from sleep_scoring_app.core.dataclasses import (
+    DailyNonwearMarkers,
+    DailySleepMarkers,
+    ManualNonwearPeriod,
+    ParticipantInfo,
+    SleepMetrics,
+    SleepPeriod,
+)
 from sleep_scoring_app.core.exceptions import (
     DatabaseError,
     DataIntegrityError,
@@ -90,8 +97,8 @@ class DatabaseManager:
         DatabaseColumn.ALGORITHM_TYPE,
         DatabaseColumn.SADEH_ONSET,
         DatabaseColumn.SADEH_OFFSET,
-        DatabaseColumn.CHOI_ONSET,
-        DatabaseColumn.CHOI_OFFSET,
+        DatabaseColumn.OVERLAPPING_NONWEAR_MINUTES_ALGORITHM,
+        DatabaseColumn.OVERLAPPING_NONWEAR_MINUTES_SENSOR,
         DatabaseColumn.TOTAL_ACTIVITY,
         DatabaseColumn.MOVEMENT_INDEX,
         DatabaseColumn.FRAGMENTATION_INDEX,
@@ -176,6 +183,10 @@ class DatabaseManager:
         DatabaseColumn.MARKER_TYPE,
         DatabaseColumn.IS_MAIN_SLEEP,
         DatabaseColumn.CREATED_BY,
+        # Manual nonwear marker columns
+        DatabaseColumn.SLEEP_DATE,
+        DatabaseColumn.START_TIMESTAMP,
+        DatabaseColumn.END_TIMESTAMP,
     }
 
     def __init__(self, db_path: Path | None = None) -> None:
@@ -392,8 +403,8 @@ class DatabaseManager:
             # Core columns always present
             DatabaseColumn.FILENAME: metrics.filename,
             DatabaseColumn.PARTICIPANT_ID: metrics.participant.numerical_id,
-            DatabaseColumn.PARTICIPANT_GROUP: metrics.participant.group,
-            DatabaseColumn.PARTICIPANT_TIMEPOINT: metrics.participant.timepoint,
+            DatabaseColumn.PARTICIPANT_GROUP: metrics.participant.group_str,
+            DatabaseColumn.PARTICIPANT_TIMEPOINT: metrics.participant.timepoint_str,
             DatabaseColumn.ANALYSIS_DATE: metrics.analysis_date,
             DatabaseColumn.UPDATED_AT: datetime.now().isoformat(),
         }
@@ -600,7 +611,7 @@ class DatabaseManager:
         group = safe_get(DatabaseColumn.PARTICIPANT_GROUP) or "G1"
 
         # Reconstruct full_id from all three components
-        full_id = f"{numerical_id} {timepoint} {group}" if numerical_id != "Unknown" else "Unknown BO G1"
+        full_id = f"{numerical_id} {timepoint} {group}" if numerical_id != "UNKNOWN" else "UNKNOWN BO G1"
 
         participant = ParticipantInfo(
             numerical_id=numerical_id,
@@ -668,9 +679,8 @@ class DatabaseManager:
             sleep_fragmentation_index=safe_get(DatabaseColumn.SLEEP_FRAGMENTATION_INDEX),
             sadeh_onset=safe_get(DatabaseColumn.SADEH_ONSET),
             sadeh_offset=safe_get(DatabaseColumn.SADEH_OFFSET),
-            choi_onset=safe_get(DatabaseColumn.CHOI_ONSET),
-            choi_offset=safe_get(DatabaseColumn.CHOI_OFFSET),
-            total_choi_counts=safe_get(DatabaseColumn.TOTAL_CHOI_COUNTS),
+            overlapping_nonwear_minutes_algorithm=safe_get(DatabaseColumn.OVERLAPPING_NONWEAR_MINUTES_ALGORITHM),
+            overlapping_nonwear_minutes_sensor=safe_get(DatabaseColumn.OVERLAPPING_NONWEAR_MINUTES_SENSOR),
             created_at=safe_get(DatabaseColumn.CREATED_AT) or "",
             updated_at=safe_get(DatabaseColumn.UPDATED_AT) or "",
         )
@@ -771,9 +781,8 @@ class DatabaseManager:
             sleep_fragmentation_index=data.get("Sleep Fragmentation Index"),
             sadeh_onset=data.get("Sadeh Algorithm Value at Sleep Onset"),
             sadeh_offset=data.get("Sadeh Algorithm Value at Sleep Offset"),
-            choi_onset=data.get("Choi Algorithm Value at Sleep Onset"),
-            choi_offset=data.get("Choi Algorithm Value at Sleep Offset"),
-            total_choi_counts=data.get("Total Choi Algorithm Counts over the Sleep Period"),
+            overlapping_nonwear_minutes_algorithm=data.get("Overlapping Nonwear Minutes (Algorithm)"),
+            overlapping_nonwear_minutes_sensor=data.get("Overlapping Nonwear Minutes (Sensor)"),
             updated_at=data.get("Saved At", ""),
         )
 
@@ -792,6 +801,9 @@ class DatabaseManager:
                 try:
                     # Integrate diary data into SleepMetrics before export
                     self._integrate_diary_data_into_metrics(metric)
+
+                    # Integrate manual nonwear markers into SleepMetrics before export
+                    self._integrate_manual_nonwear_into_metrics(metric)
 
                     # Get all sleep periods for this participant/date
                     period_records = metric.to_export_dict_list()
@@ -856,6 +868,69 @@ class DatabaseManager:
 
         except Exception as e:
             logger.warning("Failed to integrate diary data for %s: %s", metric.filename, e)
+
+    def _integrate_manual_nonwear_into_metrics(self, metric: SleepMetrics) -> None:
+        """Integrate manual nonwear marker data into SleepMetrics object for export."""
+        from datetime import datetime
+
+        from sleep_scoring_app.core.constants import ExportColumn
+
+        try:
+            # Get filename and analysis date for lookup
+            filename = metric.filename
+            if not filename or not metric.analysis_date:
+                return
+
+            # Parse analysis date
+            try:
+                analysis_date = datetime.strptime(metric.analysis_date, "%Y-%m-%d").date()
+            except ValueError:
+                logger.debug("Invalid analysis date format for %s", filename)
+                return
+
+            # Load manual nonwear markers for this file/date
+            daily_nonwear = self.load_manual_nonwear_markers(filename, analysis_date)
+
+            # Get complete periods sorted by start time
+            complete_periods = daily_nonwear.get_complete_periods()
+
+            # Set count
+            metric.set_dynamic_field(ExportColumn.MANUAL_NWT_COUNT, len(complete_periods))
+
+            # Set up to 3 periods in export fields
+            total_duration = 0.0
+            for i, period in enumerate(complete_periods[:3], start=1):
+                start_dt = datetime.fromtimestamp(period.start_timestamp)
+                end_dt = datetime.fromtimestamp(period.end_timestamp)
+                duration = period.duration_minutes or 0.0
+                total_duration += duration
+
+                if i == 1:
+                    metric.set_dynamic_field(ExportColumn.MANUAL_NWT_1_START, start_dt.strftime("%H:%M"))
+                    metric.set_dynamic_field(ExportColumn.MANUAL_NWT_1_END, end_dt.strftime("%H:%M"))
+                    metric.set_dynamic_field(ExportColumn.MANUAL_NWT_1_DURATION, round(duration, 1))
+                elif i == 2:
+                    metric.set_dynamic_field(ExportColumn.MANUAL_NWT_2_START, start_dt.strftime("%H:%M"))
+                    metric.set_dynamic_field(ExportColumn.MANUAL_NWT_2_END, end_dt.strftime("%H:%M"))
+                    metric.set_dynamic_field(ExportColumn.MANUAL_NWT_2_DURATION, round(duration, 1))
+                elif i == 3:
+                    metric.set_dynamic_field(ExportColumn.MANUAL_NWT_3_START, start_dt.strftime("%H:%M"))
+                    metric.set_dynamic_field(ExportColumn.MANUAL_NWT_3_END, end_dt.strftime("%H:%M"))
+                    metric.set_dynamic_field(ExportColumn.MANUAL_NWT_3_DURATION, round(duration, 1))
+
+            # Set total duration
+            metric.set_dynamic_field(ExportColumn.MANUAL_NWT_TOTAL_DURATION, round(total_duration, 1))
+
+            if complete_periods:
+                logger.debug(
+                    "Integrated %d manual nonwear periods for %s on %s",
+                    len(complete_periods),
+                    filename,
+                    metric.analysis_date,
+                )
+
+        except Exception as e:
+            logger.warning("Failed to integrate manual nonwear data for %s: %s", metric.filename, e)
 
     def cleanup_old_autosaves(self, days_old: int = 7) -> int:
         """Remove autosave entries older than specified days with validation."""
@@ -1906,3 +1981,261 @@ class DatabaseManager:
         except Exception:
             logger.exception("Failed to load nonwear periods for %s on %s", filename, diary_date)
             return []
+
+    # =========================================================================
+    # MANUAL NONWEAR MARKERS (User-placed nonwear periods)
+    # =========================================================================
+
+    def save_manual_nonwear_markers(
+        self,
+        filename: str,
+        participant_id: str,
+        sleep_date: str,
+        daily_nonwear_markers: DailyNonwearMarkers,
+    ) -> bool:
+        """
+        Save manual nonwear markers to database.
+
+        Args:
+            filename: The participant's data filename
+            participant_id: Participant identifier
+            sleep_date: The sleep date these markers belong to (YYYY-MM-DD)
+            daily_nonwear_markers: Container with up to 10 nonwear periods
+
+        Returns:
+            True if save successful, False otherwise
+
+        """
+        # Validate inputs
+        InputValidator.validate_string(filename, min_length=1, name="filename")
+        InputValidator.validate_string(participant_id, min_length=1, name="participant_id")
+        InputValidator.validate_string(sleep_date, min_length=1, name="sleep_date")
+
+        table_name = self._validate_table_name(DatabaseTable.MANUAL_NWT_MARKERS)
+
+        try:
+            with self._get_connection() as conn:
+                # First, delete existing markers for this file/date
+                conn.execute(
+                    f"""
+                    DELETE FROM {table_name}
+                    WHERE {self._validate_column_name(DatabaseColumn.FILENAME)} = ?
+                    AND {self._validate_column_name(DatabaseColumn.SLEEP_DATE)} = ?
+                """,
+                    (filename, sleep_date),
+                )
+
+                # Insert new markers (only complete periods)
+                for i in range(1, 11):
+                    period = daily_nonwear_markers.get_period_by_slot(i)
+                    if period is not None and period.is_complete:
+                        duration_minutes = int(period.duration_minutes) if period.duration_minutes else None
+
+                        conn.execute(
+                            f"""
+                            INSERT INTO {table_name} (
+                                {self._validate_column_name(DatabaseColumn.FILENAME)},
+                                {self._validate_column_name(DatabaseColumn.PARTICIPANT_ID)},
+                                {self._validate_column_name(DatabaseColumn.SLEEP_DATE)},
+                                {self._validate_column_name(DatabaseColumn.MARKER_INDEX)},
+                                {self._validate_column_name(DatabaseColumn.START_TIMESTAMP)},
+                                {self._validate_column_name(DatabaseColumn.END_TIMESTAMP)},
+                                {self._validate_column_name(DatabaseColumn.DURATION_MINUTES)}
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                            (
+                                filename,
+                                participant_id,
+                                sleep_date,
+                                i,
+                                period.start_timestamp,
+                                period.end_timestamp,
+                                duration_minutes,
+                            ),
+                        )
+
+                conn.commit()
+                saved_count = len(daily_nonwear_markers.get_complete_periods())
+                logger.debug(
+                    "Saved %s manual nonwear markers for %s on %s",
+                    saved_count,
+                    filename,
+                    sleep_date,
+                )
+                return True
+
+        except Exception:
+            logger.exception(
+                "Failed to save manual nonwear markers for %s on %s",
+                filename,
+                sleep_date,
+            )
+            return False
+
+    def load_manual_nonwear_markers(
+        self,
+        filename: str,
+        sleep_date: str,
+    ) -> DailyNonwearMarkers:
+        """
+        Load manual nonwear markers from database.
+
+        Args:
+            filename: The participant's data filename
+            sleep_date: The sleep date to load markers for (YYYY-MM-DD)
+
+        Returns:
+            DailyNonwearMarkers container with loaded periods
+
+        """
+        # Validate inputs
+        InputValidator.validate_string(filename, min_length=1, name="filename")
+        InputValidator.validate_string(sleep_date, min_length=1, name="sleep_date")
+
+        table_name = self._validate_table_name(DatabaseTable.MANUAL_NWT_MARKERS)
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    f"""
+                    SELECT
+                        {self._validate_column_name(DatabaseColumn.MARKER_INDEX)},
+                        {self._validate_column_name(DatabaseColumn.START_TIMESTAMP)},
+                        {self._validate_column_name(DatabaseColumn.END_TIMESTAMP)}
+                    FROM {table_name}
+                    WHERE {self._validate_column_name(DatabaseColumn.FILENAME)} = ?
+                    AND {self._validate_column_name(DatabaseColumn.SLEEP_DATE)} = ?
+                    ORDER BY {self._validate_column_name(DatabaseColumn.MARKER_INDEX)}
+                """,
+                    (filename, sleep_date),
+                )
+
+                daily_markers = DailyNonwearMarkers()
+
+                for row in cursor.fetchall():
+                    marker_index = row[0]
+                    period = ManualNonwearPeriod(
+                        start_timestamp=row[1],
+                        end_timestamp=row[2],
+                        marker_index=marker_index,
+                    )
+
+                    # Assign to appropriate slot (1-10)
+                    daily_markers.set_period_by_slot(marker_index, period)
+
+                loaded_count = len(daily_markers.get_complete_periods())
+                if loaded_count > 0:
+                    logger.debug(
+                        "Loaded %s manual nonwear markers for %s on %s",
+                        loaded_count,
+                        filename,
+                        sleep_date,
+                    )
+
+                return daily_markers
+
+        except Exception:
+            logger.exception(
+                "Failed to load manual nonwear markers for %s on %s",
+                filename,
+                sleep_date,
+            )
+            return DailyNonwearMarkers()
+
+    def delete_manual_nonwear_markers(
+        self,
+        filename: str,
+        sleep_date: str,
+    ) -> bool:
+        """
+        Delete all manual nonwear markers for a specific file and date.
+
+        Args:
+            filename: The participant's data filename
+            sleep_date: The sleep date to delete markers for (YYYY-MM-DD)
+
+        Returns:
+            True if deletion successful, False otherwise
+
+        """
+        # Validate inputs
+        InputValidator.validate_string(filename, min_length=1, name="filename")
+        InputValidator.validate_string(sleep_date, min_length=1, name="sleep_date")
+
+        table_name = self._validate_table_name(DatabaseTable.MANUAL_NWT_MARKERS)
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    f"""
+                    DELETE FROM {table_name}
+                    WHERE {self._validate_column_name(DatabaseColumn.FILENAME)} = ?
+                    AND {self._validate_column_name(DatabaseColumn.SLEEP_DATE)} = ?
+                """,
+                    (filename, sleep_date),
+                )
+
+                deleted_count = cursor.rowcount
+                conn.commit()
+
+                if deleted_count > 0:
+                    logger.debug(
+                        "Deleted %s manual nonwear markers for %s on %s",
+                        deleted_count,
+                        filename,
+                        sleep_date,
+                    )
+
+                return True
+
+        except Exception:
+            logger.exception(
+                "Failed to delete manual nonwear markers for %s on %s",
+                filename,
+                sleep_date,
+            )
+            return False
+
+    def has_manual_nonwear_markers(
+        self,
+        filename: str,
+        sleep_date: str,
+    ) -> bool:
+        """
+        Check if there are any manual nonwear markers for a specific file and date.
+
+        Args:
+            filename: The participant's data filename
+            sleep_date: The sleep date to check (YYYY-MM-DD)
+
+        Returns:
+            True if markers exist, False otherwise
+
+        """
+        # Validate inputs
+        InputValidator.validate_string(filename, min_length=1, name="filename")
+        InputValidator.validate_string(sleep_date, min_length=1, name="sleep_date")
+
+        table_name = self._validate_table_name(DatabaseTable.MANUAL_NWT_MARKERS)
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    f"""
+                    SELECT COUNT(*) FROM {table_name}
+                    WHERE {self._validate_column_name(DatabaseColumn.FILENAME)} = ?
+                    AND {self._validate_column_name(DatabaseColumn.SLEEP_DATE)} = ?
+                """,
+                    (filename, sleep_date),
+                )
+
+                count = cursor.fetchone()[0]
+                return count > 0
+
+        except Exception:
+            logger.exception(
+                "Failed to check manual nonwear markers for %s on %s",
+                filename,
+                sleep_date,
+            )
+            return False

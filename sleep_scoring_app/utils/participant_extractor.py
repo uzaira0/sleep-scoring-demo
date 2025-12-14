@@ -38,7 +38,9 @@ def extract_participant_info(input_string: str, config=None) -> ParticipantInfo:
     """
     if not input_string:
         # Return defaults for empty input
-        return ParticipantInfo(numerical_id="UNKNOWN", timepoint=ParticipantTimepoint.T1, group=ParticipantGroup.GROUP_1)
+        return ParticipantInfo(
+            numerical_id="UNKNOWN", timepoint=ParticipantTimepoint.T1, group=ParticipantGroup.GROUP_1, timepoint_str="T1", group_str="G1"
+        )
 
     input_string = str(input_string).strip()
 
@@ -51,11 +53,36 @@ def extract_participant_info(input_string: str, config=None) -> ParticipantInfo:
     if config and hasattr(config, "study_participant_id_patterns") and config.study_participant_id_patterns:
         id_patterns_from_config = config.study_participant_id_patterns
 
-    # Hardcoded defaults
+    # Get timepoint pattern from config (with fallback to default)
+    timepoint_pattern = None
+    if config and hasattr(config, "study_timepoint_pattern") and config.study_timepoint_pattern:
+        timepoint_pattern = config.study_timepoint_pattern
+
+    # Get group pattern from config (with fallback to default)
+    group_pattern = None
+    if config and hasattr(config, "study_group_pattern") and config.study_group_pattern:
+        group_pattern = config.study_group_pattern
+
+    # Get default values from config valid lists
     default_group = "G1"
     default_timepoint = "T1"
+    if config and hasattr(config, "study_valid_groups") and config.study_valid_groups:
+        default_group = config.study_valid_groups[0]
+    if config and hasattr(config, "study_valid_timepoints") and config.study_valid_timepoints:
+        default_timepoint = config.study_valid_timepoints[0]
 
-    # Try configured patterns first
+    # Try configured patterns - if none configured or none match, return UNKNOWN
+    if not id_patterns_from_config:
+        logger.warning("No participant ID patterns configured. Configure patterns in Study Settings.")
+        return ParticipantInfo(
+            numerical_id="UNKNOWN",
+            timepoint=ParticipantTimepoint.T1,
+            group=ParticipantGroup.GROUP_1,
+            full_id="UNKNOWN T1 G1",
+            timepoint_str=default_timepoint,
+            group_str=default_group,
+        )
+
     for pattern_str in id_patterns_from_config:
         try:
             pattern = re.compile(pattern_str, re.IGNORECASE)
@@ -68,24 +95,15 @@ def extract_participant_info(input_string: str, config=None) -> ParticipantInfo:
                 if len(groups) >= 1:
                     numerical_id = groups[0]
 
-                    # Try to extract timepoint from the string
-                    timepoint_match = re.search(r"\b(T\d+)\b", input_string, re.IGNORECASE)
-                    if timepoint_match:
-                        timepoint = timepoint_match.group(1).upper()
-                    else:
-                        timepoint = default_timepoint
+                    # Extract timepoint using configured pattern
+                    timepoint = _extract_timepoint(input_string, timepoint_pattern, default_timepoint)
 
-                    # If there are more capture groups, use them for group/timepoint
-                    if len(groups) >= 2:
-                        second = groups[1]
-                        if second and second.upper().startswith("T"):
-                            timepoint = second.upper()
+                    # Extract group using configured pattern
+                    group_str = _extract_group(input_string, group_pattern, default_group)
 
-                    # Convert timepoint string to enum
-                    timepoint_enum = _timepoint_to_enum(timepoint)
-
-                    # Check for group in string
-                    group_enum, group_str = _extract_group(input_string)
+                    # Convert to enums (with flexible mapping)
+                    timepoint_enum = _string_to_timepoint_enum(timepoint)
+                    group_enum = _string_to_group_enum(group_str)
 
                     logger.debug("Extracted participant ID '%s' using configured pattern '%s'", numerical_id, pattern_str)
                     return ParticipantInfo(
@@ -93,57 +111,94 @@ def extract_participant_info(input_string: str, config=None) -> ParticipantInfo:
                         timepoint=timepoint_enum,
                         group=group_enum,
                         full_id=f"{numerical_id} {timepoint} {group_str}",
+                        timepoint_str=timepoint,
+                        group_str=group_str,
                     )
-        except Exception:
-            continue  # Try next pattern
+        except re.error as e:
+            logger.exception("Invalid regex pattern '%s': %s", pattern_str, e)
+            continue
 
-    # Fallback: hardcoded patterns for legacy support
-    fallback_patterns = [
-        r"(P1-\d{4})",  # P1-1001 format
-        r"^(\d{4})$",  # Pure numeric format like 4002, 4000, 4006
-    ]
+    # No patterns matched - log which patterns were tried
+    logger.warning(
+        "No configured patterns matched input '%s'. Configured patterns: %s",
+        input_string,
+        id_patterns_from_config,
+    )
+    return ParticipantInfo(
+        numerical_id="UNKNOWN",
+        timepoint=ParticipantTimepoint.T1,
+        group=ParticipantGroup.GROUP_1,
+        full_id="UNKNOWN T1 G1",
+        timepoint_str=default_timepoint,
+        group_str=default_group,
+    )
 
-    for id_pattern in fallback_patterns:
-        match = re.search(id_pattern, input_string, re.IGNORECASE)
+
+def _extract_timepoint(input_string: str, pattern: str | None, default: str) -> str:
+    """Extract timepoint from string using configured pattern."""
+    if not pattern or pattern.upper() == "N/A":
+        # No pattern configured, use default
+        return default
+
+    try:
+        regex = re.compile(pattern, re.IGNORECASE)
+        match = regex.search(input_string)
         if match:
-            numerical_id = match.group(1)
+            # Return the first capture group if present, otherwise the full match
+            if match.groups():
+                return match.group(1).upper()
+            return match.group(0).upper()
+    except re.error as e:
+        logger.warning("Invalid timepoint regex pattern '%s': %s", pattern, e)
 
-            # For pure numeric IDs, convert to P1-XXXX format for consistency
-            if id_pattern == r"^(\d{4})$":
-                numerical_id = f"P1-{numerical_id}"
-
-            # Try to find timepoint T1, T2, or T3
-            timepoint_match = re.search(r"T[123]", input_string, re.IGNORECASE)
-            timepoint = timepoint_match.group(0).upper() if timepoint_match else "T1"
-
-            timepoint_enum = _timepoint_to_enum(timepoint)
-            group_enum, group_str = _extract_group(input_string)
-
-            return ParticipantInfo(
-                numerical_id=numerical_id,
-                timepoint=timepoint_enum,
-                group=group_enum,
-                full_id=f"{numerical_id} {timepoint} {group_str}",
-            )
-
-    return ParticipantInfo(numerical_id="UNKNOWN", timepoint=ParticipantTimepoint.T1, group=ParticipantGroup.GROUP_1, full_id="UNKNOWN T1 G1")
+    return default
 
 
-def _timepoint_to_enum(timepoint: str) -> ParticipantTimepoint:
-    """Convert timepoint string to enum."""
+def _extract_group(input_string: str, pattern: str | None, default: str) -> str:
+    """Extract group from string using configured pattern."""
+    if not pattern or pattern.upper() == "N/A":
+        # No pattern configured, use default
+        return default
+
+    try:
+        regex = re.compile(pattern, re.IGNORECASE)
+        match = regex.search(input_string)
+        if match:
+            # Return the first capture group if present, otherwise the full match
+            if match.groups():
+                return match.group(1).upper()
+            return match.group(0).upper()
+    except re.error as e:
+        logger.warning("Invalid group regex pattern '%s': %s", pattern, e)
+
+    return default
+
+
+def _string_to_timepoint_enum(timepoint: str) -> ParticipantTimepoint:
+    """Convert timepoint string to enum with flexible mapping."""
     timepoint = timepoint.upper()
+    # Direct enum value match
     if timepoint == "T1":
         return ParticipantTimepoint.T1
     if timepoint == "T2":
         return ParticipantTimepoint.T2
     if timepoint == "T3":
         return ParticipantTimepoint.T3
+    # For any other value, return T1 as default but the string will be preserved in full_id
     return ParticipantTimepoint.T1
 
 
-def _extract_group(input_string: str) -> tuple[ParticipantGroup, str]:
-    """Extract group from string, return (enum, string)."""
-    group_match = re.search(r"(ISSUE|IGNORE)", input_string, re.IGNORECASE)
-    if group_match:
-        return ParticipantGroup.ISSUE, "ISSUE"
-    return ParticipantGroup.GROUP_1, "G1"
+def _string_to_group_enum(group: str) -> ParticipantGroup:
+    """Convert group string to enum with flexible mapping."""
+    group = group.upper()
+    # Check for known enum values
+    if group in ("G1", "GROUP_1", "GROUP1"):
+        return ParticipantGroup.GROUP_1
+    if group in ("G2", "GROUP_2", "GROUP2"):
+        return ParticipantGroup.GROUP_2
+    if group in ("G3", "GROUP_3", "GROUP3"):
+        return ParticipantGroup.GROUP_3
+    if group in ("ISSUE", "IGNORE"):
+        return ParticipantGroup.ISSUE
+    # For any other value, return GROUP_1 as default but the string will be preserved in full_id
+    return ParticipantGroup.GROUP_1

@@ -129,6 +129,7 @@ class DatabaseSchemaManager:
         # Create extended sleep markers tables
         self._create_sleep_markers_extended_table(conn, sleep_markers_extended_table)
         self._create_manual_nwt_markers_table(conn, manual_nwt_markers_table)
+        self._migrate_manual_nwt_markers_table(conn, manual_nwt_markers_table)
         self._create_extended_markers_indexes(conn, sleep_markers_extended_table, manual_nwt_markers_table)
 
     def _create_main_table(self, conn: sqlite3.Connection, table_name: str) -> None:
@@ -731,25 +732,80 @@ class DatabaseSchemaManager:
         """)
 
     def _create_manual_nwt_markers_table(self, conn: sqlite3.Connection, table_name: str) -> None:
-        """Create manual NWT markers table (framework only)."""
+        """Create manual NWT markers table for user-placed nonwear periods."""
         conn.execute(f"""
             CREATE TABLE IF NOT EXISTS {table_name} (
                 {self._validate_column_name(DatabaseColumn.ID)} INTEGER PRIMARY KEY AUTOINCREMENT,
                 {self._validate_column_name(DatabaseColumn.FILENAME)} TEXT NOT NULL,
                 {self._validate_column_name(DatabaseColumn.PARTICIPANT_ID)} TEXT NOT NULL,
-                {self._validate_column_name(DatabaseColumn.START_TIME)} TEXT NOT NULL,
-                {self._validate_column_name(DatabaseColumn.END_TIME)} TEXT NOT NULL,
+                {self._validate_column_name(DatabaseColumn.SLEEP_DATE)} TEXT NOT NULL,
+                {self._validate_column_name(DatabaseColumn.MARKER_INDEX)} INTEGER NOT NULL,
+                {self._validate_column_name(DatabaseColumn.START_TIMESTAMP)} REAL NOT NULL,
+                {self._validate_column_name(DatabaseColumn.END_TIMESTAMP)} REAL NOT NULL,
                 {self._validate_column_name(DatabaseColumn.DURATION_MINUTES)} INTEGER,
                 {self._validate_column_name(DatabaseColumn.CREATED_BY)} TEXT,
                 {self._validate_column_name(DatabaseColumn.CREATED_AT)} TEXT DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE({self._validate_column_name(DatabaseColumn.FILENAME)},
-                       {self._validate_column_name(DatabaseColumn.START_TIME)},
-                       {self._validate_column_name(DatabaseColumn.END_TIME)}),
+                       {self._validate_column_name(DatabaseColumn.SLEEP_DATE)},
+                       {self._validate_column_name(DatabaseColumn.MARKER_INDEX)}),
                 FOREIGN KEY({self._validate_column_name(DatabaseColumn.FILENAME)})
                     REFERENCES {self._validate_table_name(DatabaseTable.FILE_REGISTRY)}({self._validate_column_name(DatabaseColumn.FILENAME)})
                     ON DELETE CASCADE
             )
         """)
+
+    def _migrate_manual_nwt_markers_table(self, conn: sqlite3.Connection, table_name: str) -> None:
+        """
+        Add missing columns to existing manual_nwt_markers table.
+
+        If the table structure is too different from the expected schema,
+        we drop and recreate it since this is a user-generated markers table
+        that can be rebuilt by the user.
+        """
+        # Get existing columns
+        cursor = conn.execute(f"PRAGMA table_info({table_name})")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+
+        # If table is empty, we can safely drop and recreate it if needed
+        if existing_columns:
+            # Check if critical columns are missing
+            start_ts_col = self._validate_column_name(DatabaseColumn.START_TIMESTAMP)
+            end_ts_col = self._validate_column_name(DatabaseColumn.END_TIMESTAMP)
+            marker_idx_col = self._validate_column_name(DatabaseColumn.MARKER_INDEX)
+
+            missing_critical = []
+            if start_ts_col not in existing_columns:
+                missing_critical.append(start_ts_col)
+            if end_ts_col not in existing_columns:
+                missing_critical.append(end_ts_col)
+            if marker_idx_col not in existing_columns:
+                missing_critical.append(marker_idx_col)
+
+            if missing_critical:
+                # Table structure is incompatible - drop and recreate
+                logger.warning("Manual NWT markers table missing critical columns %s. Dropping and recreating table.", missing_critical)
+                conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+                # Recreate with correct schema
+                self._create_manual_nwt_markers_table(conn, table_name)
+                return
+
+        # Define columns that need to exist (for minor migrations)
+        required_columns = [
+            (DatabaseColumn.DURATION_MINUTES, "INTEGER"),
+            (DatabaseColumn.CREATED_BY, "TEXT"),
+            (DatabaseColumn.CREATED_AT, "TEXT DEFAULT CURRENT_TIMESTAMP"),
+        ]
+
+        # Add missing columns
+        for col_enum, col_type in required_columns:
+            col_name = self._validate_column_name(col_enum)
+            if col_name not in existing_columns:
+                try:
+                    conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}")
+                    logger.info("Added column %s to %s table", col_name, table_name)
+                except sqlite3.OperationalError as e:
+                    # Column might already exist or other issue
+                    logger.debug("Could not add column %s: %s", col_name, e)
 
     def _migrate_diary_table_columns(self, conn: sqlite3.Connection, table_name: str) -> None:
         """Add missing columns to existing diary_data tables."""
@@ -954,6 +1010,6 @@ class DatabaseSchemaManager:
 
         conn.execute(f"""
             CREATE INDEX IF NOT EXISTS idx_manual_nwt_markers_time_range
-            ON {nwt_markers_table}({self._validate_column_name(DatabaseColumn.START_TIME)},
-                                  {self._validate_column_name(DatabaseColumn.END_TIME)})
+            ON {nwt_markers_table}({self._validate_column_name(DatabaseColumn.START_TIMESTAMP)},
+                                  {self._validate_column_name(DatabaseColumn.END_TIMESTAMP)})
         """)

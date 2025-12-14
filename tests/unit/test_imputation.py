@@ -11,7 +11,7 @@ import dataclasses
 import numpy as np
 import pytest
 
-from sleep_scoring_app.core.algorithms import ImputationConfig, ImputationResult, impute_timegaps
+from sleep_scoring_app.preprocessing import ImputationConfig, ImputationResult, impute_timegaps
 
 
 class TestImputationConfig:

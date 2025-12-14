@@ -101,45 +101,64 @@ hidden_imports = [
     'sleep_scoring_app.web',
     'sleep_scoring_app.core',
     'sleep_scoring_app.core.algorithms',
-    'sleep_scoring_app.core.algorithms.auto_score',
-    'sleep_scoring_app.core.algorithms.calibration',
-    'sleep_scoring_app.core.algorithms.choi',
-    'sleep_scoring_app.core.algorithms.choi_algorithm',
-    'sleep_scoring_app.core.algorithms.cole_kripke',
-    'sleep_scoring_app.core.algorithms.config',
-    'sleep_scoring_app.core.algorithms.csv_datasource',
-    'sleep_scoring_app.core.algorithms.datasource_factory',
-    'sleep_scoring_app.core.algorithms.datasource_protocol',
-    'sleep_scoring_app.core.algorithms.factory',
-    'sleep_scoring_app.core.algorithms.gt3x_datasource',
-    'sleep_scoring_app.core.algorithms.imputation',
-    'sleep_scoring_app.core.algorithms.nonwear_detection_protocol',
-    'sleep_scoring_app.core.algorithms.nonwear_factory',
-    'sleep_scoring_app.core.algorithms.nwt_correlation',
-    'sleep_scoring_app.core.algorithms.onset_offset_factory',
-    'sleep_scoring_app.core.algorithms.onset_offset_protocol',
-    'sleep_scoring_app.core.algorithms.protocols',
-    'sleep_scoring_app.core.algorithms.sadeh',
-    'sleep_scoring_app.core.algorithms.sleep_rules',
-    'sleep_scoring_app.core.algorithms.sleep_scoring_protocol',
-    'sleep_scoring_app.core.algorithms.tudor_locke',
     'sleep_scoring_app.core.algorithms.types',
-    'sleep_scoring_app.core.algorithms.utils',
-    'sleep_scoring_app.core.algorithms.van_hees',
     'sleep_scoring_app.core.constants',
+    'sleep_scoring_app.core.constants.algorithms',
+    'sleep_scoring_app.core.constants.database',
+    'sleep_scoring_app.core.constants.io',
+    'sleep_scoring_app.core.constants.ui',
     'sleep_scoring_app.core.dataclasses',
     'sleep_scoring_app.core.exceptions',
-    'sleep_scoring_app.core.legacy_algorithms',
-    'sleep_scoring_app.core.nonwear_data',
+
     'sleep_scoring_app.core.validation',
+
+    # Shared callback protocols
+    'sleep_scoring_app.core.algorithms.protocols',
+    'sleep_scoring_app.core.algorithms.protocols.callbacks',
+
+    # Sleep/wake classification algorithms (protocol + factory colocated)
+    'sleep_scoring_app.core.algorithms.sleep_wake',
+    'sleep_scoring_app.core.algorithms.sleep_wake.protocol',
+    'sleep_scoring_app.core.algorithms.sleep_wake.factory',
+    'sleep_scoring_app.core.algorithms.sleep_wake.sadeh',
+    'sleep_scoring_app.core.algorithms.sleep_wake.cole_kripke',
+    'sleep_scoring_app.core.algorithms.sleep_wake.utils',
+
+    # Nonwear detection algorithms (protocol + factory colocated)
+    'sleep_scoring_app.core.algorithms.nonwear',
+    'sleep_scoring_app.core.algorithms.nonwear.protocol',
+    'sleep_scoring_app.core.algorithms.nonwear.factory',
+    'sleep_scoring_app.core.algorithms.nonwear.choi',
+    'sleep_scoring_app.core.algorithms.nonwear.van_hees',
+
+    # Sleep period detection algorithms (protocol + factory colocated)
+    'sleep_scoring_app.core.algorithms.sleep_period',
+    'sleep_scoring_app.core.algorithms.sleep_period.protocol',
+    'sleep_scoring_app.core.algorithms.sleep_period.factory',
+    'sleep_scoring_app.core.algorithms.sleep_period.config',
+    'sleep_scoring_app.core.algorithms.sleep_period.consecutive_epochs',
 
     # Application modules - data
     'sleep_scoring_app.data',
     'sleep_scoring_app.data.database',
     'sleep_scoring_app.data.database_schema',
 
+    # IO modules - data loaders
+    'sleep_scoring_app.io',
+    'sleep_scoring_app.io.sources',
+    'sleep_scoring_app.io.sources.csv_loader',
+    'sleep_scoring_app.io.sources.gt3x_loader',
+    'sleep_scoring_app.io.sources.loader_factory',
+    'sleep_scoring_app.io.sources.loader_protocol',
+
+    # Preprocessing modules
+    'sleep_scoring_app.preprocessing',
+    'sleep_scoring_app.preprocessing.calibration',
+    'sleep_scoring_app.preprocessing.imputation',
+
     # Application modules - services
     'sleep_scoring_app.services',
+    'sleep_scoring_app.services.batch_scoring_service',
     'sleep_scoring_app.services.data_service',
     'sleep_scoring_app.services.diary_mapper',
     'sleep_scoring_app.services.diary_service',
@@ -151,6 +170,7 @@ hidden_imports = [
     'sleep_scoring_app.services.memory_service',
     'sleep_scoring_app.services.nonwear_import_worker',
     'sleep_scoring_app.services.nonwear_service',
+    'sleep_scoring_app.services.nwt_correlation_service',
     'sleep_scoring_app.services.unified_data_service',
 
     # Application modules - ui

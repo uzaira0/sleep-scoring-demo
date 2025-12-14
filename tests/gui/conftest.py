@@ -139,9 +139,8 @@ def sample_sleep_metrics(sample_participant, sample_daily_sleep_markers):
         sleep_fragmentation_index=8.7,
         sadeh_onset="22:03",
         sadeh_offset="05:58",
-        choi_onset="22:00",
-        choi_offset="06:00",
-        total_choi_counts=100,
+        overlapping_nonwear_minutes_algorithm=100,
+        overlapping_nonwear_minutes_sensor=50,
         updated_at=datetime.now().isoformat(),
     )
 

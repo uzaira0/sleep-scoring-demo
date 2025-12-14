@@ -9,159 +9,189 @@ Algorithms Included:
     - Sadeh (1994): Sleep/wake classification from actigraphy
     - Cole-Kripke (1992): Alternative sleep/wake classification algorithm
     - Choi (2011): Nonwear period detection
-    - Sleep Rules: Consecutive N/M onset/offset identification
-    - Tudor-Locke (2014): Alternative onset/offset detection rules
-    - NWT Correlation: Nonwear sensor correlation analysis
-
-Example Usage (New DataFrame-based API):
-    ```python
-    import pandas as pd
-    from sleep_scoring_app.core.algorithms import (
-        sadeh_score,
-        choi_detect_nonwear,
-        ActivityColumn,
-    )
-
-    # Load activity data into DataFrame
-    df = pd.read_csv('activity_data.csv')  # Has datetime, Axis1, Vector Magnitude columns
-
-    # Sadeh sleep scoring - NO parameters needed (always uses Axis1)
-    df = sadeh_score(df)  # Adds 'Sadeh Score' column to df
-
-    # Choi nonwear detection - specify activity column with enum
-    df = choi_detect_nonwear(df, activity_column=ActivityColumn.VECTOR_MAGNITUDE)  # Adds 'Choi Nonwear' column
-
-    # Can also chain operations
-    df = choi_detect_nonwear(sadeh_score(df), ActivityColumn.VECTOR_MAGNITUDE)
-    ```
+    - van Hees (2023): Alternative nonwear detection algorithm
+    - ConsecutiveEpochsSleepPeriodDetector: Configurable sleep period detection
 
 Package Structure:
-    - types.py: Algorithm type definitions (ActivityColumn enum)
-    - protocols.py: Framework-agnostic callback protocols
-    - config.py: Algorithm configuration dataclasses (SleepRulesConfig only)
-    - sadeh.py: Sadeh algorithm implementation (function-based)
-    - choi.py: Choi algorithm implementation (function-based)
-    - sleep_rules.py: Sleep onset/offset rules
-    - nwt_correlation.py: NWT correlation functions
+    sleep_wake/     - Sleep/wake classification (protocol, factory, Sadeh, Cole-Kripke)
+    nonwear/        - Nonwear detection (protocol, factory, Choi, van Hees)
+    sleep_period/   - Sleep period detection (protocol, factory, ConsecutiveEpochs)
+    protocols/      - Shared callback protocols
+    types.py        - Common type definitions (ActivityColumn enum)
+
+Example Usage (Protocol-based Dependency Injection):
+    ```python
+    from sleep_scoring_app.core.algorithms import (
+        AlgorithmFactory,
+        NonwearAlgorithmFactory,
+        SleepPeriodDetectorFactory,
+    )
+
+    # Create algorithm instances via factory
+    sleep_algo = AlgorithmFactory.create('sadeh_1994_actilife')
+    nonwear_algo = NonwearAlgorithmFactory.create('choi_2011')
+    period_detector = SleepPeriodDetectorFactory.create('consecutive_onset3s_offset5s')
+
+    # Use algorithms
+    df = sleep_algo.score(activity_df)
+    periods = nonwear_algo.detect(activity_data, timestamps)
+    onset, offset = period_detector.apply_rules(sleep_scores, start, end, timestamps)
+    ```
+
+Example Usage (Function-based API):
+    ```python
+    import pandas as pd
+    from sleep_scoring_app.core.algorithms import sadeh_score, choi_detect_nonwear, ActivityColumn
+
+    # Load activity data into DataFrame
+    df = pd.read_csv('activity_data.csv')
+
+    # Sadeh sleep scoring
+    df = sadeh_score(df)
+
+    # Choi nonwear detection
+    df = choi_detect_nonwear(df, activity_column=ActivityColumn.VECTOR_MAGNITUDE)
+    ```
 """
 
 from __future__ import annotations
 
-from sleep_scoring_app.core.algorithms.auto_score import auto_score_activity_epoch_files
-from sleep_scoring_app.core.algorithms.calibration import (
+# ============================================================================
+# RE-EXPORTS FROM OTHER PACKAGES
+# ============================================================================
+from sleep_scoring_app.io.sources import (
+    CSVDataSourceLoader,
+    DataSourceFactory,
+    DataSourceLoader,
+    GT3XDataSourceLoader,
+)
+from sleep_scoring_app.preprocessing import (
     CalibrationConfig,
     CalibrationResult,
+    ImputationConfig,
+    ImputationResult,
     apply_calibration,
     calibrate,
     extract_calibration_features,
+    impute_timegaps,
     select_stationary_points,
 )
-from sleep_scoring_app.core.algorithms.choi import NonwearPeriod, choi_detect_nonwear, detect_nonwear
-from sleep_scoring_app.core.algorithms.choi_algorithm import ChoiAlgorithm
-from sleep_scoring_app.core.algorithms.cole_kripke import ColeKripkeAlgorithm, cole_kripke_score, score_activity_cole_kripke
-from sleep_scoring_app.core.algorithms.config import SleepRulesConfig
-from sleep_scoring_app.core.algorithms.csv_datasource import CSVDataSourceLoader
-from sleep_scoring_app.core.algorithms.datasource_factory import DataSourceFactory
-from sleep_scoring_app.core.algorithms.datasource_protocol import DataSourceLoader
-from sleep_scoring_app.core.algorithms.factory import AlgorithmFactory
-from sleep_scoring_app.core.algorithms.gt3x_datasource import GT3XDataSourceLoader
-from sleep_scoring_app.core.algorithms.imputation import ImputationConfig, ImputationResult, impute_timegaps
-from sleep_scoring_app.core.algorithms.nonwear_detection_protocol import NonwearDetectionAlgorithm
-from sleep_scoring_app.core.algorithms.nonwear_factory import NonwearAlgorithmFactory
-from sleep_scoring_app.core.algorithms.nwt_correlation import (
-    NWTCorrelationResult,
-    TimeRange,
-    calculate_nwt_offset,
-    calculate_nwt_onset,
-    calculate_total_nwt_overlaps,
-    check_time_in_nonwear_periods,
-    correlate_sleep_with_nonwear,
-    count_overlapping_periods,
+
+# ============================================================================
+# NONWEAR DETECTION (Protocol, Factory, Implementations)
+# ============================================================================
+from .nonwear import (
+    ChoiAlgorithm,
+    NonwearAlgorithmFactory,
+    NonwearDetectionAlgorithm,
+    VanHeesNonwearAlgorithm,
 )
-from sleep_scoring_app.core.algorithms.onset_offset_factory import OnsetOffsetRuleFactory
-from sleep_scoring_app.core.algorithms.onset_offset_protocol import OnsetOffsetRule
-from sleep_scoring_app.core.algorithms.protocols import CancellationCheck, LogCallback, ProgressCallback
-from sleep_scoring_app.core.algorithms.sadeh import SadehAlgorithm, sadeh_score, score_activity
-from sleep_scoring_app.core.algorithms.sleep_rules import SleepRules, find_sleep_onset_offset
-from sleep_scoring_app.core.algorithms.sleep_scoring_protocol import SleepScoringAlgorithm
-from sleep_scoring_app.core.algorithms.tudor_locke import TudorLockeConfig, TudorLockeRule
-from sleep_scoring_app.core.algorithms.types import ActivityColumn
+from .nonwear.choi import NonwearPeriod, choi_detect_nonwear, detect_nonwear
 
-# Note: ChoiNonwearDetector and SleepScoringAlgorithms are deprecated and moved to legacy_algorithms.py
-# Import them directly from sleep_scoring_app.core.legacy_algorithms if needed (but use new DI pattern instead)
+# ============================================================================
+# CALLBACK PROTOCOLS (shared)
+# ============================================================================
+from .protocols import CancellationCheck, LogCallback, ProgressCallback
 
+# ============================================================================
+# SLEEP PERIOD DETECTION (Protocol, Factory, Implementations, Metrics)
+# ============================================================================
+from .sleep_period import (
+    CONSECUTIVE_ONSET3S_OFFSET5S_CONFIG,
+    CONSECUTIVE_ONSET5S_OFFSET10S_CONFIG,
+    TUDOR_LOCKE_2014_CONFIG,
+    AnchorPosition,
+    ConsecutiveEpochsSleepPeriodDetector,
+    ConsecutiveEpochsSleepPeriodDetectorConfig,
+    EpochState,
+    SleepPeriodDetector,
+    SleepPeriodDetectorFactory,
+    SleepPeriodMetrics,
+    TudorLockeSleepMetricsCalculator,
+    find_sleep_onset_offset,
+)
+
+# ============================================================================
+# SLEEP/WAKE CLASSIFICATION (Protocol, Factory, Implementations)
+# ============================================================================
+from .sleep_wake import (
+    AlgorithmFactory,
+    ColeKripkeAlgorithm,
+    SadehAlgorithm,
+    SleepScoringAlgorithm,
+    cole_kripke_score,
+    find_datetime_column,
+    sadeh_score,
+    score_activity,
+    score_activity_cole_kripke,
+    validate_and_collapse_epochs,
+)
+
+# ============================================================================
+# COMMON TYPES
+# ============================================================================
+from .types import ActivityColumn
+
+# ============================================================================
+# PUBLIC API
+# ============================================================================
 __all__ = [
+    "CONSECUTIVE_ONSET3S_OFFSET5S_CONFIG",
+    "CONSECUTIVE_ONSET5S_OFFSET10S_CONFIG",
+    "TUDOR_LOCKE_2014_CONFIG",
+    # === Type Definitions ===
     "ActivityColumn",
-    # === Algorithm Factory (Dependency Injection) ===
     "AlgorithmFactory",
-    # === Data Source Protocol and Factory (Dependency Injection) ===
+    "AnchorPosition",
     "CSVDataSourceLoader",
-    # === Calibration ===
+    # === Re-exports: Preprocessing ===
     "CalibrationConfig",
     "CalibrationResult",
+    # === Callback Protocols ===
     "CancellationCheck",
-    # === Choi Algorithm (Nonwear Detection) ===
     "ChoiAlgorithm",
-    # === Cole-Kripke Algorithm ===
     "ColeKripkeAlgorithm",
+    "ConsecutiveEpochsSleepPeriodDetector",
+    "ConsecutiveEpochsSleepPeriodDetectorConfig",
     "DataSourceFactory",
+    # === Re-exports: Data Sources ===
     "DataSourceLoader",
+    "EpochState",
     "GT3XDataSourceLoader",
-    # === Imputation ===
     "ImputationConfig",
     "ImputationResult",
     "LogCallback",
-    "NWTCorrelationResult",
-    # === Nonwear Detection Protocol and Factory (Dependency Injection) ===
     "NonwearAlgorithmFactory",
+    # === Nonwear Detection ===
     "NonwearDetectionAlgorithm",
-    # === Algorithm Data Types ===
     "NonwearPeriod",
-    # === Onset/Offset Rule Protocol and Factory (Dependency Injection) ===
-    "OnsetOffsetRule",
-    "OnsetOffsetRuleFactory",
-    # === Callback Protocols ===
     "ProgressCallback",
-    # === Algorithm Protocol Implementation ===
     "SadehAlgorithm",
-    # === Sleep Rules ===
-    "SleepRules",
-    "SleepRulesConfig",
-    # === Algorithm Protocol ===
+    # === Sleep Period Detection ===
+    "SleepPeriodDetector",
+    "SleepPeriodDetectorFactory",
+    # === Sleep Period Metrics ===
+    "SleepPeriodMetrics",
+    # === Sleep/Wake Classification ===
     "SleepScoringAlgorithm",
-    "TimeRange",
-    # === Tudor-Locke Onset/Offset Rules ===
-    "TudorLockeConfig",
-    "TudorLockeRule",
-    # === Calibration Functions ===
+    "TudorLockeSleepMetricsCalculator",
+    "VanHeesNonwearAlgorithm",
     "apply_calibration",
-    # === Auto-Scoring Orchestration ===
-    "auto_score_activity_epoch_files",
-    "calculate_nwt_offset",
-    "calculate_nwt_onset",
-    "calculate_total_nwt_overlaps",
     "calibrate",
-    "check_time_in_nonwear_periods",
     "choi_detect_nonwear",
-    # === Cole-Kripke Function-Based API ===
     "cole_kripke_score",
-    # === NWT Correlation Functions ===
-    "correlate_sleep_with_nonwear",
-    "count_overlapping_periods",
     "detect_nonwear",
     "extract_calibration_features",
+    "find_datetime_column",
     "find_sleep_onset_offset",
-    # === Imputation Function-Based API ===
     "impute_timegaps",
-    # === Sadeh Function-Based API ===
     "sadeh_score",
-    # === Core Algorithm Functions ===
     "score_activity",
     "score_activity_cole_kripke",
     "select_stationary_points",
+    "validate_and_collapse_epochs",
 ]
 
-__version__ = "2.0.0"
-
+__version__ = "5.0.0"  # Removed backward compatibility aliases
 __author__ = "Sleep Scoring Team"
 __description__ = "Framework-agnostic sleep scoring algorithms for research"

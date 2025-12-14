@@ -15,8 +15,13 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QFont
 
 from sleep_scoring_app.core.algorithms import NonwearAlgorithmFactory
-from sleep_scoring_app.core.constants import MarkerLimits, NonwearDataSource, UIColors
-from sleep_scoring_app.core.dataclasses import DailySleepMarkers, SleepPeriod
+from sleep_scoring_app.core.constants import MarkerCategory, MarkerLimits, NonwearDataSource, UIColors
+from sleep_scoring_app.core.dataclasses import (
+    DailyNonwearMarkers,
+    DailySleepMarkers,
+    ManualNonwearPeriod,
+    SleepPeriod,
+)
 from sleep_scoring_app.ui.widgets.plot_algorithm_manager import PlotAlgorithmManager
 from sleep_scoring_app.ui.widgets.plot_marker_renderer import PlotMarkerRenderer
 from sleep_scoring_app.ui.widgets.plot_overlay_renderer import PlotOverlayRenderer
@@ -49,6 +54,8 @@ class ActivityPlotWidget(pg.PlotWidget):
     """Activity plot widget with restricted pan/zoom and sleep markers."""
 
     sleep_markers_changed = pyqtSignal(DailySleepMarkers)  # Signal for daily sleep markers updates
+    nonwear_markers_changed = pyqtSignal(DailyNonwearMarkers)  # Signal for nonwear markers updates
+    nonwear_marker_selected = pyqtSignal(object)  # Signal when a nonwear marker is selected (ManualNonwearPeriod or None)
     marker_limit_exceeded = pyqtSignal(str)  # Signal when marker limit exceeded
 
     def __init__(self, parent=None) -> None:
@@ -72,6 +79,17 @@ class ActivityPlotWidget(pg.PlotWidget):
         self.current_marker_being_placed = None  # Track incomplete marker pairs
         self.selected_marker_set_index = 1  # Currently selected marker set (1, 2, 3, or 4)
         self._marker_click_in_progress = False  # Prevent double processing of marker clicks
+
+        # Manual nonwear markers
+        self._daily_nonwear_markers = DailyNonwearMarkers()
+        self._nonwear_marker_lines = []  # Visual line objects for nonwear
+        self._nonwear_markers_saved = False  # Track if nonwear markers have been saved
+        self._current_nonwear_marker_being_placed = None  # Track incomplete nonwear marker
+        self._selected_nonwear_marker_index = 1  # Currently selected nonwear marker (1-10)
+        self._nonwear_markers_visible = True  # Visibility of nonwear markers
+
+        # Marker mode - determines which type of marker is placed on click
+        self._active_marker_category = MarkerCategory.SLEEP  # SLEEP or NONWEAR
 
         # File info display
         self.file_info_label = None
@@ -259,7 +277,11 @@ class ActivityPlotWidget(pg.PlotWidget):
             filename,
         )
 
-        # Also print to make sure we see it
+        # Guard against None or empty data - clear the plot instead
+        if activity_data is None or (timestamps is not None and len(timestamps) == 0):
+            logger.warning("PLOT WIDGET: No activity data provided, clearing plot")
+            self.clear_plot()
+            return
 
         self.current_view_hours = view_hours
         self.current_filename = filename
@@ -741,28 +763,57 @@ class ActivityPlotWidget(pg.PlotWidget):
 
         # Handle clear marker shortcuts and incomplete marker cancellation (C and Delete)
         if key in (Qt.Key.Key_C, Qt.Key.Key_Delete):
-            # First check if there's an incomplete marker to cancel
-            if self.current_marker_being_placed is not None:
-                logger.debug("Delete/C key detected - cancelling incomplete marker placement")
-                self.cancel_incomplete_marker()
-                return
-
-            # Otherwise, clear selected marker set
-            logger.debug("Clear marker shortcut detected")
-            self.clear_selected_marker_set()
+            if self._active_marker_category == MarkerCategory.SLEEP:
+                # First check if there's an incomplete marker to cancel
+                if self.current_marker_being_placed is not None:
+                    logger.debug("Delete/C key detected - cancelling incomplete sleep marker placement")
+                    self.cancel_incomplete_marker()
+                    return
+                # Otherwise, clear selected marker set
+                logger.debug("Clear sleep marker shortcut detected")
+                self.clear_selected_marker_set()
+            elif self._active_marker_category == MarkerCategory.NONWEAR:
+                # First check if there's an incomplete nonwear marker to cancel
+                if self._current_nonwear_marker_being_placed is not None:
+                    logger.debug("Delete/C key detected - cancelling incomplete nonwear marker placement")
+                    self.cancel_incomplete_nonwear_marker()
+                    return
+                # Otherwise, clear selected nonwear marker
+                logger.debug("Clear nonwear marker shortcut detected")
+                self.clear_selected_nonwear_marker()
             return
 
-        # Handle marker adjustment for currently selected marker set
-        selected_period = self.get_selected_marker_period()
-        if selected_period and selected_period.is_complete:
-            if key == Qt.Key.Key_Q:  # Move onset left
-                self.adjust_selected_marker("onset", -60)  # -1 minute
-            elif key == Qt.Key.Key_E:  # Move onset right
-                self.adjust_selected_marker("onset", 60)  # +1 minute
-            elif key == Qt.Key.Key_A:  # Move offset left
-                self.adjust_selected_marker("offset", -60)  # -1 minute
-            elif key == Qt.Key.Key_D:  # Move offset right
-                self.adjust_selected_marker("offset", 60)  # +1 minute
+        # Handle marker adjustment based on active marker category
+        if self._active_marker_category == MarkerCategory.SLEEP:
+            # Handle marker adjustment for currently selected sleep marker set
+            selected_period = self.get_selected_marker_period()
+            if selected_period and selected_period.is_complete:
+                if key == Qt.Key.Key_Q:  # Move onset left
+                    self.adjust_selected_marker("onset", -60)  # -1 minute
+                elif key == Qt.Key.Key_E:  # Move onset right
+                    self.adjust_selected_marker("onset", 60)  # +1 minute
+                elif key == Qt.Key.Key_A:  # Move offset left
+                    self.adjust_selected_marker("offset", -60)  # -1 minute
+                elif key == Qt.Key.Key_D:  # Move offset right
+                    self.adjust_selected_marker("offset", 60)  # +1 minute
+                else:
+                    super().keyPressEvent(event)
+            else:
+                super().keyPressEvent(event)
+        elif self._active_marker_category == MarkerCategory.NONWEAR:
+            # Handle marker adjustment for currently selected nonwear marker
+            selected_period = self.get_selected_nonwear_period()
+            if selected_period and selected_period.is_complete:
+                if key == Qt.Key.Key_Q:  # Move start left
+                    self.adjust_selected_nonwear_marker("start", -60)  # -1 minute
+                elif key == Qt.Key.Key_E:  # Move start right
+                    self.adjust_selected_nonwear_marker("start", 60)  # +1 minute
+                elif key == Qt.Key.Key_A:  # Move end left
+                    self.adjust_selected_nonwear_marker("end", -60)  # -1 minute
+                elif key == Qt.Key.Key_D:  # Move end right
+                    self.adjust_selected_nonwear_marker("end", 60)  # +1 minute
+                else:
+                    super().keyPressEvent(event)
             else:
                 super().keyPressEvent(event)
         else:
@@ -884,6 +935,78 @@ class ActivityPlotWidget(pg.PlotWidget):
         self.sleep_markers_changed.emit(self.daily_sleep_markers)
 
         logger.info(f"Successfully moved {marker_type} marker to timestamp {target_timestamp}")
+        return True
+
+    def move_nonwear_marker_to_timestamp(self, marker_type: str, target_timestamp: float, period_slot: int | None = None) -> bool:
+        """
+        Move a nonwear marker to a specific timestamp with validation.
+
+        Args:
+            marker_type: "start" or "end"
+            target_timestamp: Unix timestamp to move the marker to
+            period_slot: Optional period slot (1-10). If None, uses selected nonwear period.
+
+        Returns:
+            bool: True if marker was moved successfully, False otherwise
+
+        """
+        # Snap to nearest minute
+        target_timestamp = round(target_timestamp / 60) * 60
+
+        # Ensure timestamp is within data bounds
+        if not (self.data_start_time <= target_timestamp <= self.data_end_time):
+            logger.warning(f"Target timestamp {target_timestamp} is outside data bounds [{self.data_start_time}, {self.data_end_time}]")
+            return False
+
+        # Get the target period
+        if period_slot is None:
+            # Use selected nonwear period
+            period = self.marker_renderer.get_selected_nonwear_period()
+            if not period:
+                logger.warning("No nonwear period selected to move marker for")
+                return False
+        else:
+            # Get period by slot
+            period = self._daily_nonwear_markers.get_period_by_slot(period_slot)
+            if not period:
+                logger.warning(f"No nonwear period found in slot {period_slot}")
+                return False
+
+        # Check if period is complete (has both markers)
+        if not period.is_complete:
+            logger.warning("Cannot move marker for incomplete nonwear period")
+            return False
+
+        # Validate the new position
+        if marker_type == "start":
+            # Ensure start would be before end
+            if target_timestamp >= period.end_timestamp:
+                logger.warning(f"Cannot move start to {target_timestamp} - would be after end at {period.end_timestamp}")
+                return False
+            # Update start timestamp
+            period.start_timestamp = target_timestamp
+        elif marker_type == "end":
+            # Ensure end would be after start
+            if target_timestamp <= period.start_timestamp:
+                logger.warning(f"Cannot move end to {target_timestamp} - would be before start at {period.start_timestamp}")
+                return False
+            # Update end timestamp
+            period.end_timestamp = target_timestamp
+        else:
+            logger.warning(f"Invalid nonwear marker type: {marker_type}")
+            return False
+
+        # Redraw nonwear markers
+        self.marker_renderer.redraw_nonwear_markers()
+
+        # Mark as unsaved
+        self._nonwear_markers_saved = False
+
+        # Emit change signals
+        self.nonwear_markers_changed.emit(self._daily_nonwear_markers)
+        self.nonwear_marker_selected.emit(period)
+
+        logger.info(f"Successfully moved nonwear {marker_type} marker to timestamp {target_timestamp}")
         return True
 
     def add_sleep_marker(self, timestamp: float) -> None:
@@ -1218,7 +1341,7 @@ class ActivityPlotWidget(pg.PlotWidget):
 
             return {
                 "participant_id": participant_info.numerical_id,
-                "timepoint": participant_info.timepoint,
+                "timepoint": participant_info.timepoint_str,
             }
 
         except Exception:
@@ -1307,6 +1430,126 @@ class ActivityPlotWidget(pg.PlotWidget):
     def _update_marker_visual_state(self) -> None:
         """Update the visual state of all markers to reflect current selection."""
         self.marker_renderer.update_marker_visual_state()
+
+    # ========== Manual Nonwear Marker Methods ==========
+
+    def add_nonwear_marker(self, timestamp: float) -> None:
+        """Add a manual nonwear marker at the given timestamp."""
+        try:
+            if self._current_nonwear_marker_being_placed is None:
+                # Start new nonwear period
+                if not self._daily_nonwear_markers.has_space_for_new_period():
+                    self.marker_limit_exceeded.emit(f"Maximum {MarkerLimits.MAX_NONWEAR_PERIODS_PER_DAY} nonwear periods per day allowed")
+                    return
+
+                # Get next available slot
+                next_slot = self._daily_nonwear_markers.get_next_available_slot()
+                if next_slot is None:
+                    return
+
+                # Create new incomplete period (start only)
+                self._current_nonwear_marker_being_placed = ManualNonwearPeriod(
+                    start_timestamp=timestamp,
+                    end_timestamp=None,
+                    marker_index=next_slot,
+                )
+
+            else:
+                # Complete the current period (add end)
+                if timestamp <= self._current_nonwear_marker_being_placed.start_timestamp:
+                    # Invalid: end before start, reset
+                    self._current_nonwear_marker_being_placed = None
+                    return
+
+                self._current_nonwear_marker_being_placed.end_timestamp = timestamp
+
+                # Check for overlap with existing periods
+                slot = self._current_nonwear_marker_being_placed.marker_index
+                if self._daily_nonwear_markers.check_overlap(
+                    self._current_nonwear_marker_being_placed.start_timestamp,
+                    self._current_nonwear_marker_being_placed.end_timestamp,
+                    exclude_slot=slot,
+                ):
+                    self.marker_limit_exceeded.emit("Nonwear periods cannot overlap")
+                    self._current_nonwear_marker_being_placed = None
+                    return
+
+                # Add to daily markers
+                self._daily_nonwear_markers.set_period_by_slot(slot, self._current_nonwear_marker_being_placed)
+
+                # Set this as the currently selected nonwear marker
+                self._selected_nonwear_marker_index = slot
+
+                # Emit change signal
+                self.nonwear_markers_changed.emit(self._daily_nonwear_markers)
+
+                self._current_nonwear_marker_being_placed = None
+
+            self.marker_renderer.redraw_nonwear_markers()
+
+        except Exception:
+            logger.exception("Error adding nonwear marker")
+            self._current_nonwear_marker_being_placed = None
+
+    def get_selected_nonwear_period(self) -> ManualNonwearPeriod | None:
+        """Get the currently selected nonwear period."""
+        return self.marker_renderer.get_selected_nonwear_period()
+
+    def clear_selected_nonwear_marker(self) -> None:
+        """Clear the currently selected nonwear marker."""
+        self.marker_renderer.clear_selected_nonwear_marker()
+        self.nonwear_markers_changed.emit(self._daily_nonwear_markers)
+
+    def cancel_incomplete_nonwear_marker(self) -> None:
+        """Cancel the current incomplete nonwear marker placement."""
+        self.marker_renderer.cancel_incomplete_nonwear_marker()
+
+    def adjust_selected_nonwear_marker(self, marker_type: str, seconds_delta: int) -> None:
+        """Adjust selected nonwear marker by specified number of seconds."""
+        self.marker_renderer.adjust_selected_nonwear_marker(marker_type, seconds_delta)
+        self.nonwear_markers_changed.emit(self._daily_nonwear_markers)
+
+    def load_daily_nonwear_markers(self, daily_markers: DailyNonwearMarkers, markers_saved: bool = True) -> None:
+        """Load existing daily nonwear markers into the plot widget."""
+        self.marker_renderer.load_daily_nonwear_markers(daily_markers, markers_saved)
+
+    def get_daily_nonwear_markers(self) -> DailyNonwearMarkers:
+        """Get the current daily nonwear markers."""
+        return self.marker_renderer.get_daily_nonwear_markers()
+
+    def set_nonwear_markers_visibility(self, visible: bool) -> None:
+        """Set visibility of nonwear markers."""
+        self.marker_renderer.set_nonwear_markers_visibility(visible)
+
+    def set_active_marker_category(self, category: MarkerCategory) -> None:
+        """
+        Set the active marker category (SLEEP or NONWEAR).
+
+        When switching modes, this also:
+        - Clears the marker click-in-progress flag to prevent blocking
+        - Cancels any incomplete markers from the previous mode
+        """
+        previous_category = self._active_marker_category
+        self._active_marker_category = category
+
+        # Always reset the click-in-progress flag when switching modes
+        # This prevents clicks on markers from the other category from blocking new placements
+        self._marker_click_in_progress = False
+
+        # Cancel any incomplete markers from the previous mode
+        if previous_category != category:
+            if previous_category == MarkerCategory.SLEEP and self.current_marker_being_placed is not None:
+                logger.debug("Cancelling incomplete sleep marker when switching to nonwear mode")
+                self.cancel_incomplete_marker()
+            elif previous_category == MarkerCategory.NONWEAR and self._current_nonwear_marker_being_placed is not None:
+                logger.debug("Cancelling incomplete nonwear marker when switching to sleep mode")
+                self.cancel_incomplete_nonwear_marker()
+
+        logger.debug(f"Active marker category set to: {category}")
+
+    def get_active_marker_category(self) -> MarkerCategory:
+        """Get the currently active marker category."""
+        return self._active_marker_category
 
     def add_background_region(
         self,
@@ -1403,12 +1646,17 @@ class ActivityPlotWidget(pg.PlotWidget):
         return arrow, text_item
 
     def on_plot_clicked(self, event) -> None:
-        """Handle mouse clicks for placing sleep markers."""
+        """Handle mouse clicks for placing markers (sleep or nonwear based on mode)."""
         # Handle right-click cancellation of incomplete markers
         if event.button() == Qt.MouseButton.RightButton:
-            if self.current_marker_being_placed is not None:
-                logger.debug("Right-click detected - cancelling incomplete marker placement")
-                self.cancel_incomplete_marker()
+            if self._active_marker_category == MarkerCategory.SLEEP:
+                if self.current_marker_being_placed is not None:
+                    logger.debug("Right-click detected - cancelling incomplete sleep marker placement")
+                    self.cancel_incomplete_marker()
+            elif self._active_marker_category == MarkerCategory.NONWEAR:
+                if self._current_nonwear_marker_being_placed is not None:
+                    logger.debug("Right-click detected - cancelling incomplete nonwear marker placement")
+                    self.cancel_incomplete_nonwear_marker()
             return
 
         # Only process left mouse button clicks for placement
@@ -1432,7 +1680,11 @@ class ActivityPlotWidget(pg.PlotWidget):
 
             # Check if click is within data boundaries
             if self.data_start_time <= clicked_time <= self.data_end_time:
-                self.add_sleep_marker(clicked_time)
+                # Route to appropriate handler based on active marker category
+                if self._active_marker_category == MarkerCategory.SLEEP:
+                    self.add_sleep_marker(clicked_time)
+                elif self._active_marker_category == MarkerCategory.NONWEAR:
+                    self.add_nonwear_marker(clicked_time)
 
         # Update marker visual state when clicking away from markers
         # This ensures selected markers stay emboldened/brightened even when clicked away
@@ -1534,8 +1786,8 @@ class ActivityPlotWidget(pg.PlotWidget):
 
                 # Create display text showing the actual loaded data
                 participant_id = info.numerical_id
-                timepoint = info.timepoint
-                group = info.group
+                timepoint = info.timepoint_str
+                group = info.group_str
 
                 label_text = f"Loaded: {participant_id} {timepoint} {group} ({self.current_filename})"
                 external_label.setText(label_text)
@@ -1565,8 +1817,8 @@ class ActivityPlotWidget(pg.PlotWidget):
 
                 # Create display text showing the actual loaded data
                 participant_id = info.numerical_id
-                timepoint = info.timepoint
-                group = info.group
+                timepoint = info.timepoint_str
+                group = info.group_str
 
                 label_text = f"Loaded: {participant_id} {timepoint} {group} ({self.current_filename})"
 

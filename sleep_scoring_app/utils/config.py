@@ -151,6 +151,19 @@ class ConfigManager:
                 if nonwear_algorithm_id:
                     self.config.nonwear_algorithm_id = nonwear_algorithm_id
 
+                # Load sleep algorithm settings
+                sleep_algorithm_id = self.settings.value("sleep_algorithm_id", "")
+                if sleep_algorithm_id:
+                    self.config.sleep_algorithm_id = sleep_algorithm_id
+
+                onset_offset_rule_id = self.settings.value("onset_offset_rule_id", "")
+                if onset_offset_rule_id:
+                    self.config.onset_offset_rule_id = onset_offset_rule_id
+
+                data_paradigm = self.settings.value("data_paradigm", "")
+                if data_paradigm:
+                    self.config.data_paradigm = data_paradigm
+
                 # Load data source settings
                 data_source_type_id = self.settings.value("data_source_type_id", "")
                 if data_source_type_id:
@@ -241,6 +254,9 @@ class ConfigManager:
                     self.settings.setValue("night_end_hour", self.config.night_end_hour)
                     self.settings.setValue("choi_axis", self.config.choi_axis)
                     self.settings.setValue("nonwear_algorithm_id", self.config.nonwear_algorithm_id)
+                    self.settings.setValue("sleep_algorithm_id", self.config.sleep_algorithm_id)
+                    self.settings.setValue("onset_offset_rule_id", self.config.onset_offset_rule_id)
+                    self.settings.setValue("data_paradigm", self.config.data_paradigm)
 
                     # Data source settings
                     self.settings.setValue("data_source_type_id", self.config.data_source_type_id)

@@ -8,8 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from sleep_scoring_app.core.algorithms.factory import AlgorithmFactory
-from sleep_scoring_app.core.algorithms.sleep_scoring_protocol import SleepScoringAlgorithm
+from sleep_scoring_app.core.algorithms import AlgorithmFactory, SleepScoringAlgorithm
 
 
 class TestAlgorithmFactoryCreation:

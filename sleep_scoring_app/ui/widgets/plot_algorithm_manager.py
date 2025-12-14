@@ -16,12 +16,11 @@ from typing import TYPE_CHECKING, Any
 
 import pyqtgraph as pg
 
-from sleep_scoring_app.core.algorithms import AlgorithmFactory, NonwearAlgorithmFactory, SleepScoringAlgorithm
-from sleep_scoring_app.core.algorithms.onset_offset_factory import OnsetOffsetRuleFactory
+from sleep_scoring_app.core.algorithms import AlgorithmFactory, NonwearAlgorithmFactory, SleepPeriodDetectorFactory, SleepScoringAlgorithm
 from sleep_scoring_app.core.constants import ActivityDataPreference, UIColors
 
 if TYPE_CHECKING:
-    from sleep_scoring_app.core.algorithms.onset_offset_protocol import OnsetOffsetRule
+    from sleep_scoring_app.core.algorithms import SleepPeriodDetector
     from sleep_scoring_app.core.dataclasses import SleepPeriod
     from sleep_scoring_app.ui.widgets.activity_plot import ActivityPlotWidget
 
@@ -43,7 +42,7 @@ class PlotAlgorithmManager:
         self._algorithm_cache: dict[str, dict[str, Any]] = {}
         self._sleep_pattern_cache: dict[tuple, tuple] = {}
         self._sleep_scoring_algorithm: SleepScoringAlgorithm | None = None
-        self._onset_offset_rule: OnsetOffsetRule | None = None
+        self._sleep_period_detector: SleepPeriodDetector | None = None
 
     # ========== Property Accessors ==========
 
@@ -135,18 +134,18 @@ class PlotAlgorithmManager:
         self._sleep_pattern_cache.clear()
         logger.info("Sleep scoring algorithm changed to: %s", algorithm.name)
 
-    def get_onset_offset_rule(self) -> OnsetOffsetRule:
+    def get_sleep_period_detector(self) -> SleepPeriodDetector:
         """
-        Get the current onset/offset rule instance.
+        Get the current sleep period detector instance.
 
-        Creates the rule from the factory if not already cached.
-        Uses configuration to determine which rule and parameters to use.
+        Creates the detector from the factory if not already cached.
+        Uses configuration to determine which detector and parameters to use.
 
         Returns:
-            OnsetOffsetRule instance (default: Consecutive 3/5 Minutes)
+            SleepPeriodDetector instance (default: Consecutive 3S/5S)
 
         """
-        if self._onset_offset_rule is None:
+        if self._sleep_period_detector is None:
             # Get config from main window
             config = None
             main_window = getattr(self.parent, "main_window", None)
@@ -155,30 +154,30 @@ class PlotAlgorithmManager:
             if main_window and hasattr(main_window, "config_manager"):
                 config = main_window.config_manager.config
 
-            # Get rule ID from config or use default
-            rule_id = OnsetOffsetRuleFactory.get_default_rule_id()
+            # Get detector ID from config or use default
+            detector_id = SleepPeriodDetectorFactory.get_default_detector_id()
             if config and hasattr(config, "onset_offset_rule_id") and config.onset_offset_rule_id:
-                rule_id = config.onset_offset_rule_id
+                detector_id = config.onset_offset_rule_id
 
-            self._onset_offset_rule = OnsetOffsetRuleFactory.create(rule_id, config)
-            logger.debug("Created onset/offset rule: %s (id: %s)", self._onset_offset_rule.name, rule_id)
+            self._sleep_period_detector = SleepPeriodDetectorFactory.create(detector_id)
+            logger.debug("Created sleep period detector: %s (id: %s)", self._sleep_period_detector.name, detector_id)
 
-        return self._onset_offset_rule
+        return self._sleep_period_detector
 
-    def set_onset_offset_rule(self, rule: OnsetOffsetRule) -> None:
+    def set_sleep_period_detector(self, detector: SleepPeriodDetector) -> None:
         """
-        Set the onset/offset rule instance.
+        Set the sleep period detector instance.
 
-        Clears caches when rule changes to ensure fresh results.
+        Clears caches when detector changes to ensure fresh results.
 
         Args:
-            rule: OnsetOffsetRule instance to use
+            detector: SleepPeriodDetector instance to use
 
         """
-        self._onset_offset_rule = rule
-        # Clear caches when rule changes
+        self._sleep_period_detector = detector
+        # Clear caches when detector changes
         self._sleep_pattern_cache.clear()
-        logger.info("Onset/offset rule changed to: %s", rule.name)
+        logger.info("Sleep period detector changed to: %s", detector.name)
 
     @sadeh_results.setter
     def sadeh_results(self, value):
@@ -445,8 +444,8 @@ class PlotAlgorithmManager:
 
         self.clear_sleep_onset_offset_markers()
 
-        # Get onset/offset rule instance
-        rule = self.get_onset_offset_rule()
+        # Get sleep period detector instance
+        detector = self.get_sleep_period_detector()
 
         # Convert period timestamps to datetime objects
         sleep_start_time = datetime.fromtimestamp(selected_period.onset_timestamp)
@@ -455,8 +454,8 @@ class PlotAlgorithmManager:
         # Convert x_data (Unix timestamps) to datetime objects
         timestamps = [datetime.fromtimestamp(ts) for ts in self.x_data]
 
-        # Apply rule via protocol
-        onset_idx, offset_idx = rule.apply_rules(
+        # Apply detector via protocol
+        onset_idx, offset_idx = detector.apply_rules(
             sleep_scores=self.sadeh_results,
             sleep_start_marker=sleep_start_time,
             sleep_end_marker=sleep_end_time,
@@ -465,12 +464,12 @@ class PlotAlgorithmManager:
 
         # Create visual markers
         if onset_idx is not None:
-            self.create_sleep_onset_marker(self.x_data[onset_idx], rule)
+            self.create_sleep_onset_marker(self.x_data[onset_idx], detector)
 
         if offset_idx is not None:
-            self.create_sleep_offset_marker(self.x_data[offset_idx], rule)
+            self.create_sleep_offset_marker(self.x_data[offset_idx], detector)
 
-    def create_sleep_onset_marker(self, timestamp, rule: OnsetOffsetRule | None = None) -> None:
+    def create_sleep_onset_marker(self, timestamp, detector: SleepPeriodDetector | None = None) -> None:
         """Create sleep onset marker with arrow and axis label."""
         custom_arrow_colors = getattr(self.parent, "custom_arrow_colors", {})
         onset_arrow_color = custom_arrow_colors.get("onset", "#0066CC")
@@ -491,9 +490,9 @@ class PlotAlgorithmManager:
 
         time_str = datetime.fromtimestamp(timestamp).strftime("%H:%M")
 
-        # Get label from rule protocol if available
-        if rule is not None:
-            onset_label, _ = rule.get_marker_labels(time_str, "")
+        # Get label from detector protocol if available
+        if detector is not None:
+            onset_label, _ = detector.get_marker_labels(time_str, "")
         else:
             onset_label = f"Sleep Onset at {time_str}\n3-minute rule applied"
 
@@ -512,7 +511,7 @@ class PlotAlgorithmManager:
             self.parent.sleep_rule_markers = []
         self.parent.sleep_rule_markers.extend([arrow, onset_text])
 
-    def create_sleep_offset_marker(self, timestamp, rule: OnsetOffsetRule | None = None) -> None:
+    def create_sleep_offset_marker(self, timestamp, detector: SleepPeriodDetector | None = None) -> None:
         """Create sleep offset marker with arrow and axis label."""
         custom_arrow_colors = getattr(self.parent, "custom_arrow_colors", {})
         offset_arrow_color = custom_arrow_colors.get("offset", "#FFA500")
@@ -533,9 +532,9 @@ class PlotAlgorithmManager:
 
         time_str = datetime.fromtimestamp(timestamp).strftime("%H:%M")
 
-        # Get label from rule protocol if available
-        if rule is not None:
-            _, offset_label = rule.get_marker_labels("", time_str)
+        # Get label from detector protocol if available
+        if detector is not None:
+            _, offset_label = detector.get_marker_labels("", time_str)
         else:
             offset_label = f"Sleep Offset at {time_str}\n5-minute rule applied"
 

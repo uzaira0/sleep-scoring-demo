@@ -1,148 +1,176 @@
 """
-Unit tests for OnsetOffsetRuleFactory dependency injection.
+Unit tests for SleepPeriodDetectorFactory dependency injection.
 
-Tests the factory pattern implementation for sleep onset/offset detection rules.
+Tests the factory pattern implementation for sleep period detection.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from sleep_scoring_app.core.algorithms.onset_offset_factory import OnsetOffsetRuleFactory
-from sleep_scoring_app.core.algorithms.onset_offset_protocol import OnsetOffsetRule
+from sleep_scoring_app.core.algorithms import SleepPeriodDetector, SleepPeriodDetectorFactory
 
 
-class TestOnsetOffsetRuleFactoryCreation:
-    """Tests for rule creation via factory."""
+class TestSleepPeriodDetectorFactoryCreation:
+    """Tests for detector creation via factory."""
 
-    def test_create_consecutive_3_5(self) -> None:
-        """Test creating consecutive 3/5 minutes rule."""
-        rule = OnsetOffsetRuleFactory.create("consecutive_3_5")
-        assert rule is not None
-        assert rule.name == "Consecutive 3/5 Minutes"
-        assert isinstance(rule, OnsetOffsetRule)
+    def test_create_consecutive_onset3s_offset5s(self) -> None:
+        """Test creating consecutive 3s/5s detector."""
+        detector = SleepPeriodDetectorFactory.create("consecutive_onset3s_offset5s")
+        assert detector is not None
+        assert detector.name == "Consecutive 3S/5S"
+        assert isinstance(detector, SleepPeriodDetector)
 
-    def test_create_consecutive_5_10(self) -> None:
-        """Test creating consecutive 5/10 minutes rule."""
-        rule = OnsetOffsetRuleFactory.create("consecutive_5_10")
-        assert rule is not None
-        assert rule.name == "Consecutive 5/10 Minutes"
-        assert isinstance(rule, OnsetOffsetRule)
+    def test_create_consecutive_onset5s_offset10s(self) -> None:
+        """Test creating consecutive 5s/10s detector."""
+        detector = SleepPeriodDetectorFactory.create("consecutive_onset5s_offset10s")
+        assert detector is not None
+        assert detector.name == "Consecutive 5S/10S"
+        assert isinstance(detector, SleepPeriodDetector)
 
     def test_create_tudor_locke_2014(self) -> None:
-        """Test creating Tudor-Locke 2014 rule."""
-        rule = OnsetOffsetRuleFactory.create("tudor_locke_2014")
-        assert rule is not None
-        assert rule.name == "Tudor-Locke (5/10)"
-        assert isinstance(rule, OnsetOffsetRule)
+        """Test creating Tudor-Locke 2014 detector."""
+        detector = SleepPeriodDetectorFactory.create("tudor_locke_2014")
+        assert detector is not None
+        assert detector.name == "Tudor-Locke (2014)"
+        assert isinstance(detector, SleepPeriodDetector)
 
-    def test_create_unknown_rule_raises(self) -> None:
-        """Test that creating unknown rule raises ValueError."""
-        with pytest.raises(ValueError, match="Unknown onset/offset rule"):
-            OnsetOffsetRuleFactory.create("nonexistent_rule")
+    def test_create_with_legacy_id_consecutive_3_5(self) -> None:
+        """Test backward compatibility with legacy ID."""
+        detector = SleepPeriodDetectorFactory.create("consecutive_3_5")
+        assert detector is not None
+        assert detector.name == "Consecutive 3S/5S"
+
+    def test_create_with_legacy_id_consecutive_5_10(self) -> None:
+        """Test backward compatibility with legacy ID."""
+        detector = SleepPeriodDetectorFactory.create("consecutive_5_10")
+        assert detector is not None
+        assert detector.name == "Consecutive 5S/10S"
+
+    def test_create_unknown_detector_raises(self) -> None:
+        """Test that creating unknown detector raises ValueError."""
+        with pytest.raises(ValueError, match="Unknown sleep period detector"):
+            SleepPeriodDetectorFactory.create("nonexistent_detector")
 
     def test_create_returns_new_instance_each_time(self) -> None:
         """Test that each create call returns a new instance."""
-        rule1 = OnsetOffsetRuleFactory.create("consecutive_3_5")
-        rule2 = OnsetOffsetRuleFactory.create("consecutive_3_5")
-        assert rule1 is not rule2
+        detector1 = SleepPeriodDetectorFactory.create("consecutive_onset3s_offset5s")
+        detector2 = SleepPeriodDetectorFactory.create("consecutive_onset3s_offset5s")
+        assert detector1 is not detector2
 
 
-class TestOnsetOffsetRuleFactoryRegistry:
+class TestSleepPeriodDetectorFactoryRegistry:
     """Tests for factory registry operations."""
 
-    def test_get_available_rules(self) -> None:
-        """Test listing available rules."""
-        available = OnsetOffsetRuleFactory.get_available_rules()
+    def test_get_available_detectors(self) -> None:
+        """Test listing available detectors."""
+        available = SleepPeriodDetectorFactory.get_available_detectors()
         assert isinstance(available, dict)
-        assert "consecutive_3_5" in available
-        assert "consecutive_5_10" in available
+        assert "consecutive_onset3s_offset5s" in available
+        assert "consecutive_onset5s_offset10s" in available
         assert "tudor_locke_2014" in available
 
-    def test_get_available_rules_returns_display_names(self) -> None:
-        """Test that available rules dict has display names as values."""
-        available = OnsetOffsetRuleFactory.get_available_rules()
-        assert available["consecutive_3_5"] == "Consecutive 3/5 Minutes"
-        assert available["consecutive_5_10"] == "Consecutive 5/10 Minutes"
-        assert available["tudor_locke_2014"] == "Tudor-Locke (5/10)"
+    def test_get_available_detectors_returns_display_names(self) -> None:
+        """Test that available detectors dict has display names as values."""
+        available = SleepPeriodDetectorFactory.get_available_detectors()
+        assert available["consecutive_onset3s_offset5s"] == "Consecutive 3S/5S"
+        assert available["consecutive_onset5s_offset10s"] == "Consecutive 5S/10S"
+        assert available["tudor_locke_2014"] == "Tudor-Locke (2014)"
 
-    def test_get_default_rule_id(self) -> None:
-        """Test getting default rule ID."""
-        default_id = OnsetOffsetRuleFactory.get_default_rule_id()
-        assert default_id == "consecutive_3_5"
+    def test_get_default_detector_id(self) -> None:
+        """Test getting default detector ID."""
+        default_id = SleepPeriodDetectorFactory.get_default_detector_id()
+        assert default_id == "consecutive_onset3s_offset5s"
+
+    def test_backward_compat_get_available_rules(self) -> None:
+        """Test backward compatibility alias."""
+        available = SleepPeriodDetectorFactory.get_available_rules()
+        assert "consecutive_onset3s_offset5s" in available
+
+    def test_backward_compat_get_default_rule_id(self) -> None:
+        """Test backward compatibility alias."""
+        default_id = SleepPeriodDetectorFactory.get_default_rule_id()
+        assert default_id == "consecutive_onset3s_offset5s"
 
 
-class TestOnsetOffsetRuleBehavior:
-    """Tests for rule behavior from factory."""
+class TestSleepPeriodDetectorBehavior:
+    """Tests for detector behavior from factory."""
 
-    def test_consecutive_3_5_parameters(self) -> None:
-        """Test consecutive 3/5 rule has correct parameters."""
-        rule = OnsetOffsetRuleFactory.create("consecutive_3_5")
-        params = rule.get_parameters()
-        assert params["onset_consecutive_minutes"] == 3
-        assert params["offset_consecutive_minutes"] == 5
+    def test_consecutive_onset3s_offset5s_parameters(self) -> None:
+        """Test consecutive 3s/5s detector has correct parameters."""
+        detector = SleepPeriodDetectorFactory.create("consecutive_onset3s_offset5s")
+        params = detector.get_parameters()
+        assert params["onset_n"] == 3
+        assert params["onset_state"] == "sleep"
+        assert params["offset_n"] == 5
+        assert params["offset_state"] == "sleep"
 
-    def test_consecutive_5_10_parameters(self) -> None:
-        """Test consecutive 5/10 rule has correct parameters."""
-        rule = OnsetOffsetRuleFactory.create("consecutive_5_10")
-        params = rule.get_parameters()
-        assert params["onset_consecutive_minutes"] == 5
-        assert params["offset_consecutive_minutes"] == 10
+    def test_consecutive_onset5s_offset10s_parameters(self) -> None:
+        """Test consecutive 5s/10s detector has correct parameters."""
+        detector = SleepPeriodDetectorFactory.create("consecutive_onset5s_offset10s")
+        params = detector.get_parameters()
+        assert params["onset_n"] == 5
+        assert params["onset_state"] == "sleep"
+        assert params["offset_n"] == 10
+        assert params["offset_state"] == "sleep"
 
     def test_tudor_locke_parameters(self) -> None:
-        """Test Tudor-Locke rule has correct parameters."""
-        rule = OnsetOffsetRuleFactory.create("tudor_locke_2014")
-        params = rule.get_parameters()
-        assert params["onset_consecutive_minutes"] == 5
-        assert params["offset_consecutive_wake_minutes"] == 10
+        """Test Tudor-Locke detector has correct parameters."""
+        detector = SleepPeriodDetectorFactory.create("tudor_locke_2014")
+        params = detector.get_parameters()
+        assert params["onset_n"] == 5
+        assert params["onset_state"] == "sleep"
+        assert params["offset_n"] == 10
+        assert params["offset_state"] == "wake"
+        assert params["offset_preceding_epoch"] is True
 
-    def test_all_rules_have_apply_rules_method(self) -> None:
-        """Test all rules implement apply_rules method."""
-        for rule_id in OnsetOffsetRuleFactory.get_available_rules():
-            rule = OnsetOffsetRuleFactory.create(rule_id)
-            assert hasattr(rule, "apply_rules")
-            assert callable(rule.apply_rules)
+    def test_all_detectors_have_apply_rules_method(self) -> None:
+        """Test all detectors implement apply_rules method."""
+        for detector_id in SleepPeriodDetectorFactory.get_available_detectors():
+            detector = SleepPeriodDetectorFactory.create(detector_id)
+            assert hasattr(detector, "apply_rules")
+            assert callable(detector.apply_rules)
 
-    def test_all_rules_have_name_property(self) -> None:
-        """Test all rules have name property."""
-        for rule_id in OnsetOffsetRuleFactory.get_available_rules():
-            rule = OnsetOffsetRuleFactory.create(rule_id)
-            assert hasattr(rule, "name")
-            assert isinstance(rule.name, str)
-            assert len(rule.name) > 0
+    def test_all_detectors_have_name_property(self) -> None:
+        """Test all detectors have name property."""
+        for detector_id in SleepPeriodDetectorFactory.get_available_detectors():
+            detector = SleepPeriodDetectorFactory.create(detector_id)
+            assert hasattr(detector, "name")
+            assert isinstance(detector.name, str)
+            assert len(detector.name) > 0
 
-    def test_all_rules_have_identifier_property(self) -> None:
-        """Test all rules have identifier property."""
-        for rule_id in OnsetOffsetRuleFactory.get_available_rules():
-            rule = OnsetOffsetRuleFactory.create(rule_id)
-            assert hasattr(rule, "identifier")
-            assert isinstance(rule.identifier, str)
+    def test_all_detectors_have_identifier_property(self) -> None:
+        """Test all detectors have identifier property."""
+        for detector_id in SleepPeriodDetectorFactory.get_available_detectors():
+            detector = SleepPeriodDetectorFactory.create(detector_id)
+            assert hasattr(detector, "identifier")
+            assert isinstance(detector.identifier, str)
 
-    def test_all_rules_have_description_property(self) -> None:
-        """Test all rules have description property."""
-        for rule_id in OnsetOffsetRuleFactory.get_available_rules():
-            rule = OnsetOffsetRuleFactory.create(rule_id)
-            assert hasattr(rule, "description")
-            assert isinstance(rule.description, str)
+    def test_all_detectors_have_description_property(self) -> None:
+        """Test all detectors have description property."""
+        for detector_id in SleepPeriodDetectorFactory.get_available_detectors():
+            detector = SleepPeriodDetectorFactory.create(detector_id)
+            assert hasattr(detector, "description")
+            assert isinstance(detector.description, str)
 
-    def test_all_rules_have_get_parameters(self) -> None:
-        """Test all rules implement get_parameters."""
-        for rule_id in OnsetOffsetRuleFactory.get_available_rules():
-            rule = OnsetOffsetRuleFactory.create(rule_id)
-            assert hasattr(rule, "get_parameters")
-            params = rule.get_parameters()
+    def test_all_detectors_have_get_parameters(self) -> None:
+        """Test all detectors implement get_parameters."""
+        for detector_id in SleepPeriodDetectorFactory.get_available_detectors():
+            detector = SleepPeriodDetectorFactory.create(detector_id)
+            assert hasattr(detector, "get_parameters")
+            params = detector.get_parameters()
             assert isinstance(params, dict)
 
 
-class TestOnsetOffsetRuleFactoryWithConfig:
+class TestSleepPeriodDetectorFactoryWithConfig:
     """Tests for factory with config parameter."""
 
     def test_create_with_none_config(self) -> None:
-        """Test creating rule with None config."""
-        rule = OnsetOffsetRuleFactory.create("consecutive_3_5", config=None)
-        assert rule is not None
+        """Test creating detector with None config."""
+        detector = SleepPeriodDetectorFactory.create("consecutive_onset3s_offset5s", config=None)
+        assert detector is not None
 
-    def test_create_ignores_config_for_now(self) -> None:
-        """Test that config parameter is reserved for future use."""
-        rule = OnsetOffsetRuleFactory.create("tudor_locke_2014", config=None)
-        assert rule.name == "Tudor-Locke (5/10)"
+    def test_create_tudor_locke_with_none_config(self) -> None:
+        """Test creating Tudor-Locke with None config."""
+        detector = SleepPeriodDetectorFactory.create("tudor_locke_2014", config=None)
+        assert detector.name == "Tudor-Locke (2014)"

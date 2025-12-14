@@ -11,10 +11,10 @@ from datetime import datetime
 import pandas as pd
 import pytest
 
-from sleep_scoring_app.core.algorithms.csv_datasource import CSVDataSourceLoader
-from sleep_scoring_app.core.algorithms.datasource_protocol import DataSourceLoader
 from sleep_scoring_app.core.constants import DatabaseColumn
 from sleep_scoring_app.core.dataclasses import ColumnMapping
+from sleep_scoring_app.io.sources.csv_loader import CSVDataSourceLoader
+from sleep_scoring_app.io.sources.loader_protocol import DataSourceLoader
 
 
 @pytest.fixture

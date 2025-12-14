@@ -27,6 +27,8 @@ dependencies = [
     "scipy>=1.0.0",
     "pygt3x>=0.3.0",
     "psutil>=5.9.0",
+    "scikit-learn>=1.7.2",
+    "pyreadr>=0.5.4",
 ]
 
 [project.optional-dependencies]
@@ -37,6 +39,12 @@ gui = [
     "openpyxl>=3.1.0",
     "xlsxwriter>=3.1.0",
 ]
+# Advanced features - high-performance Rust backend for raw accelerometer processing
+# Required for: van Hees SIB, HDCZA, van Hees 2023 nonwear, GGIR-compatible calibration
+# NOTE: gt3x-rs is a local Rust package, install via: pip install ../../../packages/gt3x-rs
+# advanced = [
+#     "gt3x-rs>=0.1.0",
+# ]
 # Development dependencies - testing and code quality tools
 dev = [
     "pytest>=7.0.0",
@@ -50,7 +58,7 @@ dev = [
 build = [
     "pyinstaller>=6.0.0",
 ]
-# Complete installation - includes all dependencies
+# Complete installation - includes all dependencies (excluding advanced which requires gt3x-rs)
 all = [
     "sleep-scoring-demo[gui,dev,build]",
 ]

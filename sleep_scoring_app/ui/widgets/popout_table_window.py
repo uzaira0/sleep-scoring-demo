@@ -145,7 +145,8 @@ class PopOutTableWindow(QDialog):
                 self.table_widget = table
 
         wrapper = TableWrapper(self.table)
-        update_marker_table(wrapper, data, bg_color, fg_color, {})
+        # Popout tables show all rows with scrollbars, not dynamic row limiting
+        update_marker_table(wrapper, data, bg_color, fg_color, {}, dynamic_rows=False)
 
     def get_timestamp_for_row(self, row: int) -> float | None:
         """Get the Unix timestamp for a given table row."""
@@ -172,6 +173,8 @@ class PopOutTableWindow(QDialog):
 
     def _restore_geometry(self) -> None:
         """Restore window size and position."""
+        from PyQt6.QtWidgets import QApplication
+
         settings = QSettings("SleepScoringApp", "MarkerTables")
 
         # Restore geometry if available
@@ -186,3 +189,34 @@ class PopOutTableWindow(QDialog):
         pos = settings.value(f"{self.table_type}_popout_pos")
         if pos:
             self.move(pos)
+
+        # Safety check: ensure window is visible on at least one screen
+        self._ensure_on_screen()
+
+    def _ensure_on_screen(self) -> None:
+        """Ensure the window is visible on at least one screen."""
+        from PyQt6.QtWidgets import QApplication
+
+        # Get all available screens
+        screens = QApplication.screens()
+        if not screens:
+            return
+
+        # Get window geometry
+        window_rect = self.frameGeometry()
+
+        # Check if window intersects with any screen
+        on_screen = False
+        for screen in screens:
+            if screen.availableGeometry().intersects(window_rect):
+                on_screen = True
+                break
+
+        # If not on any screen, move to primary screen center
+        if not on_screen:
+            primary_screen = QApplication.primaryScreen()
+            if primary_screen:
+                screen_geometry = primary_screen.availableGeometry()
+                x = screen_geometry.x() + (screen_geometry.width() - self.width()) // 2
+                y = screen_geometry.y() + (screen_geometry.height() - self.height()) // 2
+                self.move(x, y)

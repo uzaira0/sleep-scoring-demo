@@ -12,11 +12,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sleep_scoring_app.core.algorithms.datasource_factory import DataSourceFactory
-from sleep_scoring_app.core.algorithms.factory import AlgorithmFactory
-from sleep_scoring_app.core.algorithms.nonwear_factory import NonwearAlgorithmFactory
-from sleep_scoring_app.core.algorithms.onset_offset_factory import OnsetOffsetRuleFactory
+from sleep_scoring_app.core.algorithms import (
+    AlgorithmFactory,
+    NonwearAlgorithmFactory,
+    SleepPeriodDetectorFactory,
+)
 from sleep_scoring_app.core.constants import AlgorithmType, DataSourceType, NonwearAlgorithm
+from sleep_scoring_app.io.sources.loader_factory import DataSourceFactory
 
 
 class TestFactoryEnumAlignment:
@@ -26,11 +28,16 @@ class TestFactoryEnumAlignment:
         """Test AlgorithmType enum values match factory registered IDs."""
         factory_ids = set(AlgorithmFactory.get_available_algorithms().keys())
 
-        # Core algorithm types should be in factory
+        # Core epoch-based algorithm types should be in factory
         assert AlgorithmType.SADEH_1994_ORIGINAL.value in factory_ids
         assert AlgorithmType.SADEH_1994_ACTILIFE.value in factory_ids
         assert AlgorithmType.COLE_KRIPKE_1992_ORIGINAL.value in factory_ids
         assert AlgorithmType.COLE_KRIPKE_1992_ACTILIFE.value in factory_ids
+
+        # Raw data algorithms should be in factory
+        assert "van_hees_2015_sib" in factory_ids
+        # Note: hdcza_2018 has been moved to SleepPeriodDetectorFactory
+        # as it's a SPT boundary detector, not a sleep/wake classifier
 
     def test_nonwear_algorithm_enum_matches_factory(self) -> None:
         """Test NonwearAlgorithm enum values match factory registered IDs."""
@@ -91,11 +98,14 @@ class TestSleepScoringPipeline:
         assert set(result["Sleep Score"].unique()).issubset({0, 1})
 
     def test_all_algorithms_score_array(self) -> None:
-        """Test that all algorithms can score array data."""
+        """Test that epoch-based algorithms can score array data."""
         np.random.seed(42)
         activity = list(np.random.randint(0, 300, size=60))
 
-        for algo_id in AlgorithmFactory.get_available_algorithms():
+        # Only test epoch-based algorithms (raw data algorithms don't support score_array)
+        epoch_algorithms = AlgorithmFactory.get_algorithms_by_data_source("epoch")
+
+        for algo_id in epoch_algorithms:
             algorithm = AlgorithmFactory.create(algo_id)
             scores = algorithm.score_array(activity)
 
@@ -103,7 +113,7 @@ class TestSleepScoringPipeline:
             assert all(s in [0, 1] for s in scores), f"Algorithm {algo_id} produced invalid scores"
 
 
-class TestOnsetOffsetPipeline:
+class TestSleepPeriodDetectionPipeline:
     """Integration tests for onset/offset detection pipeline."""
 
     @pytest.fixture
@@ -125,13 +135,13 @@ class TestOnsetOffsetPipeline:
         """Test consecutive 3/5 rule finds onset and offset."""
         sleep_scores, timestamps = sample_sleep_scenario
 
-        rule = OnsetOffsetRuleFactory.create("consecutive_3_5")
+        detector = SleepPeriodDetectorFactory.create("consecutive_onset3s_offset5s")
 
         # Define search markers
         sleep_start = timestamps[5]  # Before sleep starts
         sleep_end = timestamps[75]  # After sleep ends
 
-        onset_idx, offset_idx = rule.apply_rules(
+        onset_idx, offset_idx = detector.apply_rules(
             sleep_scores=sleep_scores,
             sleep_start_marker=sleep_start,
             sleep_end_marker=sleep_end,
@@ -145,15 +155,15 @@ class TestOnsetOffsetPipeline:
         assert onset_idx >= 10
 
     def test_tudor_locke_finds_onset_offset(self, sample_sleep_scenario: tuple) -> None:
-        """Test Tudor-Locke rule finds onset and offset."""
+        """Test Tudor-Locke detector finds onset and offset."""
         sleep_scores, timestamps = sample_sleep_scenario
 
-        rule = OnsetOffsetRuleFactory.create("tudor_locke_2014")
+        detector = SleepPeriodDetectorFactory.create("tudor_locke_2014")
 
         sleep_start = timestamps[5]
         sleep_end = timestamps[75]
 
-        onset_idx, offset_idx = rule.apply_rules(
+        onset_idx, offset_idx = detector.apply_rules(
             sleep_scores=sleep_scores,
             sleep_start_marker=sleep_start,
             sleep_end_marker=sleep_end,
@@ -245,12 +255,12 @@ class TestCrossFactoryIntegration:
 
         assert "Sadeh Score" in scored_df.columns
 
-        # Step 2: Find onset/offset with rule
-        onset_rule = OnsetOffsetRuleFactory.create("consecutive_3_5")
+        # Step 2: Find onset/offset with detector
+        detector = SleepPeriodDetectorFactory.create("consecutive_onset3s_offset5s")
         sleep_scores = scored_df["Sadeh Score"].tolist()
         ts_list = [pd.Timestamp(t).to_pydatetime() for t in timestamps]
 
-        onset_idx, _offset_idx = onset_rule.apply_rules(
+        onset_idx, _offset_idx = detector.apply_rules(
             sleep_scores=sleep_scores,
             sleep_start_marker=ts_list[20],
             sleep_end_marker=ts_list[100],
@@ -346,7 +356,7 @@ class TestDataSourceDIIntegration:
         df = result["activity_data"]
         assert len(df) == 3
         assert "timestamp" in df.columns
-        assert "axis_y" in df.columns
+        assert "AXIS_Y" in df.columns  # DatabaseColumn.AXIS_Y is uppercase
 
         # Verify metadata
         metadata = result["metadata"]
@@ -361,10 +371,10 @@ class TestDataSourceDIIntegration:
         assert sleep_algo is not None
         assert hasattr(sleep_algo, "score")
 
-        # 2. Onset/offset factory
-        onset_rule = OnsetOffsetRuleFactory.create(OnsetOffsetRuleFactory.get_default_rule_id())
-        assert onset_rule is not None
-        assert hasattr(onset_rule, "apply_rules")
+        # 2. Sleep period detector factory
+        detector = SleepPeriodDetectorFactory.create(SleepPeriodDetectorFactory.get_default_detector_id())
+        assert detector is not None
+        assert hasattr(detector, "apply_rules")
 
         # 3. Nonwear factory
         nonwear = NonwearAlgorithmFactory.create(NonwearAlgorithmFactory.get_default_algorithm_id())
@@ -401,8 +411,8 @@ class TestDataSourceDIIntegration:
         result = loader.load_file(csv_file)
         df = result["activity_data"]
 
-        # Rename column for Sadeh algorithm
-        df_for_scoring = df.rename(columns={"timestamp": "datetime", "axis_y": "Axis1"})
+        # Rename column for Sadeh algorithm (AXIS_Y is uppercase from DatabaseColumn)
+        df_for_scoring = df.rename(columns={"timestamp": "datetime", "AXIS_Y": "Axis1"})
 
         # Score with sleep algorithm
         algo = AlgorithmFactory.create("sadeh_1994_actilife")
@@ -447,10 +457,10 @@ class TestDefaultValues:
         assert hasattr(algo, "score")
         assert hasattr(algo, "score_array")
 
-        # Onset/offset
-        rule = OnsetOffsetRuleFactory.create(OnsetOffsetRuleFactory.get_default_rule_id())
-        assert rule is not None
-        assert hasattr(rule, "apply_rules")
+        # Sleep period detector
+        detector = SleepPeriodDetectorFactory.create(SleepPeriodDetectorFactory.get_default_detector_id())
+        assert detector is not None
+        assert hasattr(detector, "apply_rules")
 
         # Nonwear
         nonwear = NonwearAlgorithmFactory.create(NonwearAlgorithmFactory.get_default_algorithm_id())
@@ -461,3 +471,79 @@ class TestDefaultValues:
         datasource = DataSourceFactory.create(DataSourceFactory.get_default_loader_id())
         assert datasource is not None
         assert hasattr(datasource, "load_file")
+
+
+class TestDataSourceFiltering:
+    """Tests for filtering algorithms by data source type."""
+
+    def test_get_algorithms_by_data_source_epoch(self) -> None:
+        """Test filtering algorithms that work with epoch data."""
+        epoch_algorithms = AlgorithmFactory.get_algorithms_by_data_source("epoch")
+
+        # Should include epoch-based algorithms
+        assert "sadeh_1994_original" in epoch_algorithms
+        assert "sadeh_1994_actilife" in epoch_algorithms
+        assert "cole_kripke_1992_original" in epoch_algorithms
+        assert "cole_kripke_1992_actilife" in epoch_algorithms
+
+        # Should NOT include raw data algorithms
+        assert "van_hees_2015_sib" not in epoch_algorithms
+        assert "hdcza_2018" not in epoch_algorithms
+
+    def test_get_algorithms_by_data_source_raw(self) -> None:
+        """Test filtering algorithms that work with raw data."""
+        raw_algorithms = AlgorithmFactory.get_algorithms_by_data_source("raw")
+
+        # Should include raw data algorithms
+        assert "van_hees_2015_sib" in raw_algorithms
+        # Note: hdcza_2018 has been moved to SleepPeriodDetectorFactory
+        # as it's a SPT boundary detector, not a sleep/wake classifier
+
+        # Should NOT include epoch-based algorithms
+        assert "sadeh_1994_original" not in raw_algorithms
+        assert "sadeh_1994_actilife" not in raw_algorithms
+        assert "cole_kripke_1992_original" not in raw_algorithms
+        assert "cole_kripke_1992_actilife" not in raw_algorithms
+
+    def test_get_algorithm_data_source_type(self) -> None:
+        """Test getting data source type for individual algorithms."""
+        # Epoch-based algorithms
+        assert AlgorithmFactory.get_algorithm_data_source_type("sadeh_1994_actilife") == "epoch"
+        assert AlgorithmFactory.get_algorithm_data_source_type("cole_kripke_1992_original") == "epoch"
+
+        # Raw data algorithms
+        assert AlgorithmFactory.get_algorithm_data_source_type("van_hees_2015_sib") == "raw"
+        # Note: hdcza_2018 is now in SleepPeriodDetectorFactory
+
+        # Unknown algorithm
+        assert AlgorithmFactory.get_algorithm_data_source_type("nonexistent_algo") is None
+
+    def test_raw_algorithms_have_correct_properties(self) -> None:
+        """Test that raw data algorithms have correct protocol properties."""
+        # van Hees 2015 SIB
+        sib = AlgorithmFactory.create("van_hees_2015_sib")
+        assert sib.data_source_type == "raw"
+        assert sib.requires_axis == "raw_triaxial"
+        assert sib.identifier == "van_hees_2015_sib"
+        assert sib.name == "van Hees (2015) SIB"
+
+        # HDCZA is now in SleepPeriodDetectorFactory (it's a SPT detector, not sleep/wake)
+        from sleep_scoring_app.core.algorithms.compatibility import AlgorithmDataRequirement
+        from sleep_scoring_app.core.algorithms.sleep_period import SleepPeriodDetectorFactory
+
+        hdcza = SleepPeriodDetectorFactory.create("hdcza_2018")
+        assert hdcza.data_requirement == AlgorithmDataRequirement.RAW_DATA
+        assert hdcza.identifier == "hdcza_2018"
+        assert hdcza.name == "HDCZA (van Hees 2018)"
+
+    def test_epoch_algorithms_have_correct_properties(self) -> None:
+        """Test that epoch-based algorithms have correct protocol properties."""
+        # Sadeh
+        sadeh = AlgorithmFactory.create("sadeh_1994_actilife")
+        assert sadeh.data_source_type == "epoch"
+        assert sadeh.requires_axis == "axis_y"
+
+        # Cole-Kripke
+        cole = AlgorithmFactory.create("cole_kripke_1992_actilife")
+        assert cole.data_source_type == "epoch"
+        assert cole.requires_axis == "axis_y"

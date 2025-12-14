@@ -81,6 +81,11 @@ The Sadeh algorithm uses an 11-minute sliding window to classify each epoch as s
 
 The Choi algorithm detects nonwear periods by identifying consecutive epochs with zero activity counts, allowing for small spikes within the window. The newest version of the Choi algorithm is used.
 
+### Tudor-Locke Sleep Period Detection and Metrics
+> Tudor-Locke, C., et al. (2014). Fully automated waist-worn accelerometer algorithm for detecting children's sleep-period time. *Applied Physiology, Nutrition, and Metabolism*, 39(1), 53-57.
+
+The Tudor-Locke algorithm detects sleep period boundaries (onset/offset) using consecutive epoch rules, then calculates comprehensive sleep quality metrics including sleep efficiency, fragmentation indices, and awakening statistics. See `TUDOR_LOCKE_METRICS.md` for detailed documentation.
+
 ### Cole-Kripke Algorithm (WIP)
 
 

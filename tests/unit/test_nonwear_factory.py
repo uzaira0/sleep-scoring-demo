@@ -8,8 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from sleep_scoring_app.core.algorithms.nonwear_detection_protocol import NonwearDetectionAlgorithm
-from sleep_scoring_app.core.algorithms.nonwear_factory import NonwearAlgorithmFactory
+from sleep_scoring_app.core.algorithms import NonwearAlgorithmFactory, NonwearDetectionAlgorithm
 
 
 class TestNonwearAlgorithmFactoryCreation:
@@ -129,7 +128,7 @@ class TestNonwearAlgorithmProtocol:
 
     def test_choi_implements_protocol(self) -> None:
         """Test that Choi algorithm implements NonwearDetectionAlgorithm protocol."""
-        from sleep_scoring_app.core.algorithms.choi_algorithm import ChoiAlgorithm
+        from sleep_scoring_app.core.algorithms import ChoiAlgorithm
 
         # Check protocol methods exist
         assert hasattr(ChoiAlgorithm, "detect")

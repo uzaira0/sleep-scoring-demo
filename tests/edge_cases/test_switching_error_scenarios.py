@@ -158,9 +158,10 @@ class TestDataSourceErrorScenarios:
         # Data size should remain unchanged
         assert len(mock_plot_widget.activity_data) == initial_data_size
 
-    @pytest.mark.skipif(not hasattr(__import__("signal"), "SIGALRM"), reason="SIGALRM not available on Windows")
     def test_timeout_during_slow_data_loading(self, mock_unified_service, mock_plot_widget):
         """Test timeout handling during slow data loading."""
+        import concurrent.futures
+
         initial_state = mock_plot_widget.activity_data.copy()
 
         def slow_loading_operation(participant_key, view_mode):
@@ -173,27 +174,23 @@ class TestDataSourceErrorScenarios:
         participant_key = ParticipantKey("4000", "BO", "G1")
 
         start_time = time.perf_counter()
+        timed_out = False
 
-        try:
-            # Simulate timeout mechanism
-            import signal
+        # Use ThreadPoolExecutor for cross-platform timeout
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(
+                mock_unified_service.load_participant_data,
+                participant_key,
+                ViewMode.HOURS_24,
+            )
+            try:
+                future.result(timeout=1.0)  # 1 second timeout
+            except concurrent.futures.TimeoutError:
+                timed_out = True
+                elapsed_time = time.perf_counter() - start_time
+                assert elapsed_time < 1.5, "Timeout should occur quickly"
 
-            def timeout_handler(signum, frame):
-                msg = "Data loading timed out"
-                raise TimeoutError(msg)
-
-            signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(1)  # 1 second timeout
-
-            mock_unified_service.load_participant_data(participant_key, ViewMode.HOURS_24)
-
-            signal.alarm(0)  # Cancel alarm
-
-        except TimeoutError as e:
-            signal.alarm(0)  # Cancel alarm
-            elapsed_time = time.perf_counter() - start_time
-            assert elapsed_time < 1.5, "Timeout should occur quickly"
-            assert "timed out" in str(e)
+        assert timed_out, "Expected timeout to occur"
 
         # State should be preserved after timeout
         assert mock_plot_widget.activity_data == initial_state

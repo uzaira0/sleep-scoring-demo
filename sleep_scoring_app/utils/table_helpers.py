@@ -33,56 +33,178 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _recalculate_visible_rows(table: QTableWidget) -> None:
-    """Recalculate which rows to show based on current viewport size, centering on marker row."""
+def _populate_table_for_viewport(table: QTableWidget) -> None:
+    """
+    Populate table with exactly as many rows as fit in viewport, centered on marker.
+
+    No scrollbars - calculates visible rows from container height.
+    """
     container = table.parent()
     if not container:
         return
 
     # Get stored data from container
     data = getattr(container, "_table_data", None)
-    marker_row = getattr(container, "_marker_row", None)
+    marker_row_in_data = getattr(container, "_marker_row", None)
+    marker_bg_color = getattr(container, "_marker_bg_color", QColor(135, 206, 235))
+    marker_fg_color = getattr(container, "_marker_fg_color", QColor(0, 0, 0))
 
-    if data is None or marker_row is None:
+    if data is None or len(data) == 0:
+        table.setRowCount(0)
         return
 
+    # Use our constant for row height (same as what we set with setRowHeight)
     row_height = TableDimensions.ROW_HEIGHT
-    viewport_height = table.viewport().height()
-    table_row_count = table.rowCount()
 
-    # Calculate how many rows can be displayed
-    if viewport_height > 0 and row_height > 0:
-        visible_rows = max(1, viewport_height // row_height)
+    # Calculate available height from container
+    container_height = container.height()
+    header_height = table.horizontalHeader().height() if table.horizontalHeader() and table.horizontalHeader().isVisible() else 0
+    # Account for margins, pop-out button above table, borders, and frame padding
+    # Button height (~25px) + button layout spacing + table frame borders + extra safety margin
+    overhead = TableDimensions.TABLE_MARGINS * 2 + 66
+    available_height = container_height - header_height - overhead
+
+    visible_row_count = max(1, available_height // row_height)
+
+    # Determine data slice centered on marker
+    data_len = len(data)
+
+    if marker_row_in_data is not None and data_len > 0:
+        half_visible = visible_row_count // 2
+        start_idx = max(0, marker_row_in_data - half_visible)
+
+        # Adjust if we'd go past the end
+        if start_idx + visible_row_count > data_len:
+            start_idx = max(0, data_len - visible_row_count)
     else:
-        visible_rows = 9  # Fallback
+        start_idx = 0
 
-    # Calculate which rows to show, centered on marker_row
-    rows_before_marker = visible_rows // 2
-    rows_after_marker = visible_rows - rows_before_marker - 1
+    # Calculate actual rows to show
+    rows_to_show = min(visible_row_count, data_len - start_idx)
 
-    first_visible = max(0, marker_row - rows_before_marker)
-    last_visible = min(len(data) - 1, marker_row + rows_after_marker)
+    # Store start index for click handlers
+    container._visible_start_idx = start_idx
 
-    # Adjust if we hit the top boundary
-    if marker_row - rows_before_marker < 0:
-        last_visible = min(len(data) - 1, visible_rows - 1)
-        first_visible = 0
+    # Update table
+    table.setUpdatesEnabled(False)
+    try:
+        table.setRowCount(rows_to_show)
 
-    # Adjust if we hit the bottom boundary
-    if marker_row + rows_after_marker >= len(data):
-        first_visible = max(0, len(data) - visible_rows)
-        last_visible = len(data) - 1
+        for table_row in range(rows_to_show):
+            data_idx = start_idx + table_row
+            row_data = data[data_idx]
 
-    # Hide all rows outside the visible range
-    for row in range(table_row_count):
-        if row < len(data) and first_visible <= row <= last_visible:
-            table.setRowHidden(row, False)
-        else:
-            table.setRowHidden(row, True)
+            # Create items
+            time_item = QTableWidgetItem(row_data.get("time", "--:--"))
+
+            axis_y_value = row_data.get("axis_y", row_data.get("activity", "--"))
+            axis_y_item = QTableWidgetItem(str(axis_y_value) if axis_y_value != "--" else "--")
+
+            vm_value = row_data.get("vm", "--")
+            vm_item = QTableWidgetItem(str(vm_value) if vm_value != "--" else "--")
+
+            sleep_value = row_data.get("sleep_score")
+            sleep_text = "S" if sleep_value == 1 else ("W" if sleep_value == 0 else "--")
+            sadeh_item = QTableWidgetItem(sleep_text)
+
+            choi_value = row_data.get("choi")
+            choi_text = "Off" if choi_value == 1 else ("On" if choi_value == 0 else "--")
+            choi_item = QTableWidgetItem(choi_text)
+
+            nwt_value = row_data.get("nwt_sensor")
+            nwt_text = "Off" if nwt_value == 1 else ("On" if nwt_value == 0 else "--")
+            nwt_item = QTableWidgetItem(nwt_text)
+
+            # Set colors
+            if data_idx == marker_row_in_data:
+                bg_color, fg_color = marker_bg_color, marker_fg_color
+            else:
+                bg_color, fg_color = QColor(255, 255, 255), QColor(0, 0, 0)
+
+            for item in [time_item, axis_y_item, vm_item, sadeh_item, choi_item, nwt_item]:
+                item.setBackground(bg_color)
+                item.setForeground(fg_color)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+
+            table.setItem(table_row, 0, time_item)
+            table.setItem(table_row, 1, axis_y_item)
+            table.setItem(table_row, 2, vm_item)
+            table.setItem(table_row, 3, sadeh_item)
+            table.setItem(table_row, 4, choi_item)
+            table.setItem(table_row, 5, nwt_item)
+
+            # Force row height
+            table.setRowHeight(table_row, TableDimensions.ROW_HEIGHT)
+    finally:
+        table.setUpdatesEnabled(True)
+
+
+def _populate_table_all_rows(
+    table: QTableWidget,
+    data: list[dict[str, Any]],
+    marker_row: int | None,
+    marker_bg_color: QColor,
+    marker_fg_color: QColor,
+) -> None:
+    """Populate table with all data rows (for popout tables with scrollbars)."""
+    if not data:
+        table.setRowCount(0)
+        return
+
+    table.setUpdatesEnabled(False)
+    try:
+        table.setRowCount(len(data))
+
+        for row_idx, row_data in enumerate(data):
+            time_item = QTableWidgetItem(row_data.get("time", "--:--"))
+
+            axis_y_value = row_data.get("axis_y", row_data.get("activity", "--"))
+            axis_y_item = QTableWidgetItem(str(axis_y_value) if axis_y_value != "--" else "--")
+
+            vm_value = row_data.get("vm", "--")
+            vm_item = QTableWidgetItem(str(vm_value) if vm_value != "--" else "--")
+
+            sleep_value = row_data.get("sleep_score")
+            sleep_text = "S" if sleep_value == 1 else ("W" if sleep_value == 0 else "--")
+            sadeh_item = QTableWidgetItem(sleep_text)
+
+            choi_value = row_data.get("choi")
+            choi_text = "Off" if choi_value == 1 else ("On" if choi_value == 0 else "--")
+            choi_item = QTableWidgetItem(choi_text)
+
+            nwt_value = row_data.get("nwt_sensor")
+            nwt_text = "Off" if nwt_value == 1 else ("On" if nwt_value == 0 else "--")
+            nwt_item = QTableWidgetItem(nwt_text)
+
+            # Set colors
+            if row_idx == marker_row:
+                bg_color, fg_color = marker_bg_color, marker_fg_color
+            else:
+                bg_color, fg_color = QColor(255, 255, 255), QColor(0, 0, 0)
+
+            for item in [time_item, axis_y_item, vm_item, sadeh_item, choi_item, nwt_item]:
+                item.setBackground(bg_color)
+                item.setForeground(fg_color)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+
+            table.setItem(row_idx, 0, time_item)
+            table.setItem(row_idx, 1, axis_y_item)
+            table.setItem(row_idx, 2, vm_item)
+            table.setItem(row_idx, 3, sadeh_item)
+            table.setItem(row_idx, 4, choi_item)
+            table.setItem(row_idx, 5, nwt_item)
+
+        # Scroll to marker row
+        if marker_row is not None:
+            table.scrollTo(table.model().index(marker_row, 0), QTableWidget.ScrollHint.PositionAtCenter)
+    finally:
+        table.setUpdatesEnabled(True)
 
 
 class _TableResizeFilter(QObject):
-    """Event filter to handle table resize events and recalculate visible rows."""
+    """Event filter to repopulate table on resize."""
 
     def __init__(self, table: QTableWidget) -> None:
         super().__init__()
@@ -90,11 +212,14 @@ class _TableResizeFilter(QObject):
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         if event.type() in (QEvent.Type.Resize, QEvent.Type.Show):
-            _recalculate_visible_rows(self._table)
+            container = self._table.parent()
+            # Only do dynamic rows if enabled
+            if container and getattr(container, "_dynamic_rows", True):
+                _populate_table_for_viewport(self._table)
         return False
 
 
-def create_marker_data_table(title: str) -> QWidget:
+def create_marker_data_table(title: str, sleep_algorithm_name: str | None = None) -> QWidget:
     """
     Create a standardized data table widget for showing surrounding marker data.
 
@@ -103,6 +228,8 @@ def create_marker_data_table(title: str) -> QWidget:
 
     Args:
         title: Title for the table (not displayed, but used for identification)
+        sleep_algorithm_name: Display name of the sleep/wake algorithm (e.g., "Sadeh", "Cole-Kripke").
+                              If None, defaults to "Sleep" as a generic column header.
 
     Returns:
         QWidget containing the configured table
@@ -110,14 +237,17 @@ def create_marker_data_table(title: str) -> QWidget:
     """
     container = QWidget()
     container.setMinimumWidth(TableDimensions.TABLE_MIN_WIDTH)
-    container.setMaximumWidth(TableDimensions.TABLE_MAX_WIDTH)
-    container.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+    # No max width - allow splitter to resize freely
+    container.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
 
     layout = QVBoxLayout(container)
     layout.setContentsMargins(
         TableDimensions.TABLE_MARGINS, TableDimensions.TABLE_MARGINS, TableDimensions.TABLE_MARGINS, TableDimensions.TABLE_MARGINS
     )
     layout.setSpacing(TableDimensions.TABLE_SPACING)
+
+    # Determine the sleep algorithm column header
+    algorithm_column_name = sleep_algorithm_name if sleep_algorithm_name else TableColumn.SLEEP_SCORE
 
     # Table widget (pop-out button is now created separately in analysis_tab.py)
     table = QTableWidget()
@@ -127,19 +257,26 @@ def create_marker_data_table(title: str) -> QWidget:
             TableColumn.TIME,
             TableColumn.AXIS_Y,
             TableColumn.VM,  # Vector Magnitude column
-            TableColumn.SADEH,
+            algorithm_column_name,  # Dynamic sleep/wake algorithm column
             TableColumn.CHOI,  # Re-enabled (2025-09-08)
             TableColumn.NWT_SENSOR,  # Re-enabled (2025-09-08)
         ]
     )
-    table.setRowCount(TableDimensions.ROW_COUNT)  # 21 total elements
+    # Start with 0 rows - rows are created dynamically based on viewport size
+    table.setRowCount(0)
+
+    # Store the algorithm name for later reference
+    container.sleep_algorithm_name = sleep_algorithm_name
+
+    # Create tooltip for sleep algorithm column
+    algorithm_tooltip = f"{algorithm_column_name} Algorithm: S=Sleep, W=Wake" if sleep_algorithm_name else TooltipText.SLEEP_SCORE_COLUMN
 
     # Center align all headers and add tooltips
     tooltips = [
         TooltipText.TIME_COLUMN,
         TooltipText.ACTIVITY_COLUMN,
         TooltipText.VM_COLUMN,
-        TooltipText.SADEH_COLUMN,
+        algorithm_tooltip,  # Dynamic tooltip for sleep algorithm
         TooltipText.CHOI_COLUMN,
         TooltipText.NWT_SENSOR_COLUMN,
     ]
@@ -202,40 +339,62 @@ def create_marker_data_table(title: str) -> QWidget:
     # Store reference to table widget for external access
     container.table_widget = table
 
-    # Initially populate with empty data
-    _populate_empty_table_rows(table)
+    # Rows are created dynamically based on viewport size when data is loaded
+    # Table starts with 0 rows
 
     # Add table to layout
     layout.addWidget(table)
 
-    # Configure size policy - table fills available space and scrolls if needed
-    table.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+    # Configure size policy - table fills available space
+    table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-    # Install resize event filter to dynamically recalculate visible rows
+    # Install resize event filter on container to recalculate visible rows
     resize_filter = _TableResizeFilter(table)
-    table.viewport().installEventFilter(resize_filter)
+    container.installEventFilter(resize_filter)
     # Keep reference to prevent garbage collection
     container._resize_filter = resize_filter
 
     return container
 
 
-def _populate_empty_table_rows(table: QTableWidget) -> None:
-    """Populate table with empty placeholder data."""
-    for row in range(TableDimensions.ROW_COUNT):
-        items = [
-            QTableWidgetItem("--:--"),
-            QTableWidgetItem("--"),
-            QTableWidgetItem("--"),
-            QTableWidgetItem("--"),
-            QTableWidgetItem("--"),  # Choi column
-            QTableWidgetItem("--"),  # NWT column - Re-added (2025-09-08)
-        ]
+def update_table_sleep_algorithm_header(table_container: QWidget, algorithm_name: str) -> None:
+    """
+    Update the sleep algorithm column header in a marker data table.
 
-        for col, item in enumerate(items):
-            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            table.setItem(row, col, item)
+    This allows dynamically changing the algorithm display name when
+    the user selects a different sleep/wake algorithm in study settings.
+
+    Args:
+        table_container: The QWidget container returned by create_marker_data_table
+        algorithm_name: Display name of the sleep/wake algorithm (e.g., "Sadeh", "Cole-Kripke")
+
+    """
+    if not hasattr(table_container, "table_widget"):
+        logger.warning("Table container does not have table_widget attribute")
+        return
+
+    table = table_container.table_widget
+    if not isinstance(table, QTableWidget):
+        logger.warning("table_widget is not a QTableWidget")
+        return
+
+    # Update the header label (column index 3 is the sleep algorithm column)
+    sleep_column_index = 3
+    header_item = table.horizontalHeaderItem(sleep_column_index)
+    if header_item:
+        header_item.setText(algorithm_name)
+        header_item.setToolTip(f"{algorithm_name} Algorithm: S=Sleep, W=Wake")
+    else:
+        # Create new header item if it doesn't exist
+        new_header = QTableWidgetItem(algorithm_name)
+        new_header.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        new_header.setToolTip(f"{algorithm_name} Algorithm: S=Sleep, W=Wake")
+        table.setHorizontalHeaderItem(sleep_column_index, new_header)
+
+    # Store the algorithm name on the container for reference
+    table_container.sleep_algorithm_name = algorithm_name
+
+    logger.debug("Updated table sleep algorithm header to: %s", algorithm_name)
 
 
 def update_marker_table(
@@ -244,12 +403,10 @@ def update_marker_table(
     marker_bg_color: QColor,
     marker_fg_color: QColor,
     custom_table_colors: dict[str, str] | None = None,
+    dynamic_rows: bool = True,
 ) -> None:
     """
     Update a marker data table with surrounding marker information.
-
-    This consolidates the duplicate table update logic from main_window.py
-    into a shared function.
 
     Args:
         table_container: Widget containing the table
@@ -257,6 +414,7 @@ def update_marker_table(
         marker_bg_color: Background color for marker row
         marker_fg_color: Foreground color for marker row
         custom_table_colors: Optional dict with custom colors for onset/offset highlights
+        dynamic_rows: If True, limit rows to viewport height. If False, show all rows with scrolling.
 
     """
     table = getattr(table_container, "table_widget", None)
@@ -264,113 +422,26 @@ def update_marker_table(
         logger.warning("Table widget not found in container")
         return
 
-    # Temporarily disable updates for performance
-    table.setUpdatesEnabled(False)
+    # Find the marker row index in data
+    marker_row = None
+    for row_idx, row_data in enumerate(data):
+        if row_data.get("is_marker"):
+            marker_row = row_idx
+            break
 
-    try:
-        # Use the actual table row count instead of hardcoded ROW_COUNT
-        # This allows the function to work with both embedded tables (21 rows) and pop-out tables (2880 rows)
-        table_row_count = table.rowCount()
+    # Store data, marker_row, and colors on container for dynamic resize/repopulation
+    table_container._table_data = data
+    table_container._marker_row = marker_row
+    table_container._marker_bg_color = marker_bg_color
+    table_container._marker_fg_color = marker_fg_color
+    table_container._dynamic_rows = dynamic_rows
 
-        for row in range(table_row_count):
-            if row < len(data) and data:
-                row_data = data[row]
-
-                # Get or create items (reuse existing ones)
-                time_item = table.item(row, 0) or QTableWidgetItem()
-                axis_y_item = table.item(row, 1) or QTableWidgetItem()
-                vm_item = table.item(row, 2) or QTableWidgetItem()
-                sadeh_item = table.item(row, 3) or QTableWidgetItem()
-                choi_item = table.item(row, 4) or QTableWidgetItem()  # Re-enabled (2025-09-08)
-                nwt_item = table.item(row, 5) or QTableWidgetItem()  # Re-enabled (2025-09-08)
-
-                # Update text content
-                time_item.setText(row_data["time"])
-
-                # Handle axis_y and vm columns
-                axis_y_value = row_data.get("axis_y", row_data.get("activity", "--"))
-                vm_value = row_data.get("vm", "--")
-                axis_y_item.setText(str(axis_y_value) if axis_y_value != "--" else "--")
-                vm_item.setText(str(vm_value) if vm_value != "--" else "--")
-
-                # Handle sadeh results (None, 0, 1)
-                sadeh_value = row_data.get("sadeh")
-                if sadeh_value == 1:
-                    sadeh_item.setText("S")
-                elif sadeh_value == 0:
-                    sadeh_item.setText("W")
-                else:
-                    sadeh_item.setText("--")
-
-                # Handle choi results (None, 0, 1) - Re-enabled (2025-09-08)
-                choi_value = row_data.get("choi")
-                if choi_value == 1:
-                    choi_item.setText("Off")
-                elif choi_value == 0:
-                    choi_item.setText("On")
-                else:
-                    choi_item.setText("--")
-
-                # Handle NWT sensor results (None, 0, 1) - Re-enabled (2025-09-08)
-                nwt_value = row_data.get("nwt_sensor")
-                if nwt_value == 1:
-                    nwt_item.setText("Off")
-                elif nwt_value == 0:
-                    nwt_item.setText("On")
-                else:
-                    nwt_item.setText("--")
-
-                # Set colors based on marker status
-                if row_data["is_marker"]:
-                    bg_color, fg_color = marker_bg_color, marker_fg_color
-                else:
-                    bg_color, fg_color = QColor(255, 255, 255), QColor(0, 0, 0)
-
-                # Apply colors, flags, and center alignment efficiently
-                for item in [time_item, axis_y_item, vm_item, sadeh_item, choi_item, nwt_item]:  # Re-added choi_item, nwt_item (2025-09-08)
-                    item.setBackground(bg_color)
-                    item.setForeground(fg_color)
-                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-
-                # Set items if not already set
-                if table.item(row, 0) != time_item:
-                    table.setItem(row, 0, time_item)
-                if table.item(row, 1) != axis_y_item:
-                    table.setItem(row, 1, axis_y_item)
-                if table.item(row, 2) != vm_item:
-                    table.setItem(row, 2, vm_item)
-                if table.item(row, 3) != sadeh_item:
-                    table.setItem(row, 3, sadeh_item)
-                if table.item(row, 4) != choi_item:
-                    table.setItem(row, 4, choi_item)  # Re-enabled (2025-09-08)
-                if table.item(row, 5) != nwt_item:
-                    table.setItem(row, 5, nwt_item)  # Re-enabled (2025-09-08)
-
-                # Ensure row is visible when it has data
-                table.setRowHidden(row, False)
-
-            else:
-                # Empty rows - hide them
-                table.setRowHidden(row, True)
-
-        # Find the marker row index
-        marker_row = None
-        for row_idx, row_data in enumerate(data):
-            if row_idx < table_row_count and row_data.get("is_marker"):
-                marker_row = row_idx
-                break
-
-        # Store data and marker_row on container for dynamic resize updates
-        table_container._table_data = data
-        table_container._marker_row = marker_row
-
-        # Calculate and apply visible rows (centered on marker)
-        _recalculate_visible_rows(table)
-
-    finally:
-        # Re-enable updates
-        table.setUpdatesEnabled(True)
+    if dynamic_rows:
+        # Populate table with rows that fit in the viewport
+        _populate_table_for_viewport(table)
+    else:
+        # Populate all rows (for popout tables with scrollbars)
+        _populate_table_all_rows(table, data, marker_row, marker_bg_color, marker_fg_color)
 
 
 def get_marker_surrounding_data(plot_widget: ActivityPlotWidget, marker_timestamp: float) -> list[dict[str, Any]]:
@@ -401,7 +472,10 @@ def get_marker_surrounding_data(plot_widget: ActivityPlotWidget, marker_timestam
         logger.debug(f"Could not find index for timestamp {marker_timestamp}")
         return surrounding_data
 
-    logger.debug(f"Found marker index {marker_idx} for timestamp {marker_timestamp} - retrieving {TableDimensions.ROW_COUNT} data points")
+    # Load enough data to fill any reasonable viewport (±100 minutes = 200 rows max)
+    elements_around_marker = 100
+
+    logger.debug(f"Found marker index {marker_idx} for timestamp {marker_timestamp} - retrieving ±{elements_around_marker} data points")
 
     # Get various result arrays from plot widget
     # CRITICAL FIX: Use same data source prioritization as main_window.py
@@ -421,9 +495,9 @@ def get_marker_surrounding_data(plot_widget: ActivityPlotWidget, marker_timestam
         plot_widget.get_nonwear_sensor_results_per_minute() if hasattr(plot_widget, "get_nonwear_sensor_results_per_minute") else []
     )
 
-    # Get 21 elements around marker (10 before + marker + 10 after)
-    start_idx = max(0, marker_idx - TableDimensions.ELEMENTS_AROUND_MARKER)
-    end_idx = min(len(plot_widget.timestamps), marker_idx + TableDimensions.ELEMENTS_AROUND_MARKER + 1)
+    # Get elements around marker
+    start_idx = max(0, marker_idx - elements_around_marker)
+    end_idx = min(len(plot_widget.timestamps), marker_idx + elements_around_marker + 1)
 
     for i in range(start_idx, end_idx):
         # Improved bounds checking with early continue for safety

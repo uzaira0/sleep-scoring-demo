@@ -246,8 +246,8 @@ class FileSelectionTable(QWidget):
         info = extract_participant_info(filename)
         return {
             "id": info.numerical_id,
-            "timepoint": info.timepoint,
-            "group": info.group,
+            "timepoint": info.timepoint_str,
+            "group": info.group_str,
         }
 
     def clear(self) -> None:
