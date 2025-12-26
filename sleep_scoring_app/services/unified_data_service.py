@@ -20,6 +20,7 @@ from sleep_scoring_app.utils.participant_extractor import extract_participant_in
 if TYPE_CHECKING:
     from datetime import date, datetime
 
+    from sleep_scoring_app.core.constants import ActivityDataPreference
     from sleep_scoring_app.core.dataclasses import FileInfo
     from sleep_scoring_app.data.database import DatabaseManager
     from sleep_scoring_app.services.memory_service import BoundedCache
@@ -140,6 +141,16 @@ class UnifiedDataService:
     ) -> tuple[list, list]:
         """Load raw activity data for visualization."""
         return self.db_manager.load_raw_activity_data(filename, start_time, end_time, activity_column)
+
+    def load_activity_data_only(
+        self,
+        filename: str,
+        target_date: datetime,
+        activity_column: ActivityDataPreference,
+        hours: int = 24,
+    ) -> tuple[list[datetime], list[float]] | None:
+        """Load only activity data for the specified column without triggering full reload cycle."""
+        return self.data_manager.load_activity_data_only(filename, target_date, activity_column, hours)
 
     def invalidate_marker_status_cache(self, filename: str | None = None) -> None:
         """Invalidate marker status cache."""
