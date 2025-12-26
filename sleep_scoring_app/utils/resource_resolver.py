@@ -43,7 +43,7 @@ class ResourceResolver:
     def _initialize(self) -> None:
         """Initialize the resource resolver with appropriate paths."""
         # Detect if running as PyInstaller executable
-        self._is_executable = getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")
+        self._is_executable = getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")  # KEEP: PyInstaller detection
 
         if self._is_executable:
             # Running as executable - use temporary extraction directory

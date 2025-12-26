@@ -53,6 +53,8 @@ class ConsecutiveEpochsSleepPeriodDetectorConfig:
         offset_anchor: Position to return for offset (default: END)
         offset_preceding_epoch: If True, return epoch before detected run (default: False)
         search_extension_minutes: Minutes to extend search beyond markers (default: 5)
+        min_sleep_period_minutes: Minimum sleep period length in minutes (default: None = no minimum)
+        max_sleep_period_minutes: Maximum sleep period length in minutes (default: 1440 = 24 hours)
 
     """
 
@@ -69,6 +71,10 @@ class ConsecutiveEpochsSleepPeriodDetectorConfig:
 
     # Search parameters
     search_extension_minutes: int = 5
+
+    # Period length constraints (ActiLife Tudor-Locke Default uses 160 min / 1440 max)
+    min_sleep_period_minutes: int | None = None  # None = no minimum
+    max_sleep_period_minutes: int = 1440  # 24 hours
 
 
 # Preset configs
@@ -103,4 +109,6 @@ TUDOR_LOCKE_2014_CONFIG = ConsecutiveEpochsSleepPeriodDetectorConfig(
     offset_anchor=AnchorPosition.START,
     offset_preceding_epoch=True,  # Return last sleep epoch before wake run
     search_extension_minutes=5,
+    min_sleep_period_minutes=160,  # ActiLife Tudor-Locke Default
+    max_sleep_period_minutes=1440,  # 24 hours
 )

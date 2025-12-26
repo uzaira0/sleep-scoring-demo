@@ -31,6 +31,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from sleep_scoring_app.core.constants import NonwearAlgorithm
 from sleep_scoring_app.core.pipeline.types import AlgorithmDataRequirement
 
 from .choi import ChoiAlgorithm
@@ -84,7 +85,7 @@ class NonwearAlgorithmFactory:
     """
 
     _registry: ClassVar[dict[str, _AlgorithmEntry]] = {
-        "choi_2011": _AlgorithmEntry(
+        NonwearAlgorithm.CHOI_2011: _AlgorithmEntry(
             algorithm_class=ChoiAlgorithm,
             display_name="Choi (2011)",
             params={
@@ -95,7 +96,7 @@ class NonwearAlgorithmFactory:
             },
             data_requirement=AlgorithmDataRequirement.EPOCH_DATA,
         ),
-        "van_hees_2023": _AlgorithmEntry(
+        NonwearAlgorithm.VAN_HEES_2023: _AlgorithmEntry(
             algorithm_class=VanHeesNonwearAlgorithm,
             display_name="van Hees (2023)",
             params={
@@ -107,7 +108,7 @@ class NonwearAlgorithmFactory:
             data_requirement=AlgorithmDataRequirement.RAW_DATA,
         ),
         # Future algorithms:
-        # 'vanhees_2013': _AlgorithmEntry(VanHeesAlgorithm, 'van Hees (2013)', {}),
+        # NonwearAlgorithm.VANHEES_2013: _AlgorithmEntry(VanHeesAlgorithm, 'van Hees (2013)', {}),
     }
 
     @classmethod
@@ -257,7 +258,7 @@ class NonwearAlgorithmFactory:
             Default algorithm ID ('choi_2011')
 
         """
-        return "choi_2011"
+        return NonwearAlgorithm.CHOI_2011
 
     @classmethod
     def is_registered(cls, algorithm_id: str) -> bool:

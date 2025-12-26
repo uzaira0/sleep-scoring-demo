@@ -85,7 +85,7 @@ class TestCompleteWorkflowSwitching:
 
             # Configure for testing
             window.data_service.database_manager = temp_database
-            window.data_service.data_manager.data_folder = str(test_csv_files[next(iter(test_csv_files.keys()))]["24h"].parent)
+            window.data_service.set_data_folder(str(test_csv_files[next(iter(test_csv_files.keys()))]["24h"].parent))
 
             yield window
 
@@ -123,8 +123,8 @@ class TestCompleteWorkflowSwitching:
 
         # Step 4: Load same participant from CSV
         csv_file = test_csv_files["4000_BO_G1"]["24h"]
-        window.data_service.data_manager.data_folder = str(csv_file.parent)
-        window.data_service.data_manager.use_database = False
+        window.data_service.set_data_folder(str(csv_file.parent))
+        window.data_service.set_database_mode(False)
 
         success = window.data_service.load_participant_data(participant_key, ViewMode.HOURS_24)
         assert success, "Failed to load participant data from CSV"
@@ -164,8 +164,8 @@ class TestCompleteWorkflowSwitching:
 
         # Configure CSV data source
         csv_file = test_csv_files["4001_P2_G2"]["48h"]
-        window.data_service.data_manager.data_folder = str(csv_file.parent)
-        window.data_service.data_manager.use_database = False
+        window.data_service.set_data_folder(str(csv_file.parent))
+        window.data_service.set_database_mode(False)
 
         # Load with new view mode
         success = window.data_service.load_participant_data(participant_key, ViewMode.HOURS_48)

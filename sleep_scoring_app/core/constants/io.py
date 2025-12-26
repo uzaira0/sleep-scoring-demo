@@ -28,8 +28,21 @@ class DeleteStatus(StrEnum):
 
     SUCCESS = "success"
     FAILED = "failed"
+    ERROR = "error"  # MW-04 FIX: Added missing ERROR status
     NOT_FOUND = "not_found"
     HAS_METRICS = "has_metrics"
+
+
+class FileSourceType(StrEnum):
+    """Source type for data files - where the file data is loaded from."""
+
+    DATABASE = "database"  # Imported into SQLite database
+    CSV = "csv"  # Direct CSV file on filesystem
+
+    @classmethod
+    def get_default(cls) -> "FileSourceType":
+        """Get the default file source type."""
+        return cls.DATABASE
 
 
 class DiaryFileType(StrEnum):
@@ -110,6 +123,48 @@ class ExportColumn(StrEnum):
     NONWEAR_START_TIME_3 = "Nonwear 3 Start Time"
     NONWEAR_END_TIME_3 = "Nonwear 3 End Time"
 
+    # Manual nonwear marker columns (placed by user in analysis tab) - supports up to 10 markers
+    MANUAL_NWT_COUNT = "Manual NWT Count"
+    MANUAL_NWT_1_START = "Manual NWT 1 Start"
+    MANUAL_NWT_1_END = "Manual NWT 1 End"
+    MANUAL_NWT_1_DURATION = "Manual NWT 1 Duration (min)"
+    MANUAL_NWT_2_START = "Manual NWT 2 Start"
+    MANUAL_NWT_2_END = "Manual NWT 2 End"
+    MANUAL_NWT_2_DURATION = "Manual NWT 2 Duration (min)"
+    MANUAL_NWT_3_START = "Manual NWT 3 Start"
+    MANUAL_NWT_3_END = "Manual NWT 3 End"
+    MANUAL_NWT_3_DURATION = "Manual NWT 3 Duration (min)"
+    MANUAL_NWT_4_START = "Manual NWT 4 Start"
+    MANUAL_NWT_4_END = "Manual NWT 4 End"
+    MANUAL_NWT_4_DURATION = "Manual NWT 4 Duration (min)"
+    MANUAL_NWT_5_START = "Manual NWT 5 Start"
+    MANUAL_NWT_5_END = "Manual NWT 5 End"
+    MANUAL_NWT_5_DURATION = "Manual NWT 5 Duration (min)"
+    MANUAL_NWT_6_START = "Manual NWT 6 Start"
+    MANUAL_NWT_6_END = "Manual NWT 6 End"
+    MANUAL_NWT_6_DURATION = "Manual NWT 6 Duration (min)"
+    MANUAL_NWT_7_START = "Manual NWT 7 Start"
+    MANUAL_NWT_7_END = "Manual NWT 7 End"
+    MANUAL_NWT_7_DURATION = "Manual NWT 7 Duration (min)"
+    MANUAL_NWT_8_START = "Manual NWT 8 Start"
+    MANUAL_NWT_8_END = "Manual NWT 8 End"
+    MANUAL_NWT_8_DURATION = "Manual NWT 8 Duration (min)"
+    MANUAL_NWT_9_START = "Manual NWT 9 Start"
+    MANUAL_NWT_9_END = "Manual NWT 9 End"
+    MANUAL_NWT_9_DURATION = "Manual NWT 9 Duration (min)"
+    MANUAL_NWT_10_START = "Manual NWT 10 Start"
+    MANUAL_NWT_10_END = "Manual NWT 10 End"
+    MANUAL_NWT_10_DURATION = "Manual NWT 10 Duration (min)"
+    MANUAL_NWT_TOTAL_DURATION = "Manual NWT Total Duration (min)"
+
+    # Nonwear period export columns (for StudyData.export_nonwear_rows())
+    NONWEAR_START = "Nonwear Start"
+    NONWEAR_END = "Nonwear End"
+    NONWEAR_DURATION_MINUTES = "Nonwear Duration (min)"
+    NONWEAR_SOURCE = "Nonwear Source"
+    NONWEAR_PERIOD_INDEX = "Nonwear Period Index"
+    NONWEAR_OVERLAP_MINUTES = "Nonwear Overlap Minutes"
+
 
 class ActivityColumn(StrEnum):
     """Activity data column search keywords."""
@@ -156,6 +211,8 @@ class ParticipantGroup(StrEnum):
     """Compatibility enum for participant groups used in tests and exports."""
 
     GROUP_1 = "G1"
+    GROUP_2 = "G2"
+    GROUP_3 = "G3"
     ISSUE = "ISSUE"
 
 
@@ -234,37 +291,35 @@ class DataSourceType(StrEnum):
         """Get the default data source type."""
         return cls.CSV
 
-    @classmethod
-    def migrate_legacy_value(cls, value: str) -> "DataSourceType":
-        """
-        Migrate legacy data source type values to current values.
 
-        Args:
-            value: Legacy or current data source type string
+class MetadataKey(StrEnum):
+    """Metadata dictionary keys for file and device information."""
 
-        Returns:
-            Current DataSourceType value
+    SAMPLE_RATE = "sample_rate"
+    SERIAL_NUMBER = "serial_number"
+    START_TIME = "start_time"
+    END_TIME = "end_time"
+    DEVICE_TYPE = "device_type"
+    FIRMWARE_VERSION = "firmware_version"
+    SUBJECT_NAME = "subject_name"
+    ACCELERATION_SCALE = "acceleration_scale"
+    ACCELERATION_MIN = "acceleration_min"
+    ACCELERATION_MAX = "acceleration_max"
+    BATTERY_VOLTAGE = "battery_voltage"
+    DOWNLOAD_TIME = "download_time"
+    BOARD_REVISION = "board_revision"
 
-        """
-        # Map legacy values to current values
-        legacy_mapping = {
-            "csv_file": cls.CSV,
-            "excel": cls.CSV,
-            "xlsx": cls.CSV,
-            "gt3x_file": cls.GT3X,
-            "actigraph": cls.GT3X,
-        }
 
-        # Check if it's a legacy value
-        if value in legacy_mapping:
-            return legacy_mapping[value]
+class DiaryPeriodKey(StrEnum):
+    """Dictionary keys for diary nap and nonwear period data."""
 
-        # Check if it's already a valid current value
-        try:
-            return cls(value)
-        except ValueError:
-            # Unknown value, default to CSV
-            return cls.CSV
+    START_TIME = "start_time"
+    END_TIME = "end_time"
+    DURATION = "duration"
+    QUALITY = "quality"
+    NOTES = "notes"
+    REASON = "reason"
+    INDEX = "index"
 
 
 # ============================================================================

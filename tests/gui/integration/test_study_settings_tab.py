@@ -151,11 +151,6 @@ class TestStudySettingsTab:
         assert hasattr(study_settings_tab, "night_end_time")
         assert hasattr(study_settings_tab, "choi_axis_combo")
 
-    def test_apply_button_exists(self, study_settings_tab):
-        """Test apply button exists."""
-        assert hasattr(study_settings_tab, "apply_button")
-        assert study_settings_tab.apply_button.text() == "Apply Settings"
-
     # ============================================================================
     # Regex Pattern Input Tests
     # ============================================================================
@@ -199,34 +194,36 @@ class TestStudySettingsTab:
     def test_add_group_button(self, mock_dialog, study_settings_tab, qtbot):
         """Test adding a group via button."""
         initial_count = study_settings_tab.valid_groups_list.count()
-        qtbot.mouseClick(study_settings_tab.add_group_button, Qt.MouseButton.LeftButton)
+        qtbot.mouseClick(study_settings_tab.valid_values_builder.add_group_button, Qt.MouseButton.LeftButton)
         assert study_settings_tab.valid_groups_list.count() == initial_count + 1
 
     @patch.object(QInputDialog, "getText", return_value=("T4", True))
     def test_add_timepoint_button(self, mock_dialog, study_settings_tab, qtbot):
         """Test adding a timepoint via button."""
         initial_count = study_settings_tab.valid_timepoints_list.count()
-        qtbot.mouseClick(study_settings_tab.add_timepoint_button, Qt.MouseButton.LeftButton)
+        qtbot.mouseClick(study_settings_tab.valid_values_builder.add_timepoint_button, Qt.MouseButton.LeftButton)
         assert study_settings_tab.valid_timepoints_list.count() == initial_count + 1
 
     @patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes)
     def test_remove_group_button(self, mock_question, study_settings_tab, qtbot):
         """Test removing a group via button."""
         # Select first item
-        study_settings_tab.valid_groups_list.setCurrentRow(0)
+        study_settings_tab.valid_groups_list.addItem("G_REMOVE")
+        study_settings_tab.valid_groups_list.setCurrentRow(study_settings_tab.valid_groups_list.count() - 1)  # Select the added item
         initial_count = study_settings_tab.valid_groups_list.count()
 
-        qtbot.mouseClick(study_settings_tab.remove_group_button, Qt.MouseButton.LeftButton)
+        qtbot.mouseClick(study_settings_tab.valid_values_builder.remove_group_button, Qt.MouseButton.LeftButton)
         assert study_settings_tab.valid_groups_list.count() == initial_count - 1
 
     @patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes)
     def test_remove_timepoint_button(self, mock_question, study_settings_tab, qtbot):
         """Test removing a timepoint via button."""
         # Select first item
-        study_settings_tab.valid_timepoints_list.setCurrentRow(0)
+        study_settings_tab.valid_timepoints_list.addItem("T_REMOVE")
+        study_settings_tab.valid_timepoints_list.setCurrentRow(study_settings_tab.valid_timepoints_list.count() - 1)  # Select the added item
         initial_count = study_settings_tab.valid_timepoints_list.count()
 
-        qtbot.mouseClick(study_settings_tab.remove_timepoint_button, Qt.MouseButton.LeftButton)
+        qtbot.mouseClick(study_settings_tab.valid_values_builder.remove_timepoint_button, Qt.MouseButton.LeftButton)
         assert study_settings_tab.valid_timepoints_list.count() == initial_count - 1
 
     @patch.object(QMessageBox, "information")
@@ -235,7 +232,7 @@ class TestStudySettingsTab:
         study_settings_tab.valid_groups_list.clearSelection()
         study_settings_tab.valid_groups_list.setCurrentRow(-1)
 
-        qtbot.mouseClick(study_settings_tab.remove_group_button, Qt.MouseButton.LeftButton)
+        qtbot.mouseClick(study_settings_tab.valid_values_builder.remove_group_button, Qt.MouseButton.LeftButton)
         mock_info.assert_called_once()
 
     # ============================================================================
@@ -276,7 +273,7 @@ class TestStudySettingsTab:
     def test_group_dropdown_updates_on_list_change(self, mock_dialog, study_settings_tab, qtbot):
         """Test default group dropdown updates when list changes."""
         initial_count = study_settings_tab.default_group_combo.count()
-        qtbot.mouseClick(study_settings_tab.add_group_button, Qt.MouseButton.LeftButton)
+        qtbot.mouseClick(study_settings_tab.valid_values_builder.add_group_button, Qt.MouseButton.LeftButton)
 
         # Dropdown should have one more item
         assert study_settings_tab.default_group_combo.count() == initial_count + 1
@@ -337,56 +334,6 @@ class TestStudySettingsTab:
     # ============================================================================
     # Apply Settings Tests
     # ============================================================================
-
-    @patch.object(QMessageBox, "warning")
-    def test_apply_settings_validation_no_groups(self, mock_warning, study_settings_tab, qtbot):
-        """Test apply settings fails with no valid groups."""
-        # Clear all groups
-        study_settings_tab.valid_groups_list.clear()
-
-        qtbot.mouseClick(study_settings_tab.apply_button, Qt.MouseButton.LeftButton)
-        mock_warning.assert_called_once()
-
-    @patch.object(QMessageBox, "warning")
-    def test_apply_settings_validation_no_timepoints(self, mock_warning, study_settings_tab, qtbot):
-        """Test apply settings fails with no valid timepoints."""
-        # Clear all timepoints
-        study_settings_tab.valid_timepoints_list.clear()
-
-        qtbot.mouseClick(study_settings_tab.apply_button, Qt.MouseButton.LeftButton)
-        mock_warning.assert_called_once()
-
-    @patch.object(QMessageBox, "warning")
-    def test_apply_settings_validation_invalid_regex(self, mock_warning, study_settings_tab, qtbot):
-        """Test apply settings fails with invalid regex."""
-        study_settings_tab.id_pattern_edit.setText("[invalid(regex")
-
-        qtbot.mouseClick(study_settings_tab.apply_button, Qt.MouseButton.LeftButton)
-        mock_warning.assert_called_once()
-
-    @patch.object(QMessageBox, "information")
-    def test_apply_settings_success(self, mock_info, study_settings_tab, qtbot):
-        """Test apply settings succeeds with valid configuration."""
-        # Ensure valid configuration
-        study_settings_tab.id_pattern_edit.setText(r"^(\d{4,})")
-        study_settings_tab.unknown_value_edit.setText("UNKNOWN")
-
-        # Select valid defaults (not placeholder)
-        group_combo = study_settings_tab.default_group_combo
-        for i in range(group_combo.count()):
-            if not group_combo.itemText(i).startswith("--"):
-                group_combo.setCurrentIndex(i)
-                break
-
-        timepoint_combo = study_settings_tab.default_timepoint_combo
-        for i in range(timepoint_combo.count()):
-            if not timepoint_combo.itemText(i).startswith("--"):
-                timepoint_combo.setCurrentIndex(i)
-                break
-
-        qtbot.mouseClick(study_settings_tab.apply_button, Qt.MouseButton.LeftButton)
-        # Should show success message
-        mock_info.assert_called_once()
 
     # ============================================================================
     # Signal Tests

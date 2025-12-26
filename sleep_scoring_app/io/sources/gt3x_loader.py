@@ -40,7 +40,6 @@ References:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -48,6 +47,7 @@ import pandas as pd
 
 from sleep_scoring_app.core.constants import DatabaseColumn
 from sleep_scoring_app.core.dataclasses import ColumnMapping
+from sleep_scoring_app.core.validation import InputValidator
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -87,6 +87,7 @@ class GT3XDataSourceLoader:
     """
 
     # GT3X format constants
+    SUPPORTED_EXTENSIONS: frozenset[str] = frozenset({".gt3x"})
     MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB limit
 
     def __init__(
@@ -151,7 +152,7 @@ class GT3XDataSourceLoader:
             Set of file extensions this loader can handle
 
         """
-        return {".gt3x"}
+        return self.SUPPORTED_EXTENSIONS
 
     def load_file(
         self,
@@ -184,12 +185,11 @@ class GT3XDataSourceLoader:
             ImportError: If pygt3x library is not installed
 
         """
-        from pathlib import Path
-
-        file_path = Path(file_path)
-        if not file_path.exists():
-            msg = f"File not found: {file_path}"
-            raise FileNotFoundError(msg)
+        file_path = InputValidator.validate_file_path(
+            file_path,
+            must_exist=True,
+            allowed_extensions=self.supported_extensions,
+        )
 
         # Check file size
         file_size = file_path.stat().st_size
@@ -298,8 +298,11 @@ class GT3XDataSourceLoader:
 
         # Build metadata dictionary
         metadata = {
+            "loader": "gt3x",
             "file_size": file_size,
             "serial_number": serial_number,
+            "device_type": start_time.get("device_type") if isinstance(start_time, dict) else None,
+            "firmware": None,  # Available from backend metadata
             "sample_rate": sample_rate,
             "start_time": result_df[DatabaseColumn.TIMESTAMP].iloc[0],
             "end_time": result_df[DatabaseColumn.TIMESTAMP].iloc[-1],
@@ -387,14 +390,14 @@ class GT3XDataSourceLoader:
             # Assume Unix timestamps (float seconds)
             epoch_datetimes = pd.to_datetime(epoch_start_timestamps, unit="s")
 
-        # Create DataFrame (use .value to get string column names)
+        # Create DataFrame with enum keys (pandas handles StrEnum automatically)
         return pd.DataFrame(
             {
-                DatabaseColumn.TIMESTAMP.value: epoch_datetimes,
-                DatabaseColumn.AXIS_X.value: epoch_x,
-                DatabaseColumn.AXIS_Y.value: epoch_y,
-                DatabaseColumn.AXIS_Z.value: epoch_z,
-                DatabaseColumn.VECTOR_MAGNITUDE.value: epoch_vm,
+                DatabaseColumn.TIMESTAMP: epoch_datetimes,
+                DatabaseColumn.AXIS_X: epoch_x,
+                DatabaseColumn.AXIS_Y: epoch_y,
+                DatabaseColumn.AXIS_Z: epoch_z,
+                DatabaseColumn.VECTOR_MAGNITUDE: epoch_vm,
             },
         )
 
@@ -421,14 +424,14 @@ class GT3XDataSourceLoader:
         # Calculate vector magnitude for each sample
         vm = np.sqrt(np.sum(raw_data**2, axis=1))
 
-        # Create DataFrame (use .value to get string column names)
+        # Create DataFrame with enum keys (pandas handles StrEnum automatically)
         return pd.DataFrame(
             {
-                DatabaseColumn.TIMESTAMP.value: datetimes,
-                DatabaseColumn.AXIS_X.value: raw_data[:, 0],
-                DatabaseColumn.AXIS_Y.value: raw_data[:, 1],
-                DatabaseColumn.AXIS_Z.value: raw_data[:, 2],
-                DatabaseColumn.VECTOR_MAGNITUDE.value: vm,
+                DatabaseColumn.TIMESTAMP: datetimes,
+                DatabaseColumn.AXIS_X: raw_data[:, 0],
+                DatabaseColumn.AXIS_Y: raw_data[:, 1],
+                DatabaseColumn.AXIS_Z: raw_data[:, 2],
+                DatabaseColumn.VECTOR_MAGNITUDE: vm,
             },
         )
 
@@ -533,12 +536,11 @@ class GT3XDataSourceLoader:
             ImportError: If pygt3x library is not installed
 
         """
-        from pathlib import Path
-
-        file_path = Path(file_path)
-        if not file_path.exists():
-            msg = f"File not found: {file_path}"
-            raise FileNotFoundError(msg)
+        file_path = InputValidator.validate_file_path(
+            file_path,
+            must_exist=True,
+            allowed_extensions=self.supported_extensions,
+        )
 
         file_size = file_path.stat().st_size
 
@@ -547,6 +549,7 @@ class GT3XDataSourceLoader:
             backend_metadata = self.backend.parse_gt3x_metadata(str(file_path))
 
             metadata = {
+                "loader": "gt3x",
                 "file_size": file_size,
                 "serial_number": backend_metadata.get("serial_number", "UNKNOWN"),
                 "sample_rate": backend_metadata.get("sample_rate"),

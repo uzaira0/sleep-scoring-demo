@@ -110,7 +110,7 @@ class AlgorithmCompatibilityUIHelper:
             self.current_data_source = self.detector.detect_from_file(file_path)
 
             # Get current algorithm from config
-            if hasattr(self.main_window, "config_manager"):
+            if self.main_window.config_manager is not None:  # Guaranteed after Phase 2
                 config = self.main_window.config_manager.config
                 self.current_algorithm_id = config.sleep_algorithm_id if config else None
 
@@ -259,9 +259,9 @@ class AlgorithmCompatibilityUIHelper:
         result = self.get_current_compatibility_result()
 
         # Update Save Markers button
-        if hasattr(self.main_window, "save_markers_btn"):
-            save_btn = self.main_window.save_markers_btn
-
+        # MainWindowProtocol guarantees save_markers_btn exists
+        save_btn = self.main_window.save_markers_btn
+        if save_btn:
             if result and result.status == CompatibilityStatus.INCOMPATIBLE:
                 # Disable button and update tooltip
                 save_btn.setEnabled(False)
@@ -313,7 +313,7 @@ class AlgorithmCompatibilityUIHelper:
 
         """
         # Check if main window has the compatibility label
-        if not hasattr(self.main_window, "algorithm_compat_label"):
+        if self.main_window.algorithm_compat_label is None:  # Guaranteed after setup_ui
             return
 
         label = self.main_window.algorithm_compat_label

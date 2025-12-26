@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from sleep_scoring_app.core.constants import NonwearAlgorithm
+
 if TYPE_CHECKING:
     from datetime import datetime
 
@@ -92,7 +94,7 @@ class VanHeesNonwearAlgorithm:
     @property
     def identifier(self) -> str:
         """Algorithm unique identifier."""
-        return "van_hees_2023"
+        return NonwearAlgorithm.VAN_HEES_2023
 
     def detect(
         self,
@@ -289,7 +291,11 @@ class VanHeesNonwearAlgorithm:
                 period_end_idx = epoch_idx * medium_epoch_size - 1
                 period_end_epoch = epoch_idx - 1
 
-                # Create NonwearPeriod
+                # Create NonwearPeriod - ensure indices are valid
+                if period_start_idx is None:
+                    in_period = False
+                    continue
+
                 start_time = timestamps[period_start_idx]
                 end_time = timestamps[min(period_end_idx, len(timestamps) - 1)]
                 duration_minutes = (period_end_epoch - period_start_epoch + 1) * (self._medium_epoch_sec // 60)
@@ -298,7 +304,7 @@ class VanHeesNonwearAlgorithm:
                     start_time=start_time,
                     end_time=end_time,
                     participant_id="",  # Will be filled by caller
-                    source=NonwearDataSource.CHOI_ALGORITHM,  # Using same source enum for now
+                    source=NonwearDataSource.VAN_HEES_2023,
                     duration_minutes=duration_minutes,
                     start_index=period_start_idx,
                     end_index=period_end_idx,
@@ -308,7 +314,7 @@ class VanHeesNonwearAlgorithm:
                 in_period = False
 
         # Handle period extending to end of data
-        if in_period:
+        if in_period and period_start_idx is not None:
             period_end_idx = len(timestamps) - 1
             period_end_epoch = len(nonwear_scores) - 1
 
@@ -320,7 +326,7 @@ class VanHeesNonwearAlgorithm:
                 start_time=start_time,
                 end_time=end_time,
                 participant_id="",
-                source=NonwearDataSource.CHOI_ALGORITHM,
+                source=NonwearDataSource.VAN_HEES_2023,
                 duration_minutes=duration_minutes,
                 start_index=period_start_idx,
                 end_index=period_end_idx,

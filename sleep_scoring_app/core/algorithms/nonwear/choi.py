@@ -12,7 +12,7 @@ References:
 
 Algorithm Details:
     - Identifies consecutive zero-count periods as potential nonwear
-    - Allows small spikes (≤2 minutes) within larger zero periods
+    - Allows small spikes (<=2 minutes) within larger zero periods
     - Validates minimum period length (default: 90 minutes)
     - Merges adjacent/overlapping periods
     - Can use single axis or vector magnitude (specified via ActivityColumn enum)
@@ -29,7 +29,7 @@ import pandas as pd
 
 from sleep_scoring_app.core.algorithms.sleep_wake.utils import find_datetime_column, validate_and_collapse_epochs
 from sleep_scoring_app.core.algorithms.types import ActivityColumn
-from sleep_scoring_app.core.constants import NonwearDataSource
+from sleep_scoring_app.core.constants import NonwearAlgorithm, NonwearDataSource
 from sleep_scoring_app.core.dataclasses import NonwearPeriod
 
 if TYPE_CHECKING:
@@ -63,14 +63,28 @@ def _merge_adjacent_periods(periods: list[NonwearPeriod]) -> list[NonwearPeriod]
 
     for next_period in periods[1:]:
         if (next_period.start_time - current.end_time).total_seconds() <= 60:
+            # Calculate merged end_index (handle None values)
+            merged_end_index = None
+            if current.end_index is not None and next_period.end_index is not None:
+                merged_end_index = max(current.end_index, next_period.end_index)
+            elif current.end_index is not None:
+                merged_end_index = current.end_index
+            elif next_period.end_index is not None:
+                merged_end_index = next_period.end_index
+
+            # Calculate duration_minutes if indices are available
+            duration_minutes = None
+            if current.start_index is not None and merged_end_index is not None:
+                duration_minutes = merged_end_index - current.start_index + 1
+
             current = NonwearPeriod(
                 start_time=current.start_time,
                 end_time=max(current.end_time, next_period.end_time),
                 participant_id=current.participant_id,
                 source=current.source,
-                duration_minutes=max(current.end_index, next_period.end_index) - current.start_index + 1,
+                duration_minutes=duration_minutes,
                 start_index=current.start_index,
-                end_index=max(current.end_index, next_period.end_index),
+                end_index=merged_end_index,
             )
         else:
             merged_periods.append(current)
@@ -82,7 +96,7 @@ def _merge_adjacent_periods(periods: list[NonwearPeriod]) -> list[NonwearPeriod]
 
 
 def choi_detect_nonwear(
-    df: pd.DataFrame,
+    data: pd.DataFrame,
     activity_column: ActivityColumn = ActivityColumn.VECTOR_MAGNITUDE,
 ) -> pd.DataFrame:
     """
@@ -98,7 +112,7 @@ def choi_detect_nonwear(
     validated research algorithm with parameters that should not be modified.
 
     Args:
-        df: DataFrame with datetime and activity columns
+        data: DataFrame with datetime and activity columns
         activity_column: Which activity column to use (VECTOR_MAGNITUDE recommended, or AXIS_Y)
 
     Returns:
@@ -109,45 +123,45 @@ def choi_detect_nonwear(
 
     Validation:
         - Finds datetime/date+time columns automatically
-        - Verifies 1-minute epochs (±1 second tolerance)
+        - Verifies 1-minute epochs (+/-1 second tolerance)
         - Collapses to 1-minute if epochs < 1 minute
         - Raises error if epochs > 1 minute
 
     Example:
         >>> import pandas as pd
         >>> from sleep_scoring_app.core.algorithms import choi_detect_nonwear, ActivityColumn
-        >>> df = pd.read_csv('activity.csv')
-        >>> df.head()
+        >>> data = pd.read_csv('activity.csv')
+        >>> data.head()
            datetime             Axis1  Vector Magnitude
         0  2024-01-01 00:00:00  45     52.3
         1  2024-01-01 00:01:00  32     38.1
         2  2024-01-01 00:02:00  0      0.0
-        >>> df = choi_detect_nonwear(df, ActivityColumn.VECTOR_MAGNITUDE)
-        >>> df.head()
+        >>> data = choi_detect_nonwear(data, ActivityColumn.VECTOR_MAGNITUDE)
+        >>> data.head()
            datetime             Axis1  Vector Magnitude  Choi Nonwear
         0  2024-01-01 00:00:00  45     52.3              0
         1  2024-01-01 00:01:00  32     38.1              0
         2  2024-01-01 00:02:00  0      0.0               1
 
     """
-    if df is None or len(df) == 0:
+    if data is None or len(data) == 0:
         msg = "DataFrame cannot be None or empty"
         raise ValueError(msg)
 
-    datetime_col = find_datetime_column(df)
+    datetime_col = find_datetime_column(data)
 
-    df = validate_and_collapse_epochs(df, datetime_col)
+    data = validate_and_collapse_epochs(data, datetime_col)
 
     column_name = activity_column.value
-    if column_name not in df.columns:
-        msg = f"DataFrame must contain '{column_name}' column. Available columns: {df.columns.tolist()}"
+    if column_name not in data.columns:
+        msg = f"DataFrame must contain '{column_name}' column. Available columns: {data.columns.tolist()}"
         raise ValueError(msg)
 
-    counts = df[column_name].to_numpy()
-    timestamps = df[datetime_col].to_numpy()
+    counts = data[column_name].to_numpy()
+    timestamps = data[datetime_col].to_numpy()
 
     if len(counts) == 0:
-        result_df = df.copy()
+        result_df = data.copy()
         result_df["Choi Nonwear"] = []
         return result_df
 
@@ -203,11 +217,13 @@ def choi_detect_nonwear(
 
     merged_periods = _merge_adjacent_periods(nonwear_periods)
 
-    nonwear_mask = np.zeros(len(df), dtype=int)
+    nonwear_mask = np.zeros(len(data), dtype=int)
     for period in merged_periods:
-        nonwear_mask[period.start_index : period.end_index + 1] = 1
+        # Skip periods without valid indices
+        if period.start_index is not None and period.end_index is not None:
+            nonwear_mask[period.start_index : period.end_index + 1] = 1
 
-    result_df = df.copy()
+    result_df = data.copy()
     result_df["Choi Nonwear"] = nonwear_mask
 
     return result_df
@@ -380,7 +396,7 @@ class ChoiAlgorithm:
     @property
     def identifier(self) -> str:
         """Algorithm unique identifier."""
-        return "choi_2011"
+        return NonwearAlgorithm.CHOI_2011
 
     def detect(
         self,

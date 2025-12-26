@@ -16,6 +16,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from sleep_scoring_app.core.constants import SleepPeriodDetectorType
 from sleep_scoring_app.core.pipeline.types import AlgorithmDataRequirement
 
 from .config import (
@@ -64,19 +65,19 @@ class SleepPeriodDetectorFactory:
         # Epoch-based detectors (require pre-classified sleep/wake epoch data)
         # These work AFTER a sleep/wake algorithm has classified each epoch
         # =============================================================================
-        "consecutive_onset3s_offset5s": _DetectorEntry(
+        SleepPeriodDetectorType.CONSECUTIVE_ONSET3S_OFFSET5S: _DetectorEntry(
             detector_class=ConsecutiveEpochsSleepPeriodDetector,
             display_name="Consecutive 3S/5S",
             data_requirement=AlgorithmDataRequirement.EPOCH_DATA,
             config=CONSECUTIVE_ONSET3S_OFFSET5S_CONFIG,
         ),
-        "consecutive_onset5s_offset10s": _DetectorEntry(
+        SleepPeriodDetectorType.CONSECUTIVE_ONSET5S_OFFSET10S: _DetectorEntry(
             detector_class=ConsecutiveEpochsSleepPeriodDetector,
             display_name="Consecutive 5S/10S",
             data_requirement=AlgorithmDataRequirement.EPOCH_DATA,
             config=CONSECUTIVE_ONSET5S_OFFSET10S_CONFIG,
         ),
-        "tudor_locke_2014": _DetectorEntry(
+        SleepPeriodDetectorType.TUDOR_LOCKE_2014: _DetectorEntry(
             detector_class=ConsecutiveEpochsSleepPeriodDetector,
             display_name="Tudor-Locke (2014)",
             data_requirement=AlgorithmDataRequirement.EPOCH_DATA,
@@ -87,18 +88,12 @@ class SleepPeriodDetectorFactory:
         # These bypass sleep/wake classification and detect SPT boundaries directly
         # using z-angle analysis
         # =============================================================================
-        "hdcza_2018": _DetectorEntry(
+        SleepPeriodDetectorType.HDCZA_2018: _DetectorEntry(
             detector_class=HDCZA,
             display_name="HDCZA (van Hees 2018)",
             data_requirement=AlgorithmDataRequirement.RAW_DATA,
             params={},
         ),
-    }
-
-    # Backward compatibility mappings
-    _legacy_ids: ClassVar[dict[str, str]] = {
-        "consecutive_3_5": "consecutive_onset3s_offset5s",
-        "consecutive_5_10": "consecutive_onset5s_offset10s",
     }
 
     @classmethod
@@ -121,10 +116,6 @@ class SleepPeriodDetectorFactory:
             ValueError: If detector_id is not registered
 
         """
-        # Handle legacy IDs
-        if detector_id in cls._legacy_ids:
-            detector_id = cls._legacy_ids[detector_id]
-
         if detector_id not in cls._registry:
             available = ", ".join(cls._registry.keys())
             msg = f"Unknown sleep period detector '{detector_id}'. Available: {available}"
@@ -203,10 +194,6 @@ class SleepPeriodDetectorFactory:
             AlgorithmDataRequirement enum value, or None if not found
 
         """
-        # Handle legacy IDs
-        if detector_id in cls._legacy_ids:
-            detector_id = cls._legacy_ids[detector_id]
-
         if detector_id not in cls._registry:
             return None
 
@@ -224,7 +211,7 @@ class SleepPeriodDetectorFactory:
             Default detector ID ("consecutive_onset3s_offset5s")
 
         """
-        return "consecutive_onset3s_offset5s"
+        return SleepPeriodDetectorType.CONSECUTIVE_ONSET3S_OFFSET5S
 
     @classmethod
     def get_default_detector_id_for_paradigm(cls, paradigm: str) -> str:
@@ -239,9 +226,9 @@ class SleepPeriodDetectorFactory:
 
         """
         if paradigm == "epoch_based":
-            return "consecutive_onset3s_offset5s"
+            return SleepPeriodDetectorType.CONSECUTIVE_ONSET3S_OFFSET5S
         # raw_accelerometer
-        return "hdcza_2018"
+        return SleepPeriodDetectorType.HDCZA_2018
 
     # Backward compatibility alias
     get_default_rule_id = get_default_detector_id
@@ -302,10 +289,6 @@ class SleepPeriodDetectorFactory:
             ValueError: If detector_id not registered
 
         """
-        # Handle legacy IDs
-        if detector_id in cls._legacy_ids:
-            detector_id = cls._legacy_ids[detector_id]
-
         if detector_id not in cls._registry:
             available = ", ".join(cls._registry.keys())
             msg = f"Unknown sleep period detector '{detector_id}'. Available: {available}"

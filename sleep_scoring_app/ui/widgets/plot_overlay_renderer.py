@@ -18,8 +18,7 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import QTimer
 
-from sleep_scoring_app.core.algorithms import NonwearAlgorithmFactory
-from sleep_scoring_app.core.constants import NonwearDataSource, UIColors
+from sleep_scoring_app.core.constants import NonwearAlgorithm, NonwearDataSource, UIColors
 
 if TYPE_CHECKING:
     from sleep_scoring_app.services.nonwear_service import NonwearPeriod
@@ -48,15 +47,9 @@ class PlotOverlayRenderer:
     def _get_choi_activity_column(self) -> str:
         """Get the Choi activity column from config."""
         try:
-            main_window = getattr(self.parent, "main_window", None)
-            if main_window is None and hasattr(self.parent, "parent") and callable(self.parent.parent):
-                main_window = self.parent.parent()
-            if main_window and hasattr(main_window, "config_manager"):
-                choi_axis = main_window.config_manager.config.choi_axis
-                if choi_axis:
-                    return choi_axis
-        except Exception:
-            pass
+            return self.parent.get_choi_activity_column()
+        except Exception as e:
+            logger.debug("Could not get choi_axis from config, using default: %s", e)
         return "vector_magnitude"
 
     # ========== Nonwear Data Management ==========
@@ -99,26 +92,22 @@ class PlotOverlayRenderer:
 
     def clear_nonwear_visualizations(self) -> None:
         """Clear all nonwear period visualizations."""
-        if hasattr(self.parent, "nonwear_regions"):
-            for region in self.parent.nonwear_regions:
-                self.parent.plotItem.removeItem(region)
+        for region in self.parent.nonwear_regions:
+            self.parent.plotItem.removeItem(region)
         self.parent.nonwear_regions = []
 
     # ========== Nonwear Period Plotting ==========
 
     def plot_nonwear_periods(self) -> None:
         """Plot nonwear periods using the same per-minute data as table/mouseover."""
-        if hasattr(self.parent, "nonwear_regions"):
-            for region in self.parent.nonwear_regions:
-                self.parent.plotItem.removeItem(region)
-            self.parent.nonwear_regions.clear()
-        else:
-            self.parent.nonwear_regions = []
+        for region in self.parent.nonwear_regions:
+            self.parent.plotItem.removeItem(region)
+        self.parent.nonwear_regions.clear()
 
         logger.info("=== PLOT_NONWEAR_PERIODS CALLED ===")
 
-        if not hasattr(self.parent, "nonwear_data"):
-            logger.warning("No nonwear_data attribute found - nonwear visualization not possible")
+        if not self.parent.nonwear_data:
+            logger.warning("No nonwear_data available - nonwear visualization not possible")
             return
 
         logger.info(
@@ -234,7 +223,7 @@ class PlotOverlayRenderer:
                 "Invalid period indices: start=%s, end=%s, timestamps_length=%d",
                 start_idx,
                 end_idx,
-                len(self.parent.timestamps) if hasattr(self.parent, "timestamps") else 0,
+                len(self.parent.timestamps) if hasattr(self.parent, "timestamps") else 0,  # KEEP: Duck typing plot/marker attributes
             )
 
     def add_background_region(
@@ -261,7 +250,7 @@ class PlotOverlayRenderer:
         """Recalculate Choi algorithm with new data while preserving Sadeh algorithm state."""
         logger.debug("Updating Choi overlay with new activity data")
 
-        if not new_activity_data or not hasattr(self.parent, "timestamps"):
+        if not new_activity_data or not self.parent.timestamps:
             logger.warning("Cannot update Choi overlay: missing activity data or timestamps")
             return
 
@@ -285,7 +274,7 @@ class PlotOverlayRenderer:
             )
 
             raw_sensor_periods = []
-            if hasattr(self.parent, "nonwear_data") and self.parent.nonwear_data:
+            if self.parent.nonwear_data:
                 raw_sensor_periods = list(self.parent.nonwear_data.sensor_periods)
 
             new_nonwear_data = NonwearData.create_for_activity_view(
@@ -311,19 +300,20 @@ class PlotOverlayRenderer:
 
             logger.info("Successfully updated Choi overlay with new data (Sadeh state preserved)")
 
-        except Exception:
-            logger.exception("Error updating Choi overlay")
-            if hasattr(self.parent, "nonwear_data"):
+        except Exception as e:
+            logger.exception("Error updating Choi overlay: %s", e)
+            self.parent.error_occurred.emit(f"Failed to update nonwear overlay: {e}")
+            if self.parent.nonwear_data:
                 try:
                     self.plot_nonwear_periods()
-                except Exception:
-                    logger.exception("Failed to restore previous nonwear visualization")
+                except Exception as restore_error:
+                    logger.exception("Failed to restore previous nonwear visualization: %s", restore_error)
 
     def update_choi_overlay_async(self, new_activity_data: list[float]) -> None:
         """Asynchronously recalculate Choi algorithm with new data."""
         logger.debug("Starting async Choi overlay update")
 
-        if not new_activity_data or not hasattr(self.parent, "timestamps"):
+        if not new_activity_data or not self.parent.timestamps:
             logger.warning("Cannot update Choi overlay async: missing activity data or timestamps")
             return
 
@@ -345,7 +335,7 @@ class PlotOverlayRenderer:
                 )
 
                 raw_sensor_periods = []
-                if hasattr(self.parent, "nonwear_data") and self.parent.nonwear_data:
+                if self.parent.nonwear_data:
                     raw_sensor_periods = list(self.parent.nonwear_data.sensor_periods)
 
                 return NonwearData.create_for_activity_view(
@@ -354,13 +344,14 @@ class PlotOverlayRenderer:
                     nonwear_service=None,
                     choi_activity_column=self._get_choi_activity_column(),
                 )
-            except Exception:
-                logger.exception("Error in async Choi computation")
+            except Exception as e:
+                logger.exception("Error in async Choi computation: %s", e)
                 return None
 
         def on_computation_complete(new_nonwear_data):
             if new_nonwear_data is None:
                 logger.error("Async Choi computation failed")
+                self.parent.error_occurred.emit("Async nonwear computation failed")
                 return
 
             try:
@@ -378,8 +369,9 @@ class PlotOverlayRenderer:
                 self._update_choi_cache_key(new_activity_data)
 
                 logger.info("Async Choi overlay update completed successfully")
-            except Exception:
-                logger.exception("Error applying async Choi results")
+            except Exception as e:
+                logger.exception("Error applying async Choi results: %s", e)
+                self.parent.error_occurred.emit(f"Failed to apply nonwear results: {e}")
 
         def delayed_computation():
             result = compute_choi_async()
@@ -396,7 +388,7 @@ class PlotOverlayRenderer:
             choi_data_hash = hashlib.md5(str(new_activity_data).encode()).hexdigest()[:8]
             choi_cache_key = f"choi_{len(new_activity_data)}_{choi_data_hash}"
 
-            if hasattr(self.parent, "nonwear_data") and self.parent.nonwear_data:
+            if self.parent.nonwear_data:
                 if len(self._choi_cache) >= 3:
                     oldest_key = next(iter(self._choi_cache))
                     del self._choi_cache[oldest_key]
@@ -407,8 +399,8 @@ class PlotOverlayRenderer:
                 }
 
                 logger.debug("Cached Choi results with key: %s", choi_cache_key)
-        except Exception:
-            logger.exception("Error updating Choi cache key")
+        except Exception as e:
+            logger.exception("Error updating Choi cache key: %s", e)
 
     def restore_choi_from_cache(self, activity_data: list[float]) -> bool:
         """Attempt to restore Choi results from cache for quick switching."""
@@ -432,13 +424,13 @@ class PlotOverlayRenderer:
                 )
 
                 raw_sensor_periods = []
-                if hasattr(self.parent, "nonwear_data") and self.parent.nonwear_data:
+                if self.parent.nonwear_data:
                     raw_sensor_periods = list(self.parent.nonwear_data.sensor_periods)
 
                 new_nonwear_data = NonwearData(
                     sensor_periods=tuple(raw_sensor_periods),
                     choi_periods=tuple(cached_data["choi_periods"]),
-                    sensor_mask=tuple(getattr(self.parent.nonwear_data, "sensor_mask", [])) if hasattr(self.parent, "nonwear_data") else (),
+                    sensor_mask=tuple(getattr(self.parent.nonwear_data, "sensor_mask", [])) if self.parent.nonwear_data else (),
                     choi_mask=tuple(cached_data["choi_mask"]),
                     activity_view=activity_view,
                 )
@@ -454,8 +446,8 @@ class PlotOverlayRenderer:
 
                 logger.debug("Successfully restored Choi results from cache: %s", choi_cache_key)
                 return True
-        except Exception:
-            logger.exception("Error restoring Choi results from cache")
+        except Exception as e:
+            logger.exception("Error restoring Choi results from cache: %s", e)
 
         return False
 
@@ -472,21 +464,21 @@ class PlotOverlayRenderer:
     def validate_choi_overlay_state(self) -> bool:
         """Validate the current Choi overlay state for consistency."""
         try:
-            if not hasattr(self.parent, "nonwear_data") or not self.parent.nonwear_data:
+            if not self.parent.nonwear_data:
                 logger.debug("No nonwear data available for validation")
                 return False
 
-            if hasattr(self.parent, "sadeh_results"):
+            if self.parent.sadeh_results:
                 if not isinstance(self.parent.sadeh_results, list):
                     logger.error("Sadeh results corrupted: not a list")
                     return False
                 logger.debug("Sadeh results validated: %d entries", len(self.parent.sadeh_results))
 
-            if not hasattr(self.parent.nonwear_data, "choi_mask") or not hasattr(self.parent.nonwear_data, "choi_periods"):
+            if not self.parent.nonwear_data.choi_mask or not self.parent.nonwear_data.choi_periods:
                 logger.error("Choi overlay data incomplete")
                 return False
 
-            if hasattr(self.parent, "timestamps"):
+            if self.parent.timestamps:
                 expected_length = len(self.parent.timestamps)
                 choi_mask_length = len(self.parent.nonwear_data.choi_mask)
 
@@ -495,21 +487,20 @@ class PlotOverlayRenderer:
 
             logger.debug("Choi overlay state validation passed")
             return True
-        except Exception:
-            logger.exception("Error validating Choi overlay state")
+        except Exception as e:
+            logger.exception("Error validating Choi overlay state: %s", e)
             return False
 
     def convert_choi_results_to_periods(self) -> list[NonwearPeriod]:
         """Convert dynamically generated Choi results to NonwearPeriod format."""
         periods = []
-        if not hasattr(self.parent, "axis_y_data") or not hasattr(self.parent, "timestamps"):
+        if not self.parent.axis_y_data or not self.parent.timestamps:
             return periods
 
         try:
-            # Use NonwearAlgorithmFactory (DI pattern)
-            choi_algorithm = NonwearAlgorithmFactory.create("choi_2011")
+            choi_algorithm = self.parent.create_nonwear_algorithm(NonwearAlgorithm.CHOI_2011)
             periods = choi_algorithm.detect(activity_data=self.parent.axis_y_data, timestamps=self.parent.timestamps)
-        except Exception:
-            logger.exception("Error converting Choi results to periods")
+        except Exception as e:
+            logger.exception("Error converting Choi results to periods: %s", e)
 
         return periods

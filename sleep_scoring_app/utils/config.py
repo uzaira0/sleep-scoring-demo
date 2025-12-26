@@ -32,7 +32,7 @@ try:
 except ImportError:
     # Fallback when PyQt6 is not available
     QSETTINGS_AVAILABLE = False
-    QSettings = None
+    QSettings = None  # type: ignore[misc, assignment]
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ class ConfigManager:
     def __init__(self) -> None:
         self._lock = Lock()
 
-        if QSETTINGS_AVAILABLE:
+        if QSETTINGS_AVAILABLE and QSettings is not None:
             self.settings = QSettings("SleepResearch", "SleepScoringApp")
         else:
             self.settings = None
@@ -66,7 +66,8 @@ class ConfigManager:
         """Try to load configuration, return None if invalid instead of throwing."""
         try:
             return self.load_config()
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to load configuration: %s", e)
             return None
 
     def load_config(self) -> AppConfig:
@@ -178,6 +179,13 @@ class ConfigManager:
                 if self.settings.contains("gt3x_return_raw"):
                     self.config.gt3x_return_raw = self.settings.value("gt3x_return_raw", type=bool)
 
+                # Auto-save settings
+                if self.settings.contains("auto_save_markers"):
+                    self.config.auto_save_markers = self.settings.value("auto_save_markers", type=bool)
+
+                # Validate algorithm compatibility with paradigm
+                self._validate_algorithm_paradigm_compatibility()
+
                 logger.debug("Loaded configuration from QSettings")
                 return self.config
 
@@ -213,6 +221,39 @@ class ConfigManager:
         self.config = AppConfig.create_default()
         logger.debug("Created default config with hardcoded values")
         return self.config
+
+    def _validate_algorithm_paradigm_compatibility(self) -> None:
+        """
+        Validate that selected algorithms are compatible with the data paradigm.
+
+        If an algorithm is incompatible, reset it to the default for that paradigm.
+        """
+        if self.config is None:
+            return
+
+        from sleep_scoring_app.services.algorithm_service import get_algorithm_service
+
+        paradigm = self.config.data_paradigm
+        algo_service = get_algorithm_service()
+
+        # Validate nonwear algorithm (paradigm-specific)
+        available_nonwear = algo_service.get_nonwear_algorithms_for_paradigm(paradigm)
+        if self.config.nonwear_algorithm_id not in available_nonwear:
+            # Get first available or default
+            if available_nonwear:
+                new_algo = next(iter(available_nonwear.keys()))
+                logger.warning(
+                    "Nonwear algorithm '%s' incompatible with paradigm '%s', resetting to '%s'",
+                    self.config.nonwear_algorithm_id,
+                    paradigm,
+                    new_algo,
+                )
+                self.config.nonwear_algorithm_id = str(new_algo)
+            else:
+                logger.warning("No nonwear algorithms available for paradigm '%s'", paradigm)
+
+        # Note: Sleep algorithms are not currently paradigm-restricted,
+        # so we only validate nonwear algorithms here
 
     def save_config(self) -> None:
         """Save configuration to QSettings (directory paths and export grouping) or JSON fallback (thread-safe)."""
@@ -263,6 +304,9 @@ class ConfigManager:
                     self.settings.setValue("csv_skip_rows", self.config.csv_skip_rows)
                     self.settings.setValue("gt3x_epoch_length", self.config.gt3x_epoch_length)
                     self.settings.setValue("gt3x_return_raw", self.config.gt3x_return_raw)
+
+                    # Auto-save settings
+                    self.settings.setValue("auto_save_markers", self.config.auto_save_markers)
 
                     # Force sync to disk
                     self.settings.sync()
@@ -365,25 +409,24 @@ class ConfigManager:
         logger.debug("Updated epoch_length to: %s", value)
         self.save_config()
 
+    def update_auto_save_markers(self, enabled: bool) -> None:
+        """Update the auto-save markers setting."""
+        self.config.auto_save_markers = enabled
+        logger.debug("Updated auto_save_markers to: %s", enabled)
+        self.save_config()
+
     def update_study_settings(self, **kwargs) -> None:
         """
         Update study settings and persist to QSettings.
 
-        Supported kwargs:
-        - participant_id_patterns: list[str]
-        - timepoint_pattern: str
-        - group_pattern: str
-        - valid_groups: list[str]
-        - valid_timepoints: list[str]
-        - default_group: str
-        - default_timepoint: str
-        - unknown_value: str
+        Accepts both short and Redux-style field names.
         """
         if self.config is None:
             return
 
-        # Map kwargs to config attributes
+        # Map kwargs to config attributes - support both short names and Redux field names
         attr_mapping = {
+            # Short names (legacy)
             "participant_id_patterns": "study_participant_id_patterns",
             "timepoint_pattern": "study_timepoint_pattern",
             "group_pattern": "study_group_pattern",
@@ -392,6 +435,23 @@ class ConfigManager:
             "default_group": "study_default_group",
             "default_timepoint": "study_default_timepoint",
             "unknown_value": "study_unknown_value",
+            # Redux field names (full names)
+            "study_participant_id_patterns": "study_participant_id_patterns",
+            "study_timepoint_pattern": "study_timepoint_pattern",
+            "study_group_pattern": "study_group_pattern",
+            "study_valid_groups": "study_valid_groups",
+            "study_valid_timepoints": "study_valid_timepoints",
+            "study_default_group": "study_default_group",
+            "study_default_timepoint": "study_default_timepoint",
+            "study_unknown_value": "study_unknown_value",
+            # Algorithm settings
+            "data_paradigm": "data_paradigm",
+            "sleep_algorithm_id": "sleep_algorithm_id",
+            "onset_offset_rule_id": "onset_offset_rule_id",
+            "night_start_hour": "night_start_hour",
+            "night_end_hour": "night_end_hour",
+            "nonwear_algorithm_id": "nonwear_algorithm_id",
+            "choi_axis": "choi_axis",
         }
 
         # Update config attributes

@@ -10,6 +10,7 @@ import pandas as pd
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QButtonGroup,
+    QCheckBox,
     QDialog,
     QFileDialog,
     QGroupBox,
@@ -17,10 +18,14 @@ from PyQt6.QtWidgets import (
     QLabel,
     QPushButton,
     QRadioButton,
+    QScrollArea,
+    QTabWidget,
     QVBoxLayout,
+    QWidget,
 )
 
 from sleep_scoring_app.core.constants import ButtonText, ExportColumn, WindowTitle
+from sleep_scoring_app.utils.column_registry import column_registry
 
 
 class ExportDialog(QDialog):
@@ -31,18 +36,20 @@ class ExportDialog(QDialog):
         self.backup_file_path = backup_file_path
         self.grouping_option = None
         self.output_path = None
+        self.sleep_column_checkboxes: dict[str, QCheckBox] = {}
+        self.nonwear_column_checkboxes: dict[str, QCheckBox] = {}
         self.setup_ui()
 
     def setup_ui(self) -> None:
         """Create the dialog interface."""
         self.setWindowTitle(WindowTitle.EXPORT_DIALOG)
         self.setModal(True)
-        self.resize(500, 400)
+        self.resize(700, 600)
 
         layout = QVBoxLayout(self)
 
         # Title
-        title_label = QLabel(WindowTitle.EXPORT_DIALOG)
+        title_label = QLabel("Export Sleep and Nonwear Data")
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title_label.setStyleSheet("font-size: 16px; font-weight: bold; margin: 10px;")
         layout.addWidget(title_label)
@@ -51,6 +58,19 @@ class ExportDialog(QDialog):
         self.summary_label = QLabel("Loading data summary...")
         self.summary_label.setStyleSheet("margin: 10px; padding: 10px; background-color: #f0f0f0; border-radius: 5px;")
         layout.addWidget(self.summary_label)
+
+        # Tab widget for Sleep and Nonwear column selection
+        tab_widget = QTabWidget()
+
+        # Sleep columns tab
+        sleep_tab = self._create_sleep_columns_tab()
+        tab_widget.addTab(sleep_tab, "Sleep Columns")
+
+        # Nonwear columns tab
+        nonwear_tab = self._create_nonwear_columns_tab()
+        tab_widget.addTab(nonwear_tab, "Nonwear Columns")
+
+        layout.addWidget(tab_widget)
 
         # Grouping options
         grouping_group = QGroupBox("Grouping Options")
@@ -112,6 +132,104 @@ class ExportDialog(QDialog):
         # Load data after dialog is visible
         QTimer.singleShot(0, self._load_data_summary)
 
+    def _create_sleep_columns_tab(self) -> QWidget:
+        """Create tab for sleep column selection."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # Header
+        header = QLabel("Select columns to include in sleep data export")
+        header.setStyleSheet("font-weight: bold; padding: 5px;")
+        layout.addWidget(header)
+
+        # Select/Deselect buttons
+        button_layout = QHBoxLayout()
+        select_all = QPushButton("Select All")
+        select_all.clicked.connect(lambda: self._select_all_sleep_columns(True))
+        button_layout.addWidget(select_all)
+
+        deselect_all = QPushButton("Deselect All")
+        deselect_all.clicked.connect(lambda: self._select_all_sleep_columns(False))
+        button_layout.addWidget(deselect_all)
+        button_layout.addStretch()
+        layout.addLayout(button_layout)
+
+        # Scroll area for checkboxes
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+
+        # Get sleep-related columns (excluding Nonwear Markers group)
+        exportable_columns = column_registry.get_exportable()
+        for col in sorted(exportable_columns, key=lambda c: c.ui_order):
+            if col.export_column and col.ui_group != "Nonwear Markers" and not col.is_always_exported:
+                checkbox = QCheckBox(col.display_name)
+                checkbox.setChecked(True)
+                checkbox.setToolTip(col.description or f"Export column: {col.export_column}")
+                scroll_layout.addWidget(checkbox)
+                self.sleep_column_checkboxes[col.export_column] = checkbox
+
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll)
+
+        return tab
+
+    def _create_nonwear_columns_tab(self) -> QWidget:
+        """Create tab for nonwear column selection."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # Header
+        header = QLabel("Select columns to include in nonwear data export")
+        header.setStyleSheet("font-weight: bold; padding: 5px;")
+        layout.addWidget(header)
+
+        # Select/Deselect buttons
+        button_layout = QHBoxLayout()
+        select_all = QPushButton("Select All")
+        select_all.clicked.connect(lambda: self._select_all_nonwear_columns(True))
+        button_layout.addWidget(select_all)
+
+        deselect_all = QPushButton("Deselect All")
+        deselect_all.clicked.connect(lambda: self._select_all_nonwear_columns(False))
+        button_layout.addWidget(deselect_all)
+        button_layout.addStretch()
+        layout.addLayout(button_layout)
+
+        # Scroll area for checkboxes
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+
+        # Get nonwear-related columns (from Nonwear Markers group)
+        exportable_columns = column_registry.get_exportable()
+        for col in sorted(exportable_columns, key=lambda c: c.ui_order):
+            if col.export_column and col.ui_group == "Nonwear Markers":
+                checkbox = QCheckBox(col.display_name)
+                checkbox.setChecked(True)
+                checkbox.setToolTip(col.description or f"Export column: {col.export_column}")
+                scroll_layout.addWidget(checkbox)
+                self.nonwear_column_checkboxes[col.export_column] = checkbox
+
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll)
+
+        return tab
+
+    def _select_all_sleep_columns(self, checked: bool) -> None:
+        """Select or deselect all sleep columns."""
+        for checkbox in self.sleep_column_checkboxes.values():
+            checkbox.setChecked(checked)
+
+    def _select_all_nonwear_columns(self, checked: bool) -> None:
+        """Select or deselect all nonwear columns."""
+        for checkbox in self.nonwear_column_checkboxes.values():
+            checkbox.setChecked(checked)
+
     def _load_data_summary(self) -> None:
         """Load data summary after dialog is shown to prevent blocking."""
         try:
@@ -143,6 +261,24 @@ class ExportDialog(QDialog):
         """Return selected grouping option."""
         return self.grouping_group.checkedId()
 
-    def get_output_path(self) -> str:
+    def get_output_path(self) -> str | None:
         """Return selected output path."""
         return self.output_path
+
+    def get_selected_sleep_columns(self) -> list[str]:
+        """Get list of selected sleep export column names."""
+        selected = [col for col, cb in self.sleep_column_checkboxes.items() if cb.isChecked()]
+        # Add always-exported columns
+        for col in column_registry.get_exportable():
+            if col.is_always_exported and col.export_column and col.export_column not in selected:
+                selected.insert(0, col.export_column)
+        return selected
+
+    def get_selected_nonwear_columns(self) -> list[str]:
+        """Get list of selected nonwear export column names."""
+        selected = [col for col, cb in self.nonwear_column_checkboxes.items() if cb.isChecked()]
+        # Add always-exported columns if they're in the Nonwear Markers group
+        for col in column_registry.get_exportable():
+            if col.is_always_exported and col.ui_group == "Nonwear Markers" and col.export_column and col.export_column not in selected:
+                selected.insert(0, col.export_column)
+        return selected

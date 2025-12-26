@@ -25,7 +25,9 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pandas as pd
 
+from sleep_scoring_app.core.constants import DatabaseColumn
 from sleep_scoring_app.core.dataclasses import ColumnMapping
+from sleep_scoring_app.core.validation import InputValidator
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -51,6 +53,7 @@ class Gt3xRsDataSourceLoader:
 
     """
 
+    SUPPORTED_EXTENSIONS: frozenset[str] = frozenset({".gt3x"})
     MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB limit (gt3x-rs handles large files)
 
     def __init__(
@@ -110,7 +113,7 @@ class Gt3xRsDataSourceLoader:
     @property
     def supported_extensions(self) -> set[str]:
         """Supported file extensions."""
-        return {".gt3x"}
+        return self.SUPPORTED_EXTENSIONS
 
     def load_file(
         self,
@@ -138,12 +141,11 @@ class Gt3xRsDataSourceLoader:
             ImportError: If gt3x-rs is not available
 
         """
-        from pathlib import Path
-
-        file_path = Path(file_path)
-        if not file_path.exists():
-            msg = f"File not found: {file_path}"
-            raise FileNotFoundError(msg)
+        file_path = InputValidator.validate_file_path(
+            file_path,
+            must_exist=True,
+            allowed_extensions=self.supported_extensions,
+        )
 
         file_size = file_path.stat().st_size
         if file_size > self.MAX_FILE_SIZE:
@@ -171,7 +173,7 @@ class Gt3xRsDataSourceLoader:
 
         # Get idle sleep mode array if available
         idle_sleep_mode = np.zeros(len(x), dtype=np.bool_)
-        if hasattr(data, "idle_sleep_mode"):
+        if hasattr(data, "idle_sleep_mode"):  # KEEP: Optional gt3x_rs data field
             ism = data.idle_sleep_mode
             if ism is not None:
                 idle_sleep_mode = np.array(ism, dtype=np.bool_)
@@ -229,6 +231,9 @@ class Gt3xRsDataSourceLoader:
                 logger.info(f"Set {ism_count} ISM samples to NaN (before imputation)")
 
         # Impute time gaps if enabled
+        imputation_n_gaps = 0
+        imputation_samples_added = 0
+        imputation_total_gap_sec = 0.0
         if self.impute_gaps:
             try:
                 logger.info("Checking for time gaps...")
@@ -239,14 +244,14 @@ class Gt3xRsDataSourceLoader:
                     ts_seconds = timestamps.astype(np.float64)
 
                 # Use zero-copy NumPy API if available, fallback to .tolist() version
-                if hasattr(self._gt3x_rs, "detect_time_gaps_numpy"):
+                if hasattr(self._gt3x_rs, "detect_time_gaps_numpy"):  # KEEP: Optional gt3x_rs module feature
                     gaps = self._gt3x_rs.detect_time_gaps_numpy(ts_seconds, int(sample_rate), 1.0)
                 else:
                     gaps = self._gt3x_rs.detect_time_gaps(ts_seconds.tolist(), int(sample_rate), 1.0)
 
                 if gaps:
                     # Use zero-copy NumPy API if available
-                    if hasattr(self._gt3x_rs, "impute_time_gaps_numpy"):
+                    if hasattr(self._gt3x_rs, "impute_time_gaps_numpy"):  # KEEP: Optional gt3x_rs module feature
                         x_new, y_new, z_new, ts_new = self._gt3x_rs.impute_time_gaps_numpy(x, y, z, ts_seconds, int(sample_rate), 1.0)
                     else:
                         x_new, y_new, z_new, ts_new = self._gt3x_rs.impute_time_gaps(
@@ -257,6 +262,8 @@ class Gt3xRsDataSourceLoader:
                     y = np.asarray(y_new, dtype=np.float64)
                     z = np.asarray(z_new, dtype=np.float64)
                     timestamps = np.asarray(ts_new)
+                    imputation_n_gaps = len(gaps)
+                    imputation_samples_added = samples_added
                     logger.info(f"Imputed {len(gaps)} time gaps, added {samples_added} samples")
                 else:
                     logger.info("No time gaps detected")
@@ -288,14 +295,23 @@ class Gt3xRsDataSourceLoader:
             "file_size": file_size,
             "serial_number": serial_number,
             "sample_rate": sample_rate,
-            "start_time": result_df["timestamp"].iloc[0],
-            "end_time": result_df["timestamp"].iloc[-1],
+            "start_time": result_df[DatabaseColumn.TIMESTAMP].iloc[0],
+            "end_time": result_df[DatabaseColumn.TIMESTAMP].iloc[-1],
             "total_epochs": len(result_df) if not self.return_raw else None,
             "total_samples": len(x),
             "epoch_length_seconds": None if self.return_raw else self.epoch_length_seconds,
             "loader": "gt3x_rs",
             "autocalibrated": calibration_result["success"] if calibration_result else False,
             "calibration": calibration_result,
+            "timezone_offset": None,
+            "device_type": None,
+            "firmware": None,
+            "calibration_error_before": calibration_result["error_before"] if calibration_result else None,
+            "calibration_error_after": calibration_result["error_after"] if calibration_result else None,
+            "imputation_applied": imputation_n_gaps > 0,
+            "imputation_n_gaps": imputation_n_gaps,
+            "imputation_samples_added": imputation_samples_added,
+            "imputation_total_gap_sec": imputation_total_gap_sec,
         }
 
         return {
@@ -325,11 +341,11 @@ class Gt3xRsDataSourceLoader:
 
         return pd.DataFrame(
             {
-                "timestamp": datetimes,
-                "AXIS_X": x,
-                "AXIS_Y": y,
-                "AXIS_Z": z,
-                "VECTOR_MAGNITUDE": vm,
+                DatabaseColumn.TIMESTAMP: datetimes,
+                DatabaseColumn.AXIS_X: x,
+                DatabaseColumn.AXIS_Y: y,
+                DatabaseColumn.AXIS_Z: z,
+                DatabaseColumn.VECTOR_MAGNITUDE: vm,
             }
         )
 
@@ -348,10 +364,18 @@ class Gt3xRsDataSourceLoader:
 
         if n_epochs == 0:
             logger.warning("Not enough samples for even one epoch")
-            return pd.DataFrame(columns=["timestamp", "AXIS_X", "AXIS_Y", "AXIS_Z", "VECTOR_MAGNITUDE"])
+            return pd.DataFrame(
+                columns=[
+                    DatabaseColumn.TIMESTAMP,
+                    DatabaseColumn.AXIS_X,
+                    DatabaseColumn.AXIS_Y,
+                    DatabaseColumn.AXIS_Z,
+                    DatabaseColumn.VECTOR_MAGNITUDE,
+                ]
+            )
 
         # Use Rust aggregation if available (much faster for large arrays)
-        if hasattr(self._gt3x_rs, "aggregate_xyz_to_epochs"):
+        if hasattr(self._gt3x_rs, "aggregate_xyz_to_epochs"):  # KEEP: Optional gt3x_rs module feature
             logger.debug("Using Rust epoch aggregation")
             epoch_x, epoch_y, epoch_z, epoch_vm = self._gt3x_rs.aggregate_xyz_to_epochs(x, y, z, sample_rate, float(self.epoch_length_seconds))
         else:
@@ -383,29 +407,29 @@ class Gt3xRsDataSourceLoader:
 
         return pd.DataFrame(
             {
-                "timestamp": datetimes,
-                "AXIS_X": np.asarray(epoch_x),
-                "AXIS_Y": np.asarray(epoch_y),
-                "AXIS_Z": np.asarray(epoch_z),
-                "VECTOR_MAGNITUDE": np.asarray(epoch_vm),
+                DatabaseColumn.TIMESTAMP: datetimes,
+                DatabaseColumn.AXIS_X: np.asarray(epoch_x),
+                DatabaseColumn.AXIS_Y: np.asarray(epoch_y),
+                DatabaseColumn.AXIS_Z: np.asarray(epoch_z),
+                DatabaseColumn.VECTOR_MAGNITUDE: np.asarray(epoch_vm),
             }
         )
 
     def detect_columns(self, df: pd.DataFrame) -> ColumnMapping:
         """Detect and map column names."""
         mapping = ColumnMapping()
-        mapping.datetime_column = "timestamp"
-        mapping.activity_column = "AXIS_Y"
-        mapping.axis_x_column = "AXIS_X"
-        mapping.axis_z_column = "AXIS_Z"
-        mapping.vector_magnitude_column = "VECTOR_MAGNITUDE"
+        mapping.datetime_column = DatabaseColumn.TIMESTAMP
+        mapping.activity_column = DatabaseColumn.AXIS_Y
+        mapping.axis_x_column = DatabaseColumn.AXIS_X
+        mapping.axis_z_column = DatabaseColumn.AXIS_Z
+        mapping.vector_magnitude_column = DatabaseColumn.VECTOR_MAGNITUDE
         return mapping
 
     def validate_data(self, df: pd.DataFrame) -> tuple[bool, list[str]]:
         """Validate loaded data."""
         errors = []
 
-        required = ["timestamp", "AXIS_X", "AXIS_Y", "AXIS_Z"]
+        required = [DatabaseColumn.TIMESTAMP, DatabaseColumn.AXIS_X, DatabaseColumn.AXIS_Y, DatabaseColumn.AXIS_Z]
         for col in required:
             if col not in df.columns:
                 errors.append(f"Missing required column: {col}")
@@ -417,12 +441,11 @@ class Gt3xRsDataSourceLoader:
 
     def get_file_metadata(self, file_path: str | Path) -> dict[str, Any]:
         """Extract metadata without loading full data."""
-        from pathlib import Path
-
-        file_path = Path(file_path)
-        if not file_path.exists():
-            msg = f"File not found: {file_path}"
-            raise FileNotFoundError(msg)
+        file_path = InputValidator.validate_file_path(
+            file_path,
+            must_exist=True,
+            allowed_extensions=self.supported_extensions,
+        )
 
         try:
             data = self._gt3x_rs.parse_gt3x(str(file_path))
@@ -433,6 +456,10 @@ class Gt3xRsDataSourceLoader:
                 "sample_rate": float(data.sample_rate),
                 "total_samples": data.len,
                 "loader": "gt3x_rs",
+                "device_type": getattr(data, "device_type", None),
+                "firmware": getattr(data, "firmware", None),
+                "timezone_offset": getattr(data, "timezone_offset", None),
+                "epoch_length_seconds": None if self.return_raw else self.epoch_length_seconds,
             }
         except Exception as e:
             msg = f"Error reading GT3X metadata: {e}"

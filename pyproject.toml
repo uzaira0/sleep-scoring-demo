@@ -29,6 +29,7 @@ dependencies = [
     "psutil>=5.9.0",
     "scikit-learn>=1.7.2",
     "pyreadr>=0.5.4",
+    "psygnal>=0.15.0",
 ]
 
 [project.optional-dependencies]
@@ -192,6 +193,18 @@ ignore = [
     "SIM105",   # Use contextlib.suppress (test patterns)
     "TRY002",   # Create your own exception (test code)
     "S324",     # Insecure hash function (test checksums, not security)
+    "PD901",    # Avoid using the generic variable name `df` for DataFrames
+    "PD011",    # Use .to_numpy() instead of .values
+    "PGH003",   # Use specific rule codes when ignoring type issues
+    "PT017",    # Pytest related issues
+    "PT011",    # Pytest related issues
+    "SIM117",   # Use a single with statement with multiple contexts
+    "E741",     # Ambiguous variable name
+    "PT018",    # Assertion should be broken down into multiple parts
+    "DTZ004",   # datetime.datetime.utcfromtimestamp() used
+    "PD015",    # Use .merge method instead of pd.merge function
+    "D204",     # 1 blank line required after class docstring
+    "PT019",    # Fixture `_` without value is injected as parameter, use `@pytest.mark.usefixtures` instead
 ]
 
 [tool.ruff.lint.per-file-ignores]

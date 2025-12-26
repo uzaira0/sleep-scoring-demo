@@ -238,6 +238,11 @@ class TestAnalysisTabReal:
         parent.plot_widget = Mock()
         parent.plot_widget.set_view_mode = Mock()
         parent.plot_widget.toggle_adjacent_day_markers = Mock()
+        parent.handle_sleep_markers_changed = Mock()
+        parent.handle_nonwear_markers_changed = Mock()
+        parent.handle_plot_error = Mock()
+        parent.handle_marker_limit_exceeded = Mock()
+        parent.handle_nonwear_marker_selected = Mock()
 
         return parent
 

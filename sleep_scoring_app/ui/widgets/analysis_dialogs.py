@@ -29,6 +29,13 @@ from sleep_scoring_app.core.constants import UIColors
 
 if TYPE_CHECKING:
     from sleep_scoring_app.ui.analysis_tab import AnalysisTab
+    from sleep_scoring_app.ui.protocols import (
+        AppStateInterface,
+        MarkerOperationsInterface,
+        NavigationInterface,
+        ServiceContainer,
+    )
+    from sleep_scoring_app.ui.store import UIStore
 
 
 class AnalysisDialogManager:
@@ -39,20 +46,38 @@ class AnalysisDialogManager:
     including color picking, resetting, and applying color changes.
     """
 
-    def __init__(self, parent: AnalysisTab) -> None:
+    def __init__(
+        self,
+        store: UIStore,
+        navigation: NavigationInterface,
+        marker_ops: MarkerOperationsInterface,
+        app_state: AppStateInterface,
+        services: ServiceContainer,
+        parent_tab: AnalysisTab,
+    ) -> None:
         """
         Initialize dialog manager.
 
         Args:
-            parent: The AnalysisTab instance
+            store: The UI store
+            navigation: Navigation interface
+            marker_ops: Marker operations interface
+            app_state: App state coordination interface
+            services: Service container
+            parent_tab: The AnalysisTab instance
 
         """
-        self.parent = parent
+        self.store = store
+        self.navigation = navigation
+        self.marker_ops = marker_ops
+        self.app_state = app_state
+        self.services = services
+        self.parent_tab = parent_tab
         self.color_widgets: dict[str, tuple[QPushButton, str]] = {}
 
     def show_shortcuts_dialog(self) -> None:
         """Show keyboard shortcuts dialog."""
-        dialog = QDialog(self.parent)
+        dialog = QDialog(self.parent_tab)
         dialog.setWindowTitle("Keyboard Shortcuts")
         dialog.setModal(True)
         dialog.resize(450, 300)
@@ -143,7 +168,7 @@ class AnalysisDialogManager:
 
     def show_color_legend_dialog(self) -> None:
         """Show color legend dialog with color picker functionality."""
-        dialog = QDialog(self.parent)
+        dialog = QDialog(self.parent_tab)
         dialog.setWindowTitle("Color Settings")
         dialog.setModal(True)
         dialog.resize(600, 850)
@@ -210,6 +235,25 @@ class AnalysisDialogManager:
 
         scroll_layout.addWidget(nonwear_section)
 
+        # Manual Nonwear Markers Section
+        manual_nwt_section = QFrame()
+        manual_nwt_section.setStyleSheet("QFrame { border: 1px solid #dee2e6; border-radius: 5px; padding: 10px; }")
+        manual_nwt_layout = QVBoxLayout(manual_nwt_section)
+
+        manual_nwt_title = QLabel("Manual Nonwear Markers")
+        manual_nwt_title.setStyleSheet("font-weight: bold; font-size: 14px; color: #495057; margin-bottom: 8px;")
+        manual_nwt_layout.addWidget(manual_nwt_title)
+
+        manual_nwt_items = [
+            ("Selected Marker", "#DC143C", "Color for selected nonwear marker lines", "selected_manual_nwt"),
+            ("Unselected Marker", "#8B0000", "Color for unselected nonwear marker lines", "unselected_manual_nwt"),
+        ]
+
+        for name, default_color, description, key in manual_nwt_items:
+            self._add_color_item(manual_nwt_layout, name, default_color, description, key, settings)
+
+        scroll_layout.addWidget(manual_nwt_section)
+
         # Side Tables Section
         tables_section = QFrame()
         tables_section.setStyleSheet("QFrame { border: 1px solid #dee2e6; border-radius: 5px; padding: 10px; }")
@@ -228,6 +272,25 @@ class AnalysisDialogManager:
             self._add_color_item(tables_layout, name, default_color, description, key, settings)
 
         scroll_layout.addWidget(tables_section)
+
+        # Date Dropdown Section
+        dropdown_section = QFrame()
+        dropdown_section.setStyleSheet("QFrame { border: 1px solid #dee2e6; border-radius: 5px; padding: 10px; }")
+        dropdown_layout = QVBoxLayout(dropdown_section)
+
+        dropdown_title = QLabel("Date Dropdown Colors")
+        dropdown_title.setStyleSheet("font-weight: bold; font-size: 14px; color: #495057; margin-bottom: 8px;")
+        dropdown_layout.addWidget(dropdown_title)
+
+        dropdown_items = [
+            ("Date With Markers", "#27ae60", "Green color for dates with saved sleep markers", "date_with_markers"),
+            ("Date No Sleep", "#e74c3c", "Red color for dates marked as no sleep", "date_no_sleep"),
+        ]
+
+        for name, default_color, description, key in dropdown_items:
+            self._add_color_item(dropdown_layout, name, default_color, description, key, settings)
+
+        scroll_layout.addWidget(dropdown_section)
 
         # Instructions
         instructions = QLabel("Click any color box to customize the color")
@@ -349,7 +412,7 @@ class AnalysisDialogManager:
             current_color = QColor("#FFFFFF")
 
         # Open color dialog
-        color = QColorDialog.getColor(current_color, self.parent, f"Choose Color for {key}")
+        color = QColorDialog.getColor(current_color, self.parent_tab, f"Choose Color for {key}")
 
         if color.isValid():
             # Update the button color
@@ -405,10 +468,9 @@ class AnalysisDialogManager:
         # Get the saved color settings
         settings = QSettings("SleepScoring", "ColorSettings")
 
-        # Update the constants dynamically (for new elements)
-        if hasattr(self.parent, "plot_widget"):
-            plot_widget = self.parent.plot_widget
-
+        # Update the constants dynamically
+        pw = self.services.plot_widget
+        if pw:
             # Get the colors from settings
             onset_marker_color = settings.value("colors/onset_marker", "#0080FF")
             offset_marker_color = settings.value("colors/offset_marker", "#FF8000")
@@ -416,28 +478,40 @@ class AnalysisDialogManager:
             offset_arrow_color = settings.value("colors/offset_arrow", "#FFA500")
 
             # Always set custom marker colors (even if no markers exist yet)
-            plot_widget.custom_colors = {
+            pw.custom_colors = {
                 "selected_onset": onset_marker_color,
                 "selected_offset": offset_marker_color,
                 "unselected_onset": self._darken_color(onset_marker_color),
                 "unselected_offset": self._darken_color(offset_marker_color),
             }
 
+            # Add manual nonwear marker colors
+            selected_manual_nwt = settings.value("colors/selected_manual_nwt", "#DC143C")
+            unselected_manual_nwt = settings.value("colors/unselected_manual_nwt", "#8B0000")
+            pw.custom_colors["selected_manual_nwt"] = selected_manual_nwt
+            pw.custom_colors["unselected_manual_nwt"] = unselected_manual_nwt
+
             # Redraw markers if they exist
-            if hasattr(plot_widget, "marker_lines") and plot_widget.marker_lines:
-                plot_widget.redraw_markers()
+            if hasattr(pw, "marker_lines") and pw.marker_lines:  # KEEP: Duck typing for optional marker feature
+                pw.redraw_markers()
+
+            # Redraw nonwear markers if they exist
+            if hasattr(pw, "marker_renderer") and hasattr(
+                pw.marker_renderer, "nonwear_marker_lines"
+            ):  # KEEP: Duck typing for optional nonwear feature
+                pw.marker_renderer.redraw_nonwear_markers()
 
             # Always set custom arrow colors (even if no arrows exist yet)
-            plot_widget.custom_arrow_colors = {
+            pw.custom_arrow_colors = {
                 "onset": onset_arrow_color,
                 "offset": offset_arrow_color,
             }
 
             # Reapply sleep scoring rules to update arrows if they exist
-            if hasattr(plot_widget, "sleep_rule_markers") and plot_widget.sleep_rule_markers:
-                selected_period = plot_widget.get_selected_marker_period()
+            if hasattr(pw, "sleep_rule_markers") and pw.sleep_rule_markers:  # KEEP: Duck typing for optional arrows feature
+                selected_period = pw.get_selected_marker_period()
                 if selected_period and selected_period.is_complete:
-                    plot_widget.apply_sleep_scoring_rules(selected_period)
+                    pw.algorithm_manager.apply_sleep_scoring_rules(selected_period)
 
             # Update nonwear colors
             sensor_color = settings.value("colors/sensor_nonwear", "rgba(255,215,0,60)")
@@ -450,7 +524,7 @@ class AnalysisDialogManager:
             overlap_hex = self._rgba_to_hex(overlap_color)
 
             # Always set custom nonwear colors
-            plot_widget.custom_nonwear_colors = {
+            pw.custom_nonwear_colors = {
                 "sensor_brush": sensor_hex,
                 "sensor_border": sensor_hex,
                 "choi_brush": choi_hex,
@@ -460,28 +534,41 @@ class AnalysisDialogManager:
             }
 
             # Replot nonwear regions if they exist
-            if hasattr(plot_widget, "plot_nonwear_periods") and hasattr(plot_widget, "nonwear_regions"):
-                plot_widget.plot_nonwear_periods()
+            if hasattr(pw, "plot_nonwear_periods") and hasattr(pw, "nonwear_regions"):  # KEEP: Duck typing for optional nonwear overlay
+                pw.plot_nonwear_periods()
 
         # Update table colors
         onset_table_color = settings.value("colors/onset_table", "#87CEEB")
         offset_table_color = settings.value("colors/offset_table", "#FFDAB9")
 
-        # Store custom table colors on plot_widget (where main_window expects them)
-        if hasattr(self.parent, "plot_widget"):
-            plot_widget = self.parent.plot_widget
-            plot_widget.custom_table_colors = {
+        # Store custom table colors on plot_widget
+        if pw:
+            pw.custom_table_colors = {
                 "onset_bg": onset_table_color,
                 "onset_fg": "#000000",
                 "offset_bg": offset_table_color,
                 "offset_fg": "#000000",
             }
 
-            # Trigger table update to apply new colors
-            if hasattr(self.parent.parent, "onset_table") and hasattr(self.parent.parent, "offset_table"):
-                if hasattr(self.parent.parent, "update_marker_tables"):
-                    if hasattr(self.parent.parent, "_onset_table_data") and hasattr(self.parent.parent, "_offset_table_data"):
-                        self.parent.parent.update_marker_tables(self.parent.parent._onset_table_data, self.parent.parent._offset_table_data)
+            # Trigger table update via app_state interface
+            # Get data from transition attributes or functional interfaces
+            onset_data = getattr(self.app_state, "_onset_table_data", [])
+            offset_data = getattr(self.app_state, "_offset_table_data", [])
+            self.app_state.update_marker_tables(onset_data, offset_data)
+
+        # Update date dropdown colors
+        date_with_markers_color = settings.value("colors/date_with_markers", "#27ae60")
+        date_no_sleep_color = settings.value("colors/date_no_sleep", "#e74c3c")
+
+        # Store custom dropdown colors on data_service via services interface
+        if self.services.data_service:
+            self.services.data_service.custom_dropdown_colors = {
+                "date_with_markers": date_with_markers_color,
+                "date_no_sleep": date_no_sleep_color,
+            }
+        # Redux-style dropdown and table updates are now handled reactively
+        # by DateDropdownConnector and FileListConnector.
+        pass
 
     def _darken_color(self, color_str: str) -> str:
         """Darken a color by reducing its value."""

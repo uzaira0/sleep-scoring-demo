@@ -1,33 +1,146 @@
 #!/usr/bin/env python3
 """
-Marker Service for Sleep Scoring Application
-Handles validation, classification, and management of sleep markers.
+Unified Marker Service for Sleep Scoring Application.
+
+Consolidates all marker-related operations:
+- MarkerValidationService
+- MarkerClassificationService
+- MarkerPersistenceService
+- MarkerCoordinationService
+- MarkerCacheService
 """
 
 from __future__ import annotations
 
+import json
 import logging
+from dataclasses import dataclass, field
+from datetime import date
 from typing import TYPE_CHECKING
 
-from sleep_scoring_app.core.constants import MarkerLimits
-from sleep_scoring_app.core.dataclasses import DailySleepMarkers, SleepPeriod
+from sleep_scoring_app.core.constants import DatabaseTable, MarkerLimits
 
 if TYPE_CHECKING:
-    from sleep_scoring_app.core.dataclasses import SleepMetrics
+    from sleep_scoring_app.core.dataclasses import DailySleepMarkers, SleepMetrics, SleepPeriod
+    from sleep_scoring_app.core.dataclasses_markers import DailyNonwearMarkers
+    from sleep_scoring_app.data.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
 
-class MarkerValidationService:
-    """Service for validating sleep marker operations."""
+# ==================== Data Structures ====================
 
-    @staticmethod
-    def validate_marker_addition(daily_markers: DailySleepMarkers, new_period: SleepPeriod) -> tuple[bool, str]:
+
+@dataclass(frozen=True)
+class ValidationResult:
+    """Immutable validation result."""
+
+    is_valid: bool
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class MarkerStatus:
+    """Immutable marker status for a date."""
+
+    has_sleep_markers: bool = False
+    has_nonwear_markers: bool = False
+    sleep_periods_count: int = 0
+    nonwear_periods_count: int = 0
+    is_complete: bool = False
+
+
+# ==================== Unified Marker Service ====================
+
+
+class MarkerService:
+    """
+    Unified marker operations service.
+
+    Organized by responsibility with clear section headers.
+    Consolidates all marker validation, classification, persistence,
+    coordination, and caching operations.
+    """
+
+    def __init__(self, db_manager: DatabaseManager) -> None:
+        """Initialize marker service with database manager."""
+        self._db = db_manager
+        # Simple dict cache for marker data
+        self._cache: dict[str, DailySleepMarkers | DailyNonwearMarkers] = {}
+
+    # ==================== Validation ====================
+
+    def validate(self, markers: DailySleepMarkers) -> ValidationResult:
+        """
+        Validate sleep markers.
+
+        Args:
+            markers: Daily sleep markers to validate
+
+        Returns:
+            ValidationResult with errors and warnings
+
+        """
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        for period in markers.get_complete_periods():
+            # Check timestamps are valid
+            if period.onset_timestamp is not None and period.offset_timestamp is not None:
+                if period.onset_timestamp >= period.offset_timestamp:
+                    errors.append(f"Period {period.marker_index}: onset must be before offset")
+
+            # Check duration is reasonable
+            duration_hours = period.duration_hours
+            if duration_hours is not None:
+                if duration_hours > 24:
+                    warnings.append(f"Period {period.marker_index}: duration > 24 hours")
+                if duration_hours < 0.5:
+                    warnings.append(f"Period {period.marker_index}: duration < 30 minutes")
+
+        return ValidationResult(
+            is_valid=len(errors) == 0,
+            errors=errors,
+            warnings=warnings,
+        )
+
+    def validate_nonwear(self, markers: DailyNonwearMarkers) -> ValidationResult:
+        """
+        Validate nonwear markers.
+
+        Args:
+            markers: Daily nonwear markers to validate
+
+        Returns:
+            ValidationResult with errors and warnings
+
+        """
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        for period in markers.get_complete_periods():
+            # ManualNonwearPeriod uses start_timestamp and end_timestamp (not onset/offset)
+            if period.start_timestamp is not None and period.end_timestamp is not None:
+                if period.start_timestamp >= period.end_timestamp:
+                    errors.append(f"Nonwear period {period.marker_index}: start must be before end")
+
+        return ValidationResult(
+            is_valid=len(errors) == 0,
+            errors=errors,
+            warnings=warnings,
+        )
+
+    def validate_marker_addition(self, daily_markers: DailySleepMarkers, new_period: SleepPeriod) -> tuple[bool, str]:
         """
         Validate if a new sleep period can be added.
 
+        Args:
+            daily_markers: Existing daily markers
+            new_period: New period to add
+
         Returns:
-            tuple[bool, str]: (is_valid, error_message)
+            Tuple of (is_valid, error_message)
 
         """
         # Check if we have space for new period
@@ -37,18 +150,20 @@ class MarkerValidationService:
         # Check for overlaps with existing periods
         if new_period.is_complete:
             for existing_period in daily_markers.get_complete_periods():
-                if MarkerValidationService._periods_overlap(new_period, existing_period):
+                if self._periods_overlap(new_period, existing_period):
                     return False, "Sleep periods cannot overlap"
 
         return True, ""
 
-    @staticmethod
-    def validate_duration_tie(daily_markers: DailySleepMarkers) -> tuple[bool, str]:
+    def validate_duration_tie(self, daily_markers: DailySleepMarkers) -> tuple[bool, str]:
         """
         Check for duration ties and return validation result.
 
+        Args:
+            daily_markers: Daily markers to check
+
         Returns:
-            tuple[bool, str]: (has_tie, message)
+            Tuple of (has_tie, message)
 
         """
         if daily_markers.check_duration_tie():
@@ -61,34 +176,35 @@ class MarkerValidationService:
         if not (period1.is_complete and period2.is_complete):
             return False
 
+        # Type guards for None checks
+        if period1.onset_timestamp is None or period1.offset_timestamp is None or period2.onset_timestamp is None or period2.offset_timestamp is None:
+            return False
+
         # Check for any time overlap
         return period1.onset_timestamp < period2.offset_timestamp and period2.onset_timestamp < period1.offset_timestamp
 
-    @staticmethod
-    def get_next_available_slot(daily_markers: DailySleepMarkers) -> int | None:
-        """Get the next available period slot (1, 2, 3, or 4)."""
-        if daily_markers.period_1 is None:
-            return 1
-        if daily_markers.period_2 is None:
-            return 2
-        if daily_markers.period_3 is None:
-            return 3
-        if daily_markers.period_4 is None:
-            return 4
-        return None
+    # ==================== Classification ====================
 
+    def classify_periods(self, markers: DailySleepMarkers) -> None:
+        """
+        Classify sleep periods by type (main sleep, nap, etc.).
 
-class MarkerClassificationService:
-    """Service for classifying markers as main sleep vs naps."""
+        This is a convenience wrapper for markers.update_classifications()
+        maintained for backward compatibility.
 
-    @staticmethod
-    def update_classifications(daily_markers: DailySleepMarkers) -> None:
+        Args:
+            markers: Daily sleep markers to classify
+
+        """
+        markers.update_classifications()
+        logger.debug("Updated marker classifications")
+
+    def update_classifications(self, daily_markers: DailySleepMarkers) -> None:
         """Update all marker classifications based on current durations."""
         daily_markers.update_classifications()
         logger.debug("Updated marker classifications")
 
-    @staticmethod
-    def handle_duration_tie_cancellation(daily_markers: DailySleepMarkers, last_added_index: int) -> bool:
+    def handle_duration_tie_cancellation(self, daily_markers: DailySleepMarkers, last_added_index: int) -> bool:
         """
         Handle duration tie by removing the last added period.
 
@@ -97,7 +213,7 @@ class MarkerClassificationService:
             last_added_index: Index of the last added period (1, 2, 3, or 4)
 
         Returns:
-            bool: True if successfully handled, False otherwise
+            True if successfully handled, False otherwise
 
         """
         try:
@@ -114,7 +230,7 @@ class MarkerClassificationService:
                 return False
 
             # Update classifications for remaining periods
-            MarkerClassificationService.update_classifications(daily_markers)
+            self.update_classifications(daily_markers)
             logger.info("Removed period %d due to duration tie", last_added_index)
             return True
 
@@ -122,22 +238,117 @@ class MarkerClassificationService:
             logger.exception("Failed to handle duration tie cancellation")
             return False
 
+    # ==================== Persistence ====================
 
-class MarkerPersistenceService:
-    """Service for managing marker persistence operations."""
+    def save(
+        self,
+        filename: str,
+        sleep_date: date | str,
+        markers: DailySleepMarkers,
+    ) -> bool:
+        """
+        Save sleep markers to database.
 
-    def __init__(self, database_manager) -> None:
-        """Initialize with database manager dependency."""
-        self.db_manager = database_manager
+        Args:
+            filename: File identifier
+            sleep_date: Sleep date (date or ISO string)
+            markers: Sleep markers to save
+
+        Returns:
+            True if save was successful
+
+        """
+        try:
+            # Validate before saving
+            result = self.validate(markers)
+            if not result.is_valid:
+                logger.error("Cannot save invalid markers: %s", result.errors)
+                return False
+
+            # Convert date to string if needed
+            date_str = sleep_date.isoformat() if isinstance(sleep_date, date) else sleep_date
+
+            # Serialize and save using JSON
+            data = markers.to_dict()
+            self._db.execute(
+                f"""
+                INSERT OR REPLACE INTO {self._db._validate_table_name(DatabaseTable.SLEEP_MARKERS_EXTENDED)}
+                (filename, analysis_date, markers_json)
+                VALUES (?, ?, ?)
+                """,
+                (filename, date_str, json.dumps(data)),
+            )
+
+            # Invalidate cache
+            self._invalidate_cache_key(filename, date_str, "sleep")
+            logger.debug("Saved sleep markers for %s on %s", filename, date_str)
+            return True
+
+        except Exception:
+            logger.exception("Failed to save sleep markers")
+            return False
+
+    def save_nonwear(
+        self,
+        filename: str,
+        sleep_date: date | str,
+        markers: DailyNonwearMarkers,
+    ) -> bool:
+        """
+        Save nonwear markers to database.
+
+        Args:
+            filename: File identifier
+            sleep_date: Sleep date (date or ISO string)
+            markers: Nonwear markers to save
+
+        Returns:
+            True if save was successful
+
+        """
+        try:
+            # Convert date to string if needed
+            date_str = sleep_date.isoformat() if isinstance(sleep_date, date) else sleep_date
+
+            # Serialize and save using JSON
+            data = markers.to_dict()
+            self._db.execute(
+                f"""
+                INSERT OR REPLACE INTO {self._db._validate_table_name(DatabaseTable.MANUAL_NWT_MARKERS)}
+                (filename, sleep_date, markers_json)
+                VALUES (?, ?, ?)
+                """,
+                (filename, date_str, json.dumps(data)),
+            )
+
+            # Invalidate cache
+            self._invalidate_cache_key(filename, date_str, "nonwear")
+            logger.debug("Saved nonwear markers for %s on %s", filename, date_str)
+            return True
+
+        except Exception:
+            logger.exception("Failed to save nonwear markers")
+            return False
 
     def save_markers(self, sleep_metrics: SleepMetrics) -> bool:
-        """Save sleep markers to database."""
+        """
+        Save sleep markers from SleepMetrics to database.
+
+        Legacy method for backward compatibility.
+
+        Args:
+            sleep_metrics: Sleep metrics containing markers
+
+        Returns:
+            True if save was successful
+
+        """
         try:
             # Update time strings from main sleep period
             sleep_metrics.update_time_strings()
 
             # Save to extended markers table
-            success = self.db_manager.save_daily_sleep_markers(sleep_metrics)
+            success = self._db.save_daily_sleep_markers(sleep_metrics)
 
             if success:
                 logger.debug("Successfully saved markers for %s on %s", sleep_metrics.filename, sleep_metrics.analysis_date)
@@ -150,34 +361,184 @@ class MarkerPersistenceService:
             logger.exception("Error saving markers for %s on %s", sleep_metrics.filename, sleep_metrics.analysis_date)
             return False
 
+    def load(self, filename: str, sleep_date: date | str) -> DailySleepMarkers | None:
+        """
+        Load sleep markers from database.
+
+        Args:
+            filename: File identifier
+            sleep_date: Sleep date (date or ISO string)
+
+        Returns:
+            DailySleepMarkers if found, None otherwise
+
+        """
+        # Convert date to string if needed
+        date_str = sleep_date.isoformat() if isinstance(sleep_date, date) else sleep_date
+
+        # Check cache first
+        cache_key = self._make_cache_key(filename, date_str, "sleep")
+        if cache_key in self._cache:
+            return self._cache[cache_key]  # type: ignore
+
+        # Query database
+        row = self._db.fetch_one(
+            f"""
+            SELECT markers_json FROM {self._db._validate_table_name(DatabaseTable.SLEEP_MARKERS_EXTENDED)}
+            WHERE filename = ? AND analysis_date = ?
+            """,
+            (filename, date_str),
+        )
+
+        if row is None:
+            return None
+
+        # Deserialize using json.loads (NOT eval)
+        from sleep_scoring_app.core.dataclasses import DailySleepMarkers
+
+        data = json.loads(row[0])
+        markers = DailySleepMarkers.from_dict(data)
+        self._cache[cache_key] = markers
+        return markers
+
+    def load_nonwear(self, filename: str, sleep_date: date | str) -> DailyNonwearMarkers | None:
+        """
+        Load nonwear markers from database.
+
+        Args:
+            filename: File identifier
+            sleep_date: Sleep date (date or ISO string)
+
+        Returns:
+            DailyNonwearMarkers if found, None otherwise
+
+        """
+        # Convert date to string if needed
+        date_str = sleep_date.isoformat() if isinstance(sleep_date, date) else sleep_date
+
+        # Check cache first
+        cache_key = self._make_cache_key(filename, date_str, "nonwear")
+        if cache_key in self._cache:
+            return self._cache[cache_key]  # type: ignore
+
+        # Query database
+        row = self._db.fetch_one(
+            f"""
+            SELECT markers_json FROM {self._db._validate_table_name(DatabaseTable.MANUAL_NWT_MARKERS)}
+            WHERE filename = ? AND sleep_date = ?
+            """,
+            (filename, date_str),
+        )
+
+        if row is None:
+            return None
+
+        # Deserialize using json.loads (NOT eval)
+        from sleep_scoring_app.core.dataclasses_markers import DailyNonwearMarkers
+
+        data = json.loads(row[0])
+        markers = DailyNonwearMarkers.from_dict(data)
+        self._cache[cache_key] = markers
+        return markers
+
     def load_markers(self, filename: str, analysis_date: str) -> DailySleepMarkers:
-        """Load sleep markers from database."""
+        """
+        Load sleep markers from database.
+
+        Legacy method for backward compatibility.
+
+        Args:
+            filename: File identifier
+            analysis_date: Analysis date string
+
+        Returns:
+            DailySleepMarkers (empty if not found)
+
+        """
         try:
-            daily_markers = self.db_manager.load_daily_sleep_markers(filename, analysis_date)
+            daily_markers = self._db.load_daily_sleep_markers(filename, analysis_date)
             logger.debug("Loaded markers for %s on %s", filename, analysis_date)
             return daily_markers
 
         except Exception:
             logger.exception("Error loading markers for %s on %s", filename, analysis_date)
+            from sleep_scoring_app.core.dataclasses import DailySleepMarkers
+
             return DailySleepMarkers()
 
+    # ==================== Coordination ====================
 
-class MarkerCoordinationService:
-    """Service for coordinating marker operations across UI and persistence layers."""
+    def get_marker_status(self, filename: str, sleep_date: date | str) -> MarkerStatus:
+        """
+        Get status of markers for a file/date.
 
-    def __init__(self, database_manager) -> None:
-        """Initialize with database manager dependency."""
-        self.persistence_service = MarkerPersistenceService(database_manager)
+        Args:
+            filename: File identifier
+            sleep_date: Sleep date (date or ISO string)
+
+        Returns:
+            MarkerStatus with counts and flags
+
+        """
+        sleep = self.load(filename, sleep_date)
+        nonwear = self.load_nonwear(filename, sleep_date)
+
+        sleep_periods = len(sleep.get_complete_periods()) if sleep else 0
+        nonwear_periods = len(nonwear.get_complete_periods()) if nonwear else 0
+
+        return MarkerStatus(
+            has_sleep_markers=sleep is not None and sleep_periods > 0,
+            has_nonwear_markers=nonwear is not None and nonwear_periods > 0,
+            sleep_periods_count=sleep_periods,
+            nonwear_periods_count=nonwear_periods,
+            is_complete=sleep_periods > 0,
+        )
+
+    def get_all_marker_statuses(self, filename: str) -> dict[date, MarkerStatus]:
+        """
+        Get marker status for all dates of a file.
+
+        Args:
+            filename: File identifier
+
+        Returns:
+            Dictionary mapping dates to MarkerStatus
+
+        """
+        rows = self._db.fetch_all(
+            f"""
+            SELECT DISTINCT analysis_date FROM {self._db._validate_table_name(DatabaseTable.SLEEP_MARKERS_EXTENDED)}
+            WHERE filename = ?
+            UNION
+            SELECT DISTINCT sleep_date FROM {self._db._validate_table_name(DatabaseTable.MANUAL_NWT_MARKERS)}
+            WHERE filename = ?
+            """,
+            (filename, filename),
+        )
+
+        result: dict[date, MarkerStatus] = {}
+        for row in rows:
+            d = date.fromisoformat(row[0])
+            result[d] = self.get_marker_status(filename, d)
+
+        return result
 
     def add_sleep_period(self, sleep_metrics: SleepMetrics, onset_timestamp: float, offset_timestamp: float) -> tuple[bool, str]:
         """
         Add a new sleep period to the daily markers.
 
+        Args:
+            sleep_metrics: Sleep metrics containing daily markers
+            onset_timestamp: Period onset timestamp
+            offset_timestamp: Period offset timestamp
+
         Returns:
-            tuple[bool, str]: (success, message)
+            Tuple of (success, message)
 
         """
         try:
+            from sleep_scoring_app.core.dataclasses import SleepPeriod
+
             # Create new sleep period
             new_period = SleepPeriod(
                 onset_timestamp=onset_timestamp,
@@ -185,13 +546,13 @@ class MarkerCoordinationService:
             )
 
             # Validate addition
-            is_valid, error_msg = MarkerValidationService.validate_marker_addition(sleep_metrics.daily_sleep_markers, new_period)
+            is_valid, error_msg = self.validate_marker_addition(sleep_metrics.daily_sleep_markers, new_period)
 
             if not is_valid:
                 return False, error_msg
 
             # Find next available slot
-            slot = MarkerValidationService.get_next_available_slot(sleep_metrics.daily_sleep_markers)
+            slot = self.get_next_available_slot(sleep_metrics.daily_sleep_markers)
             if slot is None:
                 return False, "No available slots for new sleep period"
 
@@ -207,13 +568,13 @@ class MarkerCoordinationService:
                 sleep_metrics.daily_sleep_markers.period_4 = new_period
 
             # Update classifications
-            MarkerClassificationService.update_classifications(sleep_metrics.daily_sleep_markers)
+            self.update_classifications(sleep_metrics.daily_sleep_markers)
 
             # Check for duration ties
-            has_tie, tie_msg = MarkerValidationService.validate_duration_tie(sleep_metrics.daily_sleep_markers)
+            has_tie, tie_msg = self.validate_duration_tie(sleep_metrics.daily_sleep_markers)
             if has_tie:
                 # Remove the just-added period
-                MarkerClassificationService.handle_duration_tie_cancellation(sleep_metrics.daily_sleep_markers, slot)
+                self.handle_duration_tie_cancellation(sleep_metrics.daily_sleep_markers, slot)
                 return False, tie_msg
 
             return True, f"Added sleep period {slot}"
@@ -227,11 +588,11 @@ class MarkerCoordinationService:
         Remove a sleep period by index.
 
         Args:
-            sleep_metrics: The sleep metrics containing daily markers
+            sleep_metrics: Sleep metrics containing daily markers
             period_index: Period index (1, 2, 3, or 4)
 
         Returns:
-            tuple[bool, str]: (success, message)
+            Tuple of (success, message)
 
         """
         try:
@@ -250,7 +611,7 @@ class MarkerCoordinationService:
                 return False, f"No sleep period found at index {period_index}"
 
             # Update classifications for remaining periods
-            MarkerClassificationService.update_classifications(daily_markers)
+            self.update_classifications(daily_markers)
 
             return True, f"Removed sleep period {period_index}"
 
@@ -259,9 +620,18 @@ class MarkerCoordinationService:
             return False, "Failed to remove sleep period"
 
     def save_and_persist(self, sleep_metrics: SleepMetrics) -> tuple[bool, str]:
-        """Save markers and persist to database."""
+        """
+        Save markers and persist to database.
+
+        Args:
+            sleep_metrics: Sleep metrics to save
+
+        Returns:
+            Tuple of (success, message)
+
+        """
         try:
-            success = self.persistence_service.save_markers(sleep_metrics)
+            success = self.save_markers(sleep_metrics)
             if success:
                 return True, "Markers saved successfully"
             return False, "Failed to save markers to database"
@@ -269,3 +639,58 @@ class MarkerCoordinationService:
         except Exception:
             logger.exception("Error in save_and_persist")
             return False, "Error occurred while saving markers"
+
+    def get_next_available_slot(self, daily_markers: DailySleepMarkers) -> int | None:
+        """
+        Get the next available period slot (1, 2, 3, or 4).
+
+        Args:
+            daily_markers: Daily markers to check
+
+        Returns:
+            Next available slot number or None if all full
+
+        """
+        if daily_markers.period_1 is None:
+            return 1
+        if daily_markers.period_2 is None:
+            return 2
+        if daily_markers.period_3 is None:
+            return 3
+        if daily_markers.period_4 is None:
+            return 4
+        return None
+
+    # ==================== Cache ====================
+
+    def _make_cache_key(self, filename: str, sleep_date: str, marker_type: str) -> str:
+        """Create cache key from filename, date, and marker type."""
+        return f"{filename}:{sleep_date}:{marker_type}"
+
+    def _invalidate_cache_key(self, filename: str, sleep_date: str, marker_type: str) -> None:
+        """Invalidate a specific cache entry."""
+        key = self._make_cache_key(filename, sleep_date, marker_type)
+        self._cache.pop(key, None)
+
+    def invalidate_cache(self, filename: str, sleep_date: date | str | None = None) -> None:
+        """
+        Invalidate cache for a file, optionally for a specific date.
+
+        Args:
+            filename: File identifier
+            sleep_date: Optional specific date to invalidate
+
+        """
+        if sleep_date:
+            date_str = sleep_date.isoformat() if isinstance(sleep_date, date) else sleep_date
+            self._invalidate_cache_key(filename, date_str, "sleep")
+            self._invalidate_cache_key(filename, date_str, "nonwear")
+        else:
+            keys_to_remove = [k for k in self._cache if k.startswith(f"{filename}:")]
+            for key in keys_to_remove:
+                del self._cache[key]
+
+    def clear_cache(self) -> None:
+        """Clear entire cache."""
+        self._cache.clear()
+        logger.debug("Cleared marker cache")

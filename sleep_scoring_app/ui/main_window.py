@@ -43,28 +43,35 @@ from sleep_scoring_app.data.database import DatabaseManager
 from sleep_scoring_app.services.export_service import (
     ExportManager as EnhancedExportManager,
 )
-from sleep_scoring_app.services.import_worker import ImportWorker
 from sleep_scoring_app.services.memory_service import (
     BoundedCache,
     memory_monitor,
     resource_manager,
 )
 from sleep_scoring_app.services.nonwear_service import NonwearDataService
+from sleep_scoring_app.services.ui_state_coordinator import UIStateCoordinator
 from sleep_scoring_app.services.unified_data_service import UnifiedDataService
 from sleep_scoring_app.ui.analysis_tab import AnalysisTab
+from sleep_scoring_app.ui.coordinators import ImportUICoordinator
 from sleep_scoring_app.ui.data_settings_tab import DataSettingsTab
-from sleep_scoring_app.ui.diary_integration import DiaryIntegrationManager
 from sleep_scoring_app.ui.export_tab import ExportTab
 from sleep_scoring_app.ui.file_navigation import FileNavigationManager
+from sleep_scoring_app.ui.managers.diary_integration_manager import DiaryIntegrationManager
+from sleep_scoring_app.ui.managers.session_state_manager import SessionStateManager
+from sleep_scoring_app.ui.managers.time_field_manager import TimeFieldManager
 from sleep_scoring_app.ui.marker_table import MarkerTableManager
+from sleep_scoring_app.ui.store import UIStore
+from sleep_scoring_app.ui.store_connectors import connect_all_components
 from sleep_scoring_app.ui.study_settings_tab import StudySettingsTab
-from sleep_scoring_app.ui.time_fields import TimeFieldManager
 from sleep_scoring_app.ui.window_state import WindowStateManager
+from sleep_scoring_app.ui.workers import ImportWorker
 from sleep_scoring_app.utils.config import ConfigManager
 from sleep_scoring_app.utils.table_helpers import update_marker_table
 
 if TYPE_CHECKING:
-    from sleep_scoring_app.core.dataclasses import DailySleepMarkers, SleepPeriod
+    from PyQt6.QtGui import QCloseEvent
+
+    from sleep_scoring_app.core.dataclasses import DailySleepMarkers, FileInfo, SleepPeriod
 
 # Configure logging - use WARNING for production, DEBUG if SLEEP_SCORING_DEBUG env var is set
 _log_level = logging.DEBUG if os.getenv("SLEEP_SCORING_DEBUG") else logging.WARNING
@@ -86,7 +93,7 @@ class SleepScoringMainWindow(QMainWindow):
             import sys
 
             main_module = sys.modules.get("__main__")
-            if main_module and hasattr(main_module, "_global_splash"):
+            if main_module and hasattr(main_module, "_global_splash"):  # KEEP: Module-level dynamic attribute
                 splash = main_module._global_splash
                 app = main_module._global_app
                 if splash and app:
@@ -98,8 +105,8 @@ class SleepScoringMainWindow(QMainWindow):
                         Qt.GlobalColor.white,
                     )
                     app.processEvents()
-        except Exception:
-            pass  # Silently fail if splash not available
+        except Exception as e:
+            logger.debug("Splash screen update failed (expected if no splash): %s", e)
 
     def __init__(self) -> None:
         super().__init__()
@@ -107,48 +114,67 @@ class SleepScoringMainWindow(QMainWindow):
         self.setGeometry(100, 100, 1280, 720)
         self.setContentsMargins(20, 10, 20, 10)
 
+        # PHASE 1: Initialize core Redux store (Single Source of Truth)
+        # This MUST happen first because properties below delegate to self.store
+        self.store = UIStore()
+
+        # Internal data state (those that don't belong in Redux yet)
+        self.main_48h_data: Any = None
+        self._cached_metrics: Any = None
+        self._pending_markers: Any = None
+        self._marker_index_cache: dict = {}
+        self._last_table_update_time: float = 0.0
+        self._last_style_update_time: float = 0.0
+
         # Update splash directly if available
         self._update_splash("Initializing database...")
 
-        # Initialize shared database manager first to avoid multiple initializations
+        # PHASE 3: Initialize core services
         self.db_manager = DatabaseManager()
-
-        # Initialize component managers with shared database
         self.config_manager = ConfigManager()
 
         # Initialize config - use defaults if config doesn't exist or is invalid
         if not self.config_manager.is_config_valid() or self.config_manager.config is None:
             from sleep_scoring_app.core.dataclasses import AppConfig
 
-            # Use default config to get started
             self.config_manager.config = AppConfig.create_default()
 
         # Initialize export output path from config
         self.export_output_path = self.config_manager.config.export_directory
 
+        # Initialize Redux store state from config
+        self.store.initialize_from_config(self.config_manager.config)
+
         # Initialize unified data service
-        self.data_service = UnifiedDataService(self, self.db_manager)
-
-        # Apply saved data source preference
-        self.data_service.toggle_database_mode(self.config_manager.config.use_database)
-
-        # Direct service references
+        self.data_service = UnifiedDataService(self.db_manager, self.store)
         self.data_manager = self.data_service.data_manager
-
         self.export_manager = EnhancedExportManager(self.db_manager)
-
-        # Initialize nonwear data service
         self.nonwear_service = NonwearDataService(self.db_manager)
 
-        # Direct service references
-        self.data_manager = self.data_service.data_manager
+        # Initialize import service (headless, used by ImportUICoordinator)
+        from sleep_scoring_app.services.import_service import ImportService
 
-        # Initialize window managers
-        self.state_manager = WindowStateManager(self)
-        self.nav_manager = FileNavigationManager(self)
-        self.table_manager = MarkerTableManager(self)
-        self.diary_manager = DiaryIntegrationManager(self)
-        self.time_manager = TimeFieldManager(self)
+        self.import_service = ImportService(self.db_manager)
+
+        # Initialize window managers with decoupled interfaces
+        self.state_manager = WindowStateManager(store=self.store, navigation=self, marker_ops=self, app_state=self, services=self, parent=self)
+        self.session_manager = SessionStateManager()
+        self.nav_manager = FileNavigationManager(store=self.store, navigation=self, app_state=self, services=self, parent=self)
+        self.table_manager = MarkerTableManager(
+            store=self.store,
+            navigation=self,
+            marker_ops=self,
+            app_state=self,
+            services=self,
+            parent=self,
+            get_sleep_algorithm_name=self.get_sleep_algorithm_display_name,
+        )
+        self.diary_manager = DiaryIntegrationManager(store=self.store, navigation=self, marker_ops=self, services=self, parent=self)
+        # Note: time_manager initialized after UI setup (needs time input fields)
+
+        # Initialize coordinators
+        self.import_coordinator = ImportUICoordinator(self)
+        self.ui_state_coordinator = UIStateCoordinator(self)
 
         # Initialize algorithm-data compatibility helper
         from sleep_scoring_app.ui.algorithm_compatibility_ui import AlgorithmCompatibilityUIHelper
@@ -165,10 +191,6 @@ class SleepScoringMainWindow(QMainWindow):
         )
 
         # Data state
-        self.available_files = []
-        self.selected_file = None
-        self.available_dates = []
-        self.current_date_index = 0
         self.current_view_mode = 48  # 24 or 48 hours - default to 48
         self.main_48h_data = None  # Always store 48h dataset
 
@@ -177,12 +199,41 @@ class SleepScoringMainWindow(QMainWindow):
         # max_memory_mb=500: Each 48h dataset ~20-30MB, allows ~15-20 cached datasets
         self.current_date_48h_cache = BoundedCache(max_size=20, max_memory_mb=500)
 
+        # Table update throttling
+        self._pending_markers = None
+        self._table_update_timer = QTimer(self)
+        self._table_update_timer.setSingleShot(True)
+        self._table_update_timer.timeout.connect(self._on_table_update_timer)
+        self._last_table_update_time = 0.0
+
+        # Initialize autosave coordinator (subscribes to Redux store)
+        from sleep_scoring_app.ui.coordinators import AutosaveCoordinator
+
+        self.autosave_coordinator = AutosaveCoordinator(
+            store=self.store,
+            config_manager=self.config_manager,
+            db_manager=self.db_manager,
+            save_sleep_markers_callback=self._autosave_sleep_markers_to_db,
+            save_nonwear_markers_callback=self._autosave_nonwear_markers_to_db,
+        )
+
+        # Initialize marker loading coordinator (handles async marker loading on navigation)
+        from sleep_scoring_app.ui.coordinators.marker_loading_coordinator import MarkerLoadingCoordinator
+
+        self.marker_loading_coordinator = MarkerLoadingCoordinator(
+            store=self.store,
+            db_manager=self.db_manager,
+        )
+
         # Register for resource cleanup
         resource_manager.register_resource(f"main_window_{id(self)}", self, self._cleanup_resources)
 
         # Initialize UI components
         self._update_splash("Setting up user interface...")
         self.setup_ui()
+
+        # Wire up UIStore connectors (must be after setup_ui so components exist)
+        self._store_connector_manager = connect_all_components(self.store, self)
 
         # Clean up old temporary files
         self._cleanup_old_temp_files()
@@ -209,9 +260,167 @@ class SleepScoringMainWindow(QMainWindow):
         self._update_splash("Loading saved markers...")
         QTimer.singleShot(200, self.load_all_saved_markers_on_startup)
 
+        # Restore session state (must happen after UI is set up)
+        self._update_splash("Restoring session...")
+        self._restore_session()
+
         # Emit loading complete signal
         self._update_splash("Loading complete!")
         self.loading_complete.emit()
+
+    # === REDUX DELEGATION PROPERTIES (Single Source of Truth) ===
+
+    @property
+    def current_date_index(self) -> int:
+        """Get current date index from Redux store."""
+        return self.store.state.current_date_index
+
+    @current_date_index.setter
+    def current_date_index(self, value: int) -> None:
+        """Update current date index in Redux store."""
+        from sleep_scoring_app.ui.store import Actions
+
+        if value != self.store.state.current_date_index:
+            self.store.dispatch(Actions.date_selected(value))
+
+    @property
+    def selected_file(self) -> str | None:
+        """Get selected filename from Redux store."""
+        return self.store.state.current_file
+
+    @selected_file.setter
+    def selected_file(self, value: str | None) -> None:
+        """Update selected file in Redux store."""
+        from sleep_scoring_app.ui.store import Actions
+
+        if value != self.store.state.current_file:
+            self.store.dispatch(Actions.file_selected(value))
+
+    @property
+    def available_files(self) -> list[dict]:
+        """Get available files from Redux store."""
+        return list(self.store.state.available_files)
+
+    @available_files.setter
+    def available_files(self, value: list[dict]) -> None:
+        """Update available files in Redux store."""
+        from sleep_scoring_app.ui.store import Actions
+
+        self.store.dispatch(Actions.files_loaded(value))
+
+    @property
+    def available_dates(self) -> list:
+        """Get available dates from Redux store (robust conversion to date objects)."""
+        from datetime import date, datetime
+
+        dates = []
+        for d_str in self.store.state.available_dates:
+            try:
+                # Robust parsing: handle both pure date and full ISO timestamp
+                if "T" in d_str:
+                    dates.append(datetime.fromisoformat(d_str).date())
+                else:
+                    dates.append(date.fromisoformat(d_str))
+            except (ValueError, TypeError):
+                logger.exception(f"Failed to parse date string from state: {d_str}")
+        return dates
+
+    @available_dates.setter
+    def available_dates(self, value: list) -> None:
+        """Update available dates in Redux store."""
+        from sleep_scoring_app.ui.store import Actions
+
+        # Normalize to YYYY-MM-DD strings for consistent Redux storage
+        date_strs = []
+        for d in value:
+            if hasattr(d, "strftime"):
+                date_strs.append(d.strftime("%Y-%m-%d"))
+            else:
+                date_strs.append(str(d)[:10])  # Fallback for ISO strings
+
+        if tuple(date_strs) != self.store.state.available_dates:
+            self.store.dispatch(Actions.dates_loaded(date_strs))
+
+    @property
+    def plot_widget(self) -> Any | None:
+        """Get plot widget from analysis tab."""
+        # analysis_tab is guaranteed to exist after setup_ui()
+        # This property is only called from UI event handlers, never during init
+        return getattr(self.analysis_tab, "plot_widget", None) if self.analysis_tab else None
+
+    @property
+    def onset_table(self) -> Any | None:
+        """Get onset table from analysis tab."""
+        # analysis_tab is guaranteed to exist after setup_ui()
+        return getattr(self.analysis_tab, "onset_table", None) if self.analysis_tab else None
+
+    @property
+    def offset_table(self) -> Any | None:
+        """Get offset table from analysis tab."""
+        # analysis_tab is guaranteed to exist after setup_ui()
+        return getattr(self.analysis_tab, "offset_table", None) if self.analysis_tab else None
+
+    def _restore_session(self) -> None:
+        """Restore last session state on startup directly into Redux."""
+        logger.info("MAIN WINDOW: _restore_session() START")
+        from sleep_scoring_app.ui.store import Actions
+
+        # 1. Restore window geometry (standard Qt stuff)
+        self.session_manager.restore_window_geometry(self)
+
+        # 2. Restore file selection
+        last_file_path = self.session_manager.get_current_file()
+        if last_file_path and self.available_files:
+            logger.info(f"MAIN WINDOW: Attempting to restore file: {last_file_path}")
+            # Find the matching FileInfo (dataclass, not dict)
+            matching_file = None
+            last_file_name = Path(last_file_path).name
+            for file_info in self.available_files:
+                # FileInfo is a dataclass - use attribute access, not .get()
+                if str(file_info.source_path) == last_file_path or file_info.filename == last_file_name:
+                    matching_file = file_info
+                    break
+
+            if matching_file:
+                # Dispatch selection to Redux
+                logger.info(f"MAIN WINDOW: Restoring file selection to {matching_file.filename}")
+                self.store.dispatch(Actions.file_selected(matching_file.filename))
+                self.selected_file = last_file_path  # Update the path property
+
+                # CRITICAL: Load dates for the file BEFORE trying to restore date index
+                skip_rows = self.config_manager.config.skip_rows
+                new_dates = self.data_service.load_selected_file(matching_file, skip_rows)
+                if new_dates:
+                    logger.info(f"MAIN WINDOW: Loaded {len(new_dates)} dates for restored file")
+                    self.store.dispatch(Actions.dates_loaded(new_dates))
+                else:
+                    logger.warning("MAIN WINDOW: No dates found for restored file")
+
+                # Restore date index (only if we have dates)
+                date_index = self.session_manager.get_current_date_index()
+                # Validate index against actual available dates
+                if new_dates and 0 <= date_index < len(new_dates):
+                    logger.info(f"MAIN WINDOW: Restoring date index to {date_index}")
+                    self.store.dispatch(Actions.date_selected(date_index))
+            else:
+                logger.info("MAIN WINDOW: Last file no longer exists in available files")
+
+        # 3. Restore view mode
+        view_mode = self.session_manager.get_view_mode()
+        logger.info(f"MAIN WINDOW: Restoring view mode to {view_mode}h")
+        self.store.dispatch(Actions.view_mode_changed(view_mode))
+
+        # 4. Restore tab
+        tab_index = self.session_manager.get_current_tab()
+        if 0 <= tab_index < self.tab_widget.count():
+            self.tab_widget.setCurrentIndex(tab_index)
+
+        logger.info("MAIN WINDOW: _restore_session() COMPLETE")
+
+    def _on_tab_changed(self, index: int) -> None:
+        """Handle tab change - save to session."""
+        # session_manager is guaranteed to exist after __init__ Phase 2
+        self.session_manager.save_current_tab(index)
 
     def setup_ui(self) -> None:
         """Create the user interface."""
@@ -223,12 +432,14 @@ class SleepScoringMainWindow(QMainWindow):
 
         # Create tab widget
         self.tab_widget = QTabWidget()
+        # Connect tab change signal to save session
+        self.tab_widget.currentChanged.connect(self._on_tab_changed)
 
-        # Create tab components
-        self.data_settings_tab = DataSettingsTab(parent=self)
-        self.study_settings_tab = StudySettingsTab(parent=self)
-        self.analysis_tab = AnalysisTab(parent=self)
-        self.export_tab = ExportTab(parent=self)
+        # Create tab components with decoupled interfaces
+        self.data_settings_tab = DataSettingsTab(store=self.store, app_state=self, services=self, parent=self)
+        self.study_settings_tab = StudySettingsTab(store=self.store, navigation=self, marker_ops=self, app_state=self, services=self, parent=self)
+        self.analysis_tab = AnalysisTab(store=self.store, navigation=self, marker_ops=self, app_state=self, services=self, parent=self)
+        self.export_tab = ExportTab(store=self.store, marker_ops=self, app_state=self, services=self, parent=self)
 
         # Connect table click handlers for marker movement
         self._connect_table_click_handlers()
@@ -272,42 +483,125 @@ class SleepScoringMainWindow(QMainWindow):
         # Create references to UI elements from tabs for backward compatibility
         self._setup_ui_references()
 
+        # Connect plot widget UI feedback signals to main window handlers
+        # NOTE: Marker data signals (sleep_markers_changed, nonwear_markers_changed)
+        # are handled by MarkersConnector which dispatches to Redux.
+        # Table updates happen via SideTableConnector reacting to Redux state.
+        # This follows the CLAUDE.md Redux pattern: Widget → Connector → Store → Connector → UI
+        if self.plot_widget:
+            self.plot_widget.error_occurred.connect(self.handle_plot_error)
+            self.plot_widget.marker_limit_exceeded.connect(self.handle_marker_limit_exceeded)
+
     def _setup_ui_references(self) -> None:
         """Create references to commonly accessed UI elements."""
+        logger.info("MAIN WINDOW: _setup_ui_references START")
         # Direct references to frequently accessed components only
         self.file_selector = self.analysis_tab.file_selector
         self.date_dropdown = self.analysis_tab.date_dropdown
-        self.plot_widget = self.analysis_tab.plot_widget
+        logger.info(f"MAIN WINDOW: date_dropdown set to: {self.date_dropdown}")
 
-    # Delegate methods to services
-    def _invalidate_marker_status_cache(self, filename=None) -> None:
-        """Invalidate marker status cache for a specific file or all files."""
-        self.data_service.invalidate_marker_status_cache(filename)
+        # Time input widgets (from analysis_tab)
+        self.onset_time_input = self.analysis_tab.onset_time_input
+        self.offset_time_input = self.analysis_tab.offset_time_input
+        self.total_duration_label = self.analysis_tab.total_duration_label
 
-    def _refresh_file_dropdown_indicators(self) -> None:
-        """Refresh just the indicators in the file dropdown without full reload."""
-        self.data_service.refresh_file_dropdown_indicators()
+        # Tables (from analysis_tab)
+        self.diary_table_widget = getattr(self.analysis_tab, "diary_table_widget", None)
 
-    def load_available_files(self, preserve_selection=True, load_completion_counts=False) -> None:
-        """Load available files using DataManager with optional state preservation."""
-        self.data_service.load_available_files(preserve_selection, load_completion_counts)
-        # Update status bar with file count
-        self.update_status_bar()
-        # Update folder info label with correct file count
-        self.update_folder_info_label()
+        # Action Buttons (from analysis_tab)
+        self.save_markers_btn = getattr(self.analysis_tab, "save_markers_btn", None)
+        self.no_sleep_btn = getattr(self.analysis_tab, "no_sleep_btn", None)
+        self.clear_markers_btn = getattr(self.analysis_tab, "clear_markers_btn", None)
+        self.export_btn = getattr(self.export_tab, "export_btn", None)
+        self.auto_save_checkbox = getattr(self.analysis_tab, "auto_save_checkbox", None)
+        self.autosave_status_label = getattr(self.analysis_tab, "autosave_status_label", None)
 
-    def populate_date_dropdown(self) -> None:
-        """Populate date dropdown with available dates and purely visual marker indicators."""
-        self.data_service.populate_date_dropdown()
+        # Marker Mode Controls (from analysis_tab)
+        self.sleep_mode_btn = getattr(self.analysis_tab, "sleep_mode_btn", None)
+        self.nonwear_mode_btn = getattr(self.analysis_tab, "nonwear_mode_btn", None)
+        self.marker_mode_group = getattr(self.analysis_tab, "marker_mode_group", None)
+        self.show_manual_nonwear_checkbox = getattr(self.analysis_tab, "show_manual_nonwear_checkbox", None)
+
+        # Navigation Buttons (from analysis_tab)
+        self.prev_date_btn = getattr(self.analysis_tab, "prev_date_btn", None)
+        self.next_date_btn = getattr(self.analysis_tab, "next_date_btn", None)
+        self.view_24h_btn = getattr(self.analysis_tab, "view_24h_btn", None)
+        self.view_48h_btn = getattr(self.analysis_tab, "view_48h_btn", None)
+        self.activity_source_dropdown = getattr(self.analysis_tab, "activity_source_dropdown", None)
+        self.weekday_label = getattr(self.analysis_tab, "weekday_label", None)
+        self.show_adjacent_day_markers_checkbox = getattr(self.analysis_tab, "show_adjacent_day_markers_checkbox", None)
+
+        # Initialize time field manager now that UI fields are available
+        self.time_manager = TimeFieldManager(
+            store=self.store,
+            onset_time_input=self.onset_time_input,
+            offset_time_input=self.offset_time_input,
+            total_duration_label=self.total_duration_label,
+            update_callback=self.set_manual_sleep_times,
+        )
+
+    # Delegate methods removed - handled by Connectors and Redux state transitions
+
+    def load_available_files(self, preserve_selection: bool = True, load_completion_counts: bool = False) -> None:
+        """Load available data files into the Redux state."""
+        # data_service is initialized in __init__ before this method can be called
+        if self.data_service:
+            # Service now dispatches Action to Store, which triggers FileListConnector
+            self.data_service.load_available_files(preserve_selection, load_completion_counts)
 
     def load_current_date(self) -> None:
-        """Load data for current date - always loads 48h as main dataset."""
-        self.data_service.load_current_date()
+        """Load data for the currently selected file and date index."""
+        logger.info("MAIN WINDOW: load_current_date() START")
+
+        try:
+            if not self.selected_file:
+                logger.warning("MAIN WINDOW: Cannot load date - no file selected")
+                return
+
+            if self.current_date_index < 0:
+                logger.warning("MAIN WINDOW: Cannot load date - index < 0")
+                return
+
+            # MW-04 FIX: Delegate to data service with required cache
+            logger.info("MAIN WINDOW: Triggering data_service.load_current_date()")
+            result = self.data_service.load_current_date(self.current_date_48h_cache)
+
+            # 2. Update visuals if load was successful
+            if result:
+                timestamps, activity_data = result
+                state = self.store.state
+
+                # Update weekday label from Store state
+                current_date = None
+                if 0 <= state.current_date_index < len(state.available_dates):
+                    date_str = state.available_dates[state.current_date_index]
+                    from datetime import date
+
+                    current_date = date.fromisoformat(date_str)
+                    weekday_str = current_date.strftime("%A")
+                    if hasattr(self.analysis_tab, "weekday_label"):
+                        self.analysis_tab.weekday_label.setText(f"Day: {weekday_str}")
+
+                # UPDATE THE PLOT with loaded data
+                # Use len() checks for numpy array compatibility (truthiness is ambiguous)
+                has_data = timestamps is not None and len(timestamps) > 0 and activity_data is not None and len(activity_data) > 0
+                if self.plot_widget and has_data:
+                    logger.info(f"MAIN WINDOW: Updating plot with {len(timestamps)} data points")
+                    self.plot_widget.update_data_and_view_only(timestamps, activity_data, state.view_mode_hours, current_date=current_date)
+
+                    # Load nonwear data after plot data is updated
+                    self.load_nonwear_data_for_plot()
+
+            logger.info("MAIN WINDOW: load_current_date() COMPLETE")
+        except Exception as e:
+            logger.exception(f"MAIN WINDOW ERROR in load_current_date: {e}")
 
     def set_view_mode(self, hours) -> None:
         """Switch between 24h and 48h view modes WITHOUT reloading data or clearing markers."""
         # The data service handles all state updates atomically including UI button states
         self.data_service.set_view_mode(hours)
+        # Save to session
+        self.session_manager.save_view_mode(hours)
 
     def change_view_range_only(self, hours) -> None:
         """Change view range without reloading data - preserves sleep markers."""
@@ -319,7 +613,85 @@ class SleepScoringMainWindow(QMainWindow):
 
     def load_nonwear_data_for_plot(self) -> None:
         """Load nonwear sensor and Choi algorithm data for current file and display on plot."""
-        self.data_service.load_nonwear_data_for_plot()
+        try:
+            # Need plot widget with data loaded
+            if not self.plot_widget or not self.plot_widget.timestamps:
+                logger.debug("Cannot load nonwear data - no plot data available")
+                return
+
+            if not self.selected_file:
+                logger.debug("Cannot load nonwear data - no file selected")
+                return
+
+            from sleep_scoring_app.core.constants import ActivityDataPreference, NonwearDataSource
+            from sleep_scoring_app.core.nonwear_data import ActivityDataView, NonwearData
+
+            # Get Choi activity column from config FIRST
+            choi_column = self.config_manager.config.choi_axis
+            preferred_column = self.config_manager.config.preferred_activity_column
+
+            # Determine what data to use for Choi algorithm
+            # If choi_column matches display column, use plot data; otherwise load specific column
+            if choi_column == preferred_column:
+                # Choi column matches display - use existing plot data
+                choi_timestamps = list(self.plot_widget.timestamps)
+                choi_counts = list(self.plot_widget.activity_data) if self.plot_widget.activity_data else []
+                logger.debug("Using display data for Choi (column=%s)", choi_column)
+            else:
+                # Choi column differs from display - load the specific column data
+                target_date = self.available_dates[self.current_date_index] if self.available_dates and self.current_date_index != -1 else None
+                if target_date:
+                    # Map choi_column string to ActivityDataPreference enum
+                    choi_pref = ActivityDataPreference(choi_column) if choi_column else ActivityDataPreference.VECTOR_MAGNITUDE
+                    result = self.data_service.load_activity_data_only(
+                        filename=self.selected_file,
+                        target_date=target_date,
+                        activity_column=choi_pref,
+                        hours=48,
+                    )
+                    if result:
+                        choi_timestamps, choi_counts = result
+                        logger.info("Loaded Choi-specific data for column=%s (%d points)", choi_column, len(choi_counts))
+                    else:
+                        # Fallback to plot data if loading fails
+                        choi_timestamps = list(self.plot_widget.timestamps)
+                        choi_counts = list(self.plot_widget.activity_data) if self.plot_widget.activity_data else []
+                        logger.warning("Failed to load Choi-specific column, using display data")
+                else:
+                    choi_timestamps = list(self.plot_widget.timestamps)
+                    choi_counts = list(self.plot_widget.activity_data) if self.plot_widget.activity_data else []
+                    logger.warning("No target date available, using display data for Choi")
+
+            # Create activity view with the correct Choi data
+            activity_view = ActivityDataView.create(
+                timestamps=choi_timestamps,
+                counts=choi_counts,
+                filename=self.selected_file,
+            )
+
+            # Load sensor periods from database
+            raw_sensor_periods = self.nonwear_service.get_nonwear_periods_for_file(
+                filename=self.selected_file,
+                source=NonwearDataSource.NONWEAR_SENSOR,
+            )
+
+            logger.debug("Loaded %d sensor periods for %s", len(raw_sensor_periods), self.selected_file)
+
+            # Create NonwearData object - now activity_view contains the correct Choi axis data
+            nonwear_data = NonwearData.create_for_activity_view(
+                activity_view=activity_view,
+                raw_sensor_periods=raw_sensor_periods,
+                nonwear_service=self.nonwear_service,
+                choi_activity_column=choi_column,
+            )
+
+            # Set on plot widget
+            self.plot_widget.set_nonwear_data(nonwear_data)
+
+            logger.info("Loaded nonwear data: %d sensor periods, %d choi periods", len(nonwear_data.sensor_periods), len(nonwear_data.choi_periods))
+
+        except Exception as e:
+            logger.exception("Failed to load nonwear data for plot: %s", e)
 
     def _get_cached_metrics(self) -> list:
         """Get cached metrics, loading from database if not already cached."""
@@ -334,15 +706,17 @@ class SleepScoringMainWindow(QMainWindow):
         """Invalidate the metrics cache (call when data changes)."""
         self._cached_metrics = None
 
-        # Refresh export tab data summary if it exists
-        if hasattr(self, "export_tab") and self.export_tab is not None:
+        # Refresh export tab data summary (export_tab created in setup_ui)
+        if self.export_tab is not None:
             self.export_tab.refresh_data_summary()
 
     def _get_axis_y_data_for_sadeh(self) -> list[float]:
         """Get axis_y data specifically for Sadeh algorithm using UNIFIED loading method."""
-        # Get current filename and date
-        current_filename = self.current_file_info.get("filename") if hasattr(self, "current_file_info") else None
-        current_date = self.available_dates[self.current_date_index] if hasattr(self, "current_date_index") and self.available_dates else None
+        # Get current filename and date from Redux-backed properties
+        current_filename = self.selected_file
+        current_date = self.available_dates[self.current_date_index] if self.available_dates and self.current_date_index != -1 else None
+
+        logger.info(f"MAIN WINDOW: Loading axis_y for Sadeh | File: {current_filename} | Date: {current_date}")
 
         if not current_filename or not current_date:
             logger.warning("No current filename or date for axis_y loading")
@@ -359,10 +733,8 @@ class SleepScoringMainWindow(QMainWindow):
             logger.warning("No axis_y data available for Sadeh algorithm")
             return []
 
-        # Store axis_y data without excessive debug logging
-
         # Store in plot widget for table access (single cache location)
-        if hasattr(self.plot_widget, "main_48h_timestamps"):
+        if hasattr(self.plot_widget, "main_48h_timestamps"):  # KEEP: Plot widget duck typing
             self.plot_widget.main_48h_axis_y_data = axis_y_data
             # CRITICAL: Also store axis_y timestamps for proper alignment
             self.plot_widget.main_48h_axis_y_timestamps = timestamps
@@ -374,38 +746,33 @@ class SleepScoringMainWindow(QMainWindow):
         """Get file completion count as (completed/total) - returns tuple (completed_count, total_count)."""
         return self.data_service.get_file_completion_count(filename)
 
-    def set_activity_data_preferences(self, preferred_column: str, choi_column: str) -> None:
+    def set_activity_data_preferences(self, preferred: str, choi: str) -> None:
         """
-        Configure activity data column preferences.
+        Set the activity data preferences for the application.
+
+        This method updates both the runtime configuration and the persisted settings.
 
         Args:
-            preferred_column: Activity column for general plotting and data loading
-            choi_column: Activity column for Choi nonwear detection algorithm
-
-        Note: Sadeh algorithm ALWAYS uses axis_y (vertical) regardless of these settings.
+            preferred: The column to use for main activity display (e.g., 'axis_y', 'vm')
+            choi: The column to use for the Choi nonwear algorithm
 
         """
-        from sleep_scoring_app.core.constants import ActivityDataPreference
+        try:
+            logger.info(f"Setting activity preferences - Preferred: {preferred}, Choi: {choi}")
 
-        # Validate inputs - all ActivityDataPreference values are valid
-        valid_columns = [
-            ActivityDataPreference.AXIS_Y,
-            ActivityDataPreference.AXIS_X,
-            ActivityDataPreference.AXIS_Z,
-            ActivityDataPreference.VECTOR_MAGNITUDE,
-        ]
-        if preferred_column not in valid_columns or choi_column not in valid_columns:
-            msg = f"Column must be one of: {valid_columns}"
-            raise ValueError(msg)
+            # Update configuration via services
+            if self.config_manager:
+                self.config_manager.config.preferred_activity_column = preferred
+                self.config_manager.config.choi_axis = choi
+                self.config_manager.save_config()
 
-        # Update preferences
-        self.data_service.set_activity_column_preferences(preferred_column, choi_column)
+            # Update plot widget if it exists
+            if self.plot_widget:
+                # The switcher will handle the heavy lifting of reloading data
+                pass
 
-        # Don't clear axis_y cache when preferences change
-        # The axis_y data remains the same regardless of display preference
-
-        # Log the change
-        logger.info(f"Activity preferences updated - preferred: {preferred_column}, Choi: {choi_column}")
+        except Exception as e:
+            logger.exception(f"Error setting activity preferences: {e}")
 
     def get_activity_data_preferences(self) -> tuple[str, str]:
         """Get current activity data column preferences."""
@@ -415,47 +782,85 @@ class SleepScoringMainWindow(QMainWindow):
         """Restore file selection after file list refresh."""
         self.data_service.restore_file_selection(previous_selection, previous_date_index)
 
-    def on_file_selected_from_table(self, file_info: dict) -> None:
+    def on_file_selected_from_table(self, file_info: FileInfo) -> None:
         """Handle file selection from table widget."""
-        self.nav_manager.on_file_selected_from_table(file_info)
+        if not file_info:
+            logger.warning("MAIN WINDOW: on_file_selected_from_table called with None file_info")
+            return
 
-        # Update compatibility checking with new file
-        if hasattr(self, "compatibility_helper") and file_info.get("file_path"):
-            self.compatibility_helper.on_file_loaded(file_info["file_path"])
+        logger.info(f"MAIN WINDOW: on_file_selected_from_table START for: {file_info.filename}")
 
-    def on_date_dropdown_changed(self, index) -> None:
-        """Handle date dropdown selection change."""
-        if index >= 0 and index < len(self.available_dates) and index != self.current_date_index:
-            # Check for unsaved markers before proceeding
+        # Guard: Skip if same file is already selected (prevents clearing markers)
+        if self.store.state.current_file == file_info.filename:
+            logger.info("MAIN WINDOW: Same file already selected, skipping reload")
+            return
+
+        # 1. Dispatch file_selected to Redux (this is the ONLY place it should be dispatched)
+        from sleep_scoring_app.ui.store import Actions
+
+        logger.info("MAIN WINDOW: Dispatching file_selected action")
+        self.store.dispatch(Actions.file_selected(file_info.filename))
+
+        # 2. Update the path property
+        self.selected_file = str(file_info.source_path) if file_info.source_path else file_info.filename
+        logger.info(f"MAIN WINDOW: Updated selected_file to: {self.selected_file}")
+
+        # 3. Load dates for this file (CRITICAL - must happen AFTER file_selected dispatch)
+        skip_rows = self.config_manager.config.skip_rows
+        logger.info(f"MAIN WINDOW: Loading dates via data_service (skip_rows={skip_rows})")
+        new_dates = self.data_service.load_selected_file(file_info, skip_rows)
+
+        if new_dates:
+            logger.info(f"MAIN WINDOW: Loaded {len(new_dates)} dates, dispatching dates_loaded")
+            self.store.dispatch(Actions.dates_loaded(new_dates))
+        else:
+            logger.warning(f"MAIN WINDOW: NO DATES returned from data_service for {file_info.filename}")
+            self.store.dispatch(Actions.dates_loaded([]))
+
+        logger.info("MAIN WINDOW: on_file_selected_from_table COMPLETE")
+
+        # 6. Update activity source dropdown (enable it now that data is loaded)
+        if hasattr(self, "analysis_tab") and self.analysis_tab:
+            self.analysis_tab.update_activity_source_dropdown()
+
+        # 4. Update session
+        self.session_manager.save_current_file(self.selected_file)
+
+        # 5. Update compatibility checking
+        if file_info.source_path:
+            self.compatibility_helper.on_file_loaded(str(file_info.source_path))
+
+    def on_date_dropdown_changed(self, index: int) -> None:
+        """Handle date dropdown selection change via Redux."""
+        if 0 <= index < len(self.available_dates) and index != self.current_date_index:
+            # Check for unsaved markers
             if not self._check_unsaved_markers_before_navigation():
-                # User canceled, reset dropdown to current index
-                self.analysis_tab.date_dropdown.blockSignals(True)  # Prevent recursive signal
-                self.analysis_tab.date_dropdown.setCurrentIndex(self.current_date_index)
-                self.analysis_tab.date_dropdown.blockSignals(False)
-                return  # User canceled the navigation
+                # Connector will handle visual revert if state doesn't change
+                return
 
-            self.current_date_index = index
-            self.load_current_date()
-            # Load saved markers for this date
-            self.load_saved_markers()
-            # Update dropdown color for new selection
-            if hasattr(self.data_service, "_update_date_dropdown_current_color"):
-                self.data_service._update_date_dropdown_current_color()
+            logger.info(f"MAIN WINDOW: Date dropdown changed to {index}, dispatching to Redux")
+            from sleep_scoring_app.ui.store import Actions
+
+            self.store.dispatch(Actions.date_selected(index))
+
+            # Save to session
+            self.session_manager.save_current_date_index(index)
 
     def _check_unsaved_markers_before_navigation(self) -> bool:
         """
         Check if there are unsaved markers and handle user interaction.
         Returns True if navigation should proceed, False if it should be canceled.
         """
-        # Check if there are any complete markers placed
-        has_complete_markers = (
-            hasattr(self.plot_widget, "daily_sleep_markers")
-            and self.plot_widget.daily_sleep_markers
-            and self.plot_widget.daily_sleep_markers.get_complete_periods()
-        )
+        logger.info("=== _check_unsaved_markers_before_navigation (main_window) START ===")
 
-        # Check if markers are NOT saved
-        markers_not_saved = not getattr(self.plot_widget, "markers_saved", False)
+        # Check if there are any complete markers placed (from Redux store - single source of truth)
+        sleep_markers = self.store.state.current_sleep_markers
+        has_complete_markers = sleep_markers and sleep_markers.get_complete_periods()
+        logger.info(f"has_complete_markers: {has_complete_markers}")
+
+        # Check if markers are NOT saved (use Redux store dirty flags as source of truth)
+        markers_dirty = self.store.state.sleep_markers_dirty or self.store.state.nonwear_markers_dirty
+        logger.info(f"markers_dirty: {markers_dirty}")
 
         # Check for incomplete sleep marker being placed
         has_incomplete_sleep_marker = (
@@ -489,8 +894,9 @@ class SleepScoringMainWindow(QMainWindow):
                 self.plot_widget._current_nonwear_marker_being_placed = None
                 self.plot_widget.marker_renderer.redraw_nonwear_markers()
 
-        # If there are unsaved complete markers, show warning dialog
-        if has_complete_markers and markers_not_saved:
+        # If there are unsaved complete markers AND autosave is disabled (manual mode), show warning dialog
+        # When autosave is enabled, it will auto-save via auto_save_current_markers() below
+        if has_complete_markers and markers_dirty and not self.store.state.auto_save_enabled:
             # Create a custom message box with HTML for colored text
             msg = QMessageBox(self)
             msg.setWindowTitle("Unsaved Markers")
@@ -552,11 +958,8 @@ class SleepScoringMainWindow(QMainWindow):
                 self.current_date_index -= 1
                 self.date_dropdown.setCurrentIndex(self.current_date_index)
                 self.load_current_date()
-                # Load saved markers for this date
-                self.load_saved_markers()
-                # Update the dropdown color for the new selection
-                if hasattr(self, "data_service"):
-                    self.data_service._update_date_dropdown_current_color()
+                # NOTE: Marker loading handled by MarkerLoadingCoordinator on navigation
+                # Dropdown color handled reactively via DateDropdownConnector
         except (TypeError, AttributeError):
             # Handle mock objects during testing
             return
@@ -572,11 +975,8 @@ class SleepScoringMainWindow(QMainWindow):
                 self.current_date_index += 1
                 self.date_dropdown.setCurrentIndex(self.current_date_index)
                 self.load_current_date()
-                # Load saved markers for this date
-                self.load_saved_markers()
-                # Update the dropdown color for the new selection
-                if hasattr(self, "data_service"):
-                    self.data_service._update_date_dropdown_current_color()
+                # NOTE: Marker loading handled by MarkerLoadingCoordinator on navigation
+                # Dropdown color handled reactively via DateDropdownConnector
         except (TypeError, AttributeError):
             # Handle mock objects during testing
             return
@@ -587,37 +987,34 @@ class SleepScoringMainWindow(QMainWindow):
 
     def handle_nonwear_markers_changed(self, daily_nonwear_markers) -> None:
         """
-        Handle nonwear marker changes - save to database immediately.
-
-        Note: Nonwear markers are always saved immediately when placed,
-        independent of the ENABLE_AUTOSAVE feature flag (which controls
-        sleep marker autosaving behavior).
+        Handle nonwear marker changes - dispatches action to store.
+        The autosave coordinator will pick up the dirty state and save.
         """
-        try:
-            # Get current file and date
-            if not self.selected_file or not hasattr(self, "current_date_index"):
-                return
+        from sleep_scoring_app.ui.store import Actions
 
-            current_date = self.available_dates[self.current_date_index]
-            filename = Path(self.selected_file).name
+        self.store.dispatch(Actions.nonwear_markers_changed(daily_nonwear_markers))
 
-            # Extract participant info
-            from sleep_scoring_app.utils.participant_extractor import extract_participant_info
+    def handle_plot_error(self, error_message: str) -> None:
+        """
+        Handle errors from the activity plot widget.
 
-            participant_info = extract_participant_info(filename)
-            participant_id = participant_info.numerical_id
+        Args:
+            error_message: The error message to display.
 
-            # Save nonwear markers to database
-            self.db_manager.save_manual_nonwear_markers(
-                filename=filename,
-                participant_id=participant_id,
-                sleep_date=current_date,
-                daily_nonwear_markers=daily_nonwear_markers,
-            )
-            logger.debug("Auto-saved nonwear markers for %s on %s", filename, current_date)
+        """
+        logger.error("Plot error: %s", error_message)
+        self.statusBar().showMessage(f"Error: {error_message}", 5000)
 
-        except Exception as e:
-            logger.warning("Error auto-saving nonwear markers: %s", e)
+    def handle_marker_limit_exceeded(self, error_message: str) -> None:
+        """
+        Handle marker limit exceeded errors.
+
+        Args:
+            error_message: The error message to display.
+
+        """
+        logger.warning("Marker limit exceeded: %s", error_message)
+        QMessageBox.warning(self, "Marker Limit Exceeded", error_message)
 
     def handle_nonwear_marker_selected(self, nonwear_period) -> None:
         """
@@ -650,58 +1047,104 @@ class SleepScoringMainWindow(QMainWindow):
         except Exception as e:
             logger.warning("Error updating tables for nonwear marker selection: %s", e)
 
-    def autosave_on_marker_change(self, markers) -> None:
+    def _autosave_sleep_markers_to_db(self, daily_sleep_markers: DailySleepMarkers) -> None:
         """
-        Autosave when markers are changed (not just when saved).
-
-        Note: This is always enabled to match NWT marker behavior.
-        Sleep markers are auto-saved to ensure data is not lost.
+        Autosaves sleep markers to the database.
+        This method is a callback for the AutosaveCoordinator.
+        Uses the SAME save path as manual save for consistency.
         """
         try:
-            # Calculate comprehensive sleep metrics
-            self.data_manager.extract_enhanced_participant_info(self.selected_file)
+            # Get main sleep period for metrics calculation
+            main_sleep = daily_sleep_markers.get_main_sleep()
+            if not main_sleep:
+                return
 
             # Get algorithm results and activity data from plot widget
             sadeh_results = getattr(self.plot_widget, "sadeh_results", [])
-            choi_results = self.plot_widget.get_choi_results_per_minute() if hasattr(self.plot_widget, "get_choi_results_per_minute") else []
-            nwt_sensor_results = (
-                self.plot_widget.get_nonwear_sensor_results_per_minute() if hasattr(self.plot_widget, "get_nonwear_sensor_results_per_minute") else []
-            )
-            # For Sadeh algorithm, we MUST use axis_y data specifically
+            choi_results = self.plot_widget.get_choi_results_per_minute()
+            nwt_sensor_results = self.plot_widget.get_nonwear_sensor_results_per_minute()
             axis_y_data = self._get_axis_y_data_for_sadeh()
             x_data = getattr(self.plot_widget, "x_data", [])
 
-            # Calculate comprehensive sleep metrics
-            sleep_metrics = self.data_manager.calculate_sleep_metrics_object(
-                markers,
+            # Calculate comprehensive sleep metrics using SleepPeriod directly
+            sleep_metrics = self.data_manager.calculate_sleep_metrics_for_period_object(
+                main_sleep,
                 sadeh_results,
                 choi_results,
                 axis_y_data,
                 x_data,
-                self.selected_file,
-                nwt_sensor_results,
+                file_path=self.selected_file,
+                nwt_sensor_results=nwt_sensor_results,
             )
 
             if sleep_metrics:
                 # Add current date and file information
-                current_date = self.available_dates[self.current_date_index]
+                current_date = self.available_dates[self.current_date_index] if self.available_dates else datetime.now()
                 sleep_metrics.analysis_date = current_date.strftime("%Y-%m-%d")
                 sleep_metrics.updated_at = datetime.now().isoformat()
                 sleep_metrics.filename = Path(self.selected_file).name if self.selected_file else ""
 
-                # Autosave to database and backup
-                self.export_manager.autosave_sleep_metrics([sleep_metrics], AlgorithmType.SADEH_1994_ACTILIFE)
-                logger.debug("Auto-saved markers on change for %s", Path(self.selected_file).name if self.selected_file else "unknown")
+                # CRITICAL: Set full daily_sleep_markers to save ALL periods (same as manual save)
+                sleep_metrics.daily_sleep_markers = daily_sleep_markers
 
-                # Invalidate marker status cache for this file
-                if self.selected_file:
-                    self._invalidate_marker_status_cache(Path(self.selected_file).name)
+                # Use SAME save method as manual save for consistency
+                self.export_manager.save_comprehensive_sleep_metrics([sleep_metrics], AlgorithmType.SADEH_1994_ACTILIFE)
+                logger.debug("Autosaved sleep markers for %s", Path(self.selected_file).name if self.selected_file else "unknown")
+
+                # Invalidate marker status cache for this file after auto-save
+                if self.selected_file and self.state_manager:
+                    self.state_manager.invalidate_marker_status_cache(Path(self.selected_file).name)
+
+            # NOTE: markers_saved() is dispatched by AutosaveCoordinator after ALL saves complete
 
         except Exception as e:
-            logger.warning("Error in autosave on marker change: %s", e)
+            logger.warning("Error in _autosave_sleep_markers_to_db: %s", e)
 
-    def update_sleep_info(self, markers) -> None:
-        """Update sleep information display with protection against update loops."""
+    def _autosave_nonwear_markers_to_db(self, daily_nonwear_markers) -> None:
+        """
+        Autosaves nonwear markers to the database.
+        This method is a callback for the AutosaveCoordinator.
+        """
+        try:
+            # Get current file and date
+            if not self.selected_file:
+                return
+
+            # Validate bounds before accessing
+            if not self.available_dates or self.current_date_index < 0 or self.current_date_index >= len(self.available_dates):
+                return
+
+            current_date = self.available_dates[self.current_date_index]
+            filename = Path(self.selected_file).name
+
+            # Extract participant info
+            from sleep_scoring_app.utils.participant_extractor import extract_participant_info
+
+            participant_info = extract_participant_info(filename)
+            participant_id = participant_info.numerical_id
+
+            # Save nonwear markers to database
+            self.db_manager.save_manual_nonwear_markers(
+                filename=filename,
+                participant_id=participant_id,
+                sleep_date=current_date,
+                daily_nonwear_markers=daily_nonwear_markers,
+            )
+            logger.debug("Autosaved nonwear markers for %s on %s", filename, current_date)
+
+            # NOTE: markers_saved() is dispatched by AutosaveCoordinator after ALL saves complete
+
+        except Exception as e:
+            logger.warning("Error in _autosave_nonwear_markers_to_db: %s", e)
+
+    def update_sleep_info(self, sleep_period: SleepPeriod | None) -> None:
+        """
+        Update sleep information display with protection against update loops.
+
+        Args:
+            sleep_period: The SleepPeriod to display info for, or None to clear.
+
+        """
         # Check if we're in the middle of a field-to-marker update to prevent loops
         if getattr(self, "_updating_from_fields", False):
             logger.debug("Skipping field update - currently updating from fields to prevent loop")
@@ -711,38 +1154,38 @@ class SleepScoringMainWindow(QMainWindow):
         if self._is_user_editing_time_fields():
             logger.debug("Skipping field update - user is actively editing")
             # Still update the info label though
-            self._update_sleep_info_label_only(markers)
+            self._update_sleep_info_label_only(sleep_period)
             return
 
         # Set flag to prevent recursive updates
         self._updating_from_markers = True
         try:
-            if len(markers) == 0:
-                # Clear total duration label
-                if hasattr(self, "total_duration_label"):
-                    self.total_duration_label.setText("")
-                # Clear manual input fields
+            if sleep_period is None:
+                # Clear everything
+                self.total_duration_label.setText("")
                 self.onset_time_input.clear()
                 self.offset_time_input.clear()
-            elif len(markers) == 1:
-                start_time = datetime.fromtimestamp(markers[0])
-                # Clear duration label when only one marker
-                if hasattr(self, "total_duration_label"):
-                    self.total_duration_label.setText("")
-                # Update onset field
+            elif sleep_period.onset_timestamp is None:
+                # No markers at all
+                self.total_duration_label.setText("")
+                self.onset_time_input.clear()
+                self.offset_time_input.clear()
+            elif not sleep_period.is_complete:
+                # Only onset, no offset yet
+                start_time = datetime.fromtimestamp(sleep_period.onset_timestamp)
+                self.total_duration_label.setText("")
                 self.onset_time_input.setText(start_time.strftime("%H:%M"))
                 self.offset_time_input.clear()
             else:
-                start_time = datetime.fromtimestamp(markers[0])
-                end_time = datetime.fromtimestamp(markers[1])
-                duration = self.plot_widget.get_sleep_duration()
+                # Complete period with both onset and offset
+                start_time = datetime.fromtimestamp(sleep_period.onset_timestamp)
+                end_time = datetime.fromtimestamp(sleep_period.offset_timestamp)
 
                 # Update total duration label
-                if hasattr(self, "total_duration_label"):
-                    if duration is not None:
-                        self.total_duration_label.setText(f"Total Duration: {duration:.1f} hours")
-                    else:
-                        self.total_duration_label.setText("Total Duration: --")
+                if sleep_period.duration_hours is not None:
+                    self.total_duration_label.setText(f"Total Duration: {sleep_period.duration_hours:.1f} hours")
+                else:
+                    self.total_duration_label.setText("Total Duration: --")
 
                 # Update manual input fields with visual feedback
                 self.onset_time_input.setText(start_time.strftime("%H:%M"))
@@ -757,25 +1200,25 @@ class SleepScoringMainWindow(QMainWindow):
     def _is_user_editing_time_fields(self) -> bool:
         """Check if user is actively editing either time field."""
         # Check if either field has focus
-        onset_has_focus = self.onset_time_input.hasFocus() if hasattr(self, "onset_time_input") else False
-        offset_has_focus = self.offset_time_input.hasFocus() if hasattr(self, "offset_time_input") else False
+        onset_has_focus = self.onset_time_input.hasFocus()
+        offset_has_focus = self.offset_time_input.hasFocus()
         return onset_has_focus or offset_has_focus
 
-    def _update_sleep_info_label_only(self, markers) -> None:
+    def _update_sleep_info_label_only(self, sleep_period: SleepPeriod | None) -> None:
         """Update only the duration label without touching the input fields."""
-        if hasattr(self, "total_duration_label"):
-            if len(markers) == 0 or len(markers) == 1:
-                self.total_duration_label.setText("")
-            else:
-                duration = self.plot_widget.get_sleep_duration()
-                self.total_duration_label.setText(f"Total Duration: {duration:.1f} hours")
+        if sleep_period is None or not sleep_period.is_complete:
+            self.total_duration_label.setText("")
+        elif sleep_period.duration_hours is not None:
+            self.total_duration_label.setText(f"Total Duration: {sleep_period.duration_hours:.1f} hours")
+        else:
+            self.total_duration_label.setText("Total Duration: --")
 
     def _apply_synced_field_style(self) -> None:
         """Apply visual style to indicate fields were synced from markers."""
         from PyQt6.QtCore import QTimer
 
         # PERFORMANCE: Throttle style updates during rapid marker changes (drag)
-        if not hasattr(self, "_last_style_update_time"):
+        if False:  # Dead code: _last_style_update_time initialized in Phase 1
             self._last_style_update_time = 0
 
         import time
@@ -792,10 +1235,8 @@ class SleepScoringMainWindow(QMainWindow):
             }
         """
 
-        if hasattr(self, "onset_time_input"):
-            self.onset_time_input.setStyleSheet(synced_style)
-        if hasattr(self, "offset_time_input"):
-            self.offset_time_input.setStyleSheet(synced_style)
+        self.onset_time_input.setStyleSheet(synced_style)
+        self.offset_time_input.setStyleSheet(synced_style)
 
         # Clear the style after a short delay
         QTimer.singleShot(500, self._clear_synced_field_style)
@@ -811,26 +1252,65 @@ class SleepScoringMainWindow(QMainWindow):
             }}
         """
 
-        if hasattr(self, "onset_time_input"):
-            self.onset_time_input.setStyleSheet(normal_style)
-        if hasattr(self, "offset_time_input"):
-            self.offset_time_input.setStyleSheet(normal_style)
+        self.onset_time_input.setStyleSheet(normal_style)
+        self.offset_time_input.setStyleSheet(normal_style)
 
     def update_marker_tables(self, onset_data, offset_data) -> None:
         """Update the data tables with surrounding marker information."""
         self.table_manager.update_marker_tables(onset_data, offset_data)
 
+    def _on_table_update_timer(self) -> None:
+        """
+        Handle delayed table update after marker drag ends.
+
+        Only updates tables in SLEEP mode - nonwear mode updates are handled by
+        handle_nonwear_marker_selected signal handler.
+        """
+        if self._pending_markers is None:
+            return
+
+        # Only update tables in SLEEP mode
+        from sleep_scoring_app.core.constants import MarkerCategory
+
+        if self.store.state.marker_mode != MarkerCategory.SLEEP:
+            return
+
+        # Get the currently selected period for final update
+        selected_period = getattr(self.plot_widget, "get_selected_marker_period", lambda: None)()
+        if selected_period and selected_period.is_complete:
+            onset_idx = self._marker_index_cache.get(selected_period.onset_timestamp)
+            offset_idx = self._marker_index_cache.get(selected_period.offset_timestamp)
+
+            onset_data = self._get_marker_data_cached(selected_period.onset_timestamp, onset_idx)
+            offset_data = self._get_marker_data_cached(selected_period.offset_timestamp, offset_idx)
+
+            if onset_data or offset_data:
+                self.update_marker_tables(onset_data, offset_data)
+        else:
+            # Fallback to first complete period
+            complete_periods = self._pending_markers.get_complete_periods()
+            if complete_periods:
+                first_period = complete_periods[0]
+                onset_idx = self._marker_index_cache.get(first_period.onset_timestamp)
+                offset_idx = self._marker_index_cache.get(first_period.offset_timestamp)
+
+                onset_data = self._get_marker_data_cached(first_period.onset_timestamp, onset_idx)
+                offset_data = self._get_marker_data_cached(first_period.offset_timestamp, offset_idx)
+
+                if onset_data or offset_data:
+                    self.update_marker_tables(onset_data, offset_data)
+
     def _connect_table_click_handlers(self) -> None:
         """Connect click handlers for marker tables to enable row click to move marker."""
         try:
             # Connect onset table right-click handler for marker movement
-            if hasattr(self, "onset_table") and hasattr(self.onset_table, "table_widget"):
+            if self.onset_table is not None and hasattr(self.onset_table, "table_widget"):  # KEEP: Table duck typing
                 table = self.onset_table.table_widget
                 table.customContextMenuRequested.connect(lambda pos: self._on_onset_table_right_clicked(pos))
                 logger.debug("Connected onset table right-click handler")
 
             # Connect offset table right-click handler for marker movement
-            if hasattr(self, "offset_table") and hasattr(self.offset_table, "table_widget"):
+            if self.offset_table is not None and hasattr(self.offset_table, "table_widget"):  # KEEP: Table duck typing
                 table = self.offset_table.table_widget
                 table.customContextMenuRequested.connect(lambda pos: self._on_offset_table_right_clicked(pos))
                 logger.debug("Connected offset table right-click handler")
@@ -891,7 +1371,7 @@ class SleepScoringMainWindow(QMainWindow):
 
         try:
             # Check if we have plot widget and it's ready
-            if not hasattr(self, "plot_widget") or not self.plot_widget:
+            if self.plot_widget is None:  # Guaranteed after setup_ui
                 logger.warning("Plot widget not available for marker movement")
                 return
 
@@ -924,7 +1404,7 @@ class SleepScoringMainWindow(QMainWindow):
                 selected_period = None
                 period_slot = None
 
-                if hasattr(self.plot_widget, "get_selected_marker_period"):
+                if hasattr(self.plot_widget, "get_selected_marker_period"):  # KEEP: Plot widget duck typing
                     selected_period = self.plot_widget.get_selected_marker_period()
                     if selected_period:
                         # Use the marker_index from the selected period
@@ -990,12 +1470,23 @@ class SleepScoringMainWindow(QMainWindow):
         """
         Create or update only the onset marker.
 
+        Uses Redux store as single source of truth (per CLAUDE.md).
+
         Args:
             onset_timestamp: Unix timestamp for sleep onset
 
         """
         try:
-            main_sleep = self.plot_widget.daily_sleep_markers.get_main_sleep()
+            from sleep_scoring_app.core.dataclasses import SleepPeriod
+            from sleep_scoring_app.core.dataclasses_markers import DailySleepMarkers
+            from sleep_scoring_app.ui.store import Actions
+
+            # Get markers from Redux store (SINGLE SOURCE OF TRUTH)
+            markers = self.store.state.current_sleep_markers
+            if markers is None:
+                markers = DailySleepMarkers()
+
+            main_sleep = markers.get_main_sleep()
 
             if main_sleep:
                 # Update existing period's onset
@@ -1005,15 +1496,15 @@ class SleepScoringMainWindow(QMainWindow):
                     self.plot_widget.current_marker_being_placed = main_sleep
             else:
                 # Create new incomplete period
-                from sleep_scoring_app.core.dataclasses import SleepPeriod
-
                 new_period = SleepPeriod(onset_timestamp=onset_timestamp, offset_timestamp=None, marker_index=1)
-                self.plot_widget.daily_sleep_markers.period_1 = new_period
+                markers.period_1 = new_period
                 self.plot_widget.current_marker_being_placed = new_period
 
-            self.plot_widget.daily_sleep_markers.update_classifications()
+            markers.update_classifications()
+
+            # Dispatch to Redux - connector will update widget
+            self.store.dispatch(Actions.sleep_markers_changed(markers))
             self.plot_widget.redraw_markers()
-            self.plot_widget.sleep_markers_changed.emit(self.plot_widget.daily_sleep_markers)
 
         except Exception as e:
             logger.error(f"Error creating onset marker from diary: {e}", exc_info=True)
@@ -1022,44 +1513,57 @@ class SleepScoringMainWindow(QMainWindow):
         """
         Create or update only the offset marker.
 
+        Uses Redux store as single source of truth (per CLAUDE.md).
+
         Args:
             offset_timestamp: Unix timestamp for sleep offset
 
         """
         try:
+            from sleep_scoring_app.core.dataclasses_markers import DailySleepMarkers
+            from sleep_scoring_app.ui.store import Actions
+
+            # Get markers from Redux store (SINGLE SOURCE OF TRUTH)
+            markers = self.store.state.current_sleep_markers
+            if markers is None:
+                markers = DailySleepMarkers()
+
             # Check if there's an incomplete period to complete
-            if hasattr(self.plot_widget, "current_marker_being_placed") and self.plot_widget.current_marker_being_placed:
+            current_period = self.plot_widget.current_marker_being_placed
+            if current_period:
                 # Complete the current period
-                self.plot_widget.current_marker_being_placed.offset_timestamp = offset_timestamp
+                current_period.offset_timestamp = offset_timestamp
 
                 # Find slot for this period if not already assigned
-                if not self.plot_widget.current_marker_being_placed.marker_index:
-                    if not self.plot_widget.daily_sleep_markers.period_1:
-                        self.plot_widget.daily_sleep_markers.period_1 = self.plot_widget.current_marker_being_placed
-                        self.plot_widget.current_marker_being_placed.marker_index = 1
-                    elif not self.plot_widget.daily_sleep_markers.period_2:
-                        self.plot_widget.daily_sleep_markers.period_2 = self.plot_widget.current_marker_being_placed
-                        self.plot_widget.current_marker_being_placed.marker_index = 2
-                    elif not self.plot_widget.daily_sleep_markers.period_3:
-                        self.plot_widget.daily_sleep_markers.period_3 = self.plot_widget.current_marker_being_placed
-                        self.plot_widget.current_marker_being_placed.marker_index = 3
-                    elif not self.plot_widget.daily_sleep_markers.period_4:
-                        self.plot_widget.daily_sleep_markers.period_4 = self.plot_widget.current_marker_being_placed
-                        self.plot_widget.current_marker_being_placed.marker_index = 4
+                if not current_period.marker_index:
+                    if not markers.period_1:
+                        markers.period_1 = current_period
+                        current_period.marker_index = 1
+                    elif not markers.period_2:
+                        markers.period_2 = current_period
+                        current_period.marker_index = 2
+                    elif not markers.period_3:
+                        markers.period_3 = current_period
+                        current_period.marker_index = 3
+                    elif not markers.period_4:
+                        markers.period_4 = current_period
+                        current_period.marker_index = 4
 
                 self.plot_widget.current_marker_being_placed = None
             else:
                 # Check if main sleep exists and needs offset
-                main_sleep = self.plot_widget.daily_sleep_markers.get_main_sleep()
+                main_sleep = markers.get_main_sleep()
                 if main_sleep and not main_sleep.offset_timestamp:
                     main_sleep.offset_timestamp = offset_timestamp
                 else:
                     logger.warning("No incomplete period to add offset marker to")
                     return
 
-            self.plot_widget.daily_sleep_markers.update_classifications()
+            markers.update_classifications()
+
+            # Dispatch to Redux - connector will update widget
+            self.store.dispatch(Actions.sleep_markers_changed(markers))
             self.plot_widget.redraw_markers()
-            self.plot_widget.sleep_markers_changed.emit(self.plot_widget.daily_sleep_markers)
             self.auto_save_current_markers()
 
         except Exception as e:
@@ -1087,7 +1591,7 @@ class SleepScoringMainWindow(QMainWindow):
 
     def _force_table_update(self) -> None:
         """Force a final table update after marker dragging completes."""
-        if hasattr(self, "_pending_markers") and self._pending_markers:
+        if self._pending_markers:
             # Get the most recent marker state and update tables one final time
             selected_period = getattr(self.plot_widget, "get_selected_marker_period", lambda: None)()
             if selected_period and selected_period.is_complete:
@@ -1140,7 +1644,9 @@ class SleepScoringMainWindow(QMainWindow):
 
     def _restore_field_from_marker(self, field_type: str) -> None:
         """Restore field value from current marker."""
-        selected_period = self.plot_widget.get_selected_marker_period() if hasattr(self.plot_widget, "get_selected_marker_period") else None
+        selected_period = (
+            self.plot_widget.get_selected_marker_period() if hasattr(self.plot_widget, "get_selected_marker_period") else None
+        )  # KEEP: Plot widget duck typing
         if not selected_period:
             return
 
@@ -1152,19 +1658,30 @@ class SleepScoringMainWindow(QMainWindow):
             self.offset_time_input.setText(offset_time.strftime("%H:%M"))
 
     def _update_selected_sleep_period(self, onset_timestamp: float, offset_timestamp: float) -> None:
-        """Update the currently selected sleep period with new timestamps."""
-        if not hasattr(self.plot_widget, "daily_sleep_markers"):
+        """
+        Update the currently selected sleep period with new timestamps.
+
+        Uses Redux store as single source of truth (per CLAUDE.md).
+        """
+        from sleep_scoring_app.ui.store import Actions
+
+        # Get markers from Redux store (SINGLE SOURCE OF TRUTH)
+        markers = self.store.state.current_sleep_markers
+        if markers is None:
             return
 
-        # Get the currently selected period
-        selected_period = self.plot_widget.get_selected_marker_period() if hasattr(self.plot_widget, "get_selected_marker_period") else None
+        # Get the currently selected period from widget (widget owns selection state)
+        selected_period = (
+            self.plot_widget.get_selected_marker_period() if hasattr(self.plot_widget, "get_selected_marker_period") else None
+        )  # KEEP: Plot widget duck typing for selection state
 
         if selected_period:
             # Update existing selected period
             selected_period.onset_timestamp = onset_timestamp
             selected_period.offset_timestamp = offset_timestamp
-            # Reclassify and redraw
-            self.plot_widget.daily_sleep_markers.update_classifications()
+            # Reclassify and dispatch to Redux
+            markers.update_classifications()
+            self.store.dispatch(Actions.sleep_markers_changed(markers))
             self.plot_widget.redraw_markers()
         else:
             # No selected period, create new one using the traditional method
@@ -1173,7 +1690,7 @@ class SleepScoringMainWindow(QMainWindow):
 
     def _update_selected_sleep_period_onset(self, onset_timestamp: float) -> None:
         """Update or create sleep period with just onset."""
-        if not hasattr(self.plot_widget, "add_sleep_marker"):
+        if not hasattr(self.plot_widget, "add_sleep_marker"):  # KEEP: Plot widget duck typing
             # Fallback to old method
             self.plot_widget.sleep_markers = [onset_timestamp]
             self.plot_widget.redraw_markers()
@@ -1191,41 +1708,7 @@ class SleepScoringMainWindow(QMainWindow):
 
     def clear_plot_and_ui_state(self) -> None:
         """Clear plot and UI state when switching filters."""
-        try:
-            # Clear the plot visualization
-            if hasattr(self, "plot_widget") and self.plot_widget:
-                self.plot_widget.clear_plot()
-                self.plot_widget.clear_sleep_markers()
-
-            # Reset UI state
-            self.selected_file = None
-            self.available_dates = []
-            self.current_date_index = 0
-
-            # Clear status labels
-            if hasattr(self, "total_duration_label"):
-                self.total_duration_label.setText("")
-
-            # Reset button states
-            if hasattr(self, "save_markers_btn"):
-                self.save_markers_btn.setText(ButtonText.SAVE_MARKERS)
-                self.save_markers_btn.setStyleSheet(ButtonStyle.SAVE_MARKERS)
-
-            # Clear date dropdown
-            if hasattr(self, "date_dropdown"):
-                self.date_dropdown.clear()
-                self.date_dropdown.setEnabled(False)
-
-            # Disable navigation buttons
-            if hasattr(self, "prev_date_btn"):
-                self.prev_date_btn.setEnabled(False)
-            if hasattr(self, "next_date_btn"):
-                self.next_date_btn.setEnabled(False)
-
-            logger.debug("Cleared plot and UI state for filter change")
-
-        except Exception as e:
-            logger.warning("Error clearing plot and UI state: %s", e)
+        self.ui_state_coordinator.clear_plot_and_ui_state()
 
     def mark_no_sleep_period(self) -> None:
         """Mark current date as having no sleep period."""
@@ -1233,26 +1716,17 @@ class SleepScoringMainWindow(QMainWindow):
 
     def toggle_adjacent_day_markers(self, show: bool) -> None:
         """Toggle display of adjacent day markers from adjacent days."""
-        logger.info(f"Toggling adjacent day markers: {show}")
-
-        if not hasattr(self, "plot_widget") or not self.plot_widget:
-            logger.warning("Plot widget not available for adjacent day markers")
-            return
-
-        # Store the state
-        self.show_adjacent_day_markers = show
-
-        if show:
-            # Load and display adjacent day markers
-            self._load_and_display_adjacent_day_markers()
-        else:
-            # Clear adjacent day markers
-            self._clear_adjacent_day_markers()
+        self.ui_state_coordinator.toggle_adjacent_day_markers(show)
 
     def _load_and_display_adjacent_day_markers(self) -> None:
         """Load markers from adjacent days and display as adjacent day markers."""
-        if not self.available_dates or self.current_date_index is None:
-            logger.info("Adjacent day markers: No available dates or current date index")
+        if (
+            not self.available_dates
+            or self.current_date_index is None
+            or self.current_date_index < 0
+            or self.current_date_index >= len(self.available_dates)
+        ):
+            logger.info("Adjacent day markers: No available dates or invalid date index")
             return
 
         current_date = self.available_dates[self.current_date_index]
@@ -1289,7 +1763,7 @@ class SleepScoringMainWindow(QMainWindow):
 
         # Display adjacent day markers on plot
         if adjacent_day_markers:
-            if hasattr(self.plot_widget, "display_adjacent_day_markers"):
+            if hasattr(self.plot_widget, "display_adjacent_day_markers"):  # KEEP: Plot widget duck typing
                 logger.info("Displaying adjacent day markers on plot")
                 self.plot_widget.display_adjacent_day_markers(adjacent_day_markers)
             else:
@@ -1306,12 +1780,8 @@ class SleepScoringMainWindow(QMainWindow):
 
             # First, let's check what dates are actually in the database
             try:
-                with self.db_manager._get_connection() as conn:
-                    cursor = conn.execute(
-                        "SELECT DISTINCT analysis_date FROM sleep_markers_extended WHERE filename = ? ORDER BY analysis_date", (filename,)
-                    )
-                    available_dates = [row[0] for row in cursor.fetchall()]
-                    logger.info(f"Available dates in database for {filename}: {available_dates}")
+                available_dates = self.db_manager.file_registry.get_available_dates_for_file(filename)
+                logger.info(f"Available dates in database for {filename}: {available_dates}")
             except Exception as e:
                 logger.exception(f"Error checking available dates: {e}")
 
@@ -1344,7 +1814,7 @@ class SleepScoringMainWindow(QMainWindow):
 
     def _clear_adjacent_day_markers(self) -> None:
         """Clear all adjacent day markers from the plot."""
-        if hasattr(self.plot_widget, "clear_adjacent_day_markers"):
+        if hasattr(self.plot_widget, "clear_adjacent_day_markers"):  # KEEP: Plot widget duck typing
             self.plot_widget.clear_adjacent_day_markers()
 
     def load_saved_markers(self) -> None:
@@ -1356,7 +1826,11 @@ class SleepScoringMainWindow(QMainWindow):
     def load_saved_nonwear_markers(self) -> None:
         """Load saved nonwear markers for current file and date."""
         try:
-            if not self.selected_file or not hasattr(self, "current_date_index"):
+            if not self.selected_file:
+                return
+
+            # Validate bounds before accessing
+            if not self.available_dates or self.current_date_index < 0 or self.current_date_index >= len(self.available_dates):
                 return
 
             current_date = self.available_dates[self.current_date_index]
@@ -1369,7 +1843,7 @@ class SleepScoringMainWindow(QMainWindow):
             )
 
             # Load into plot widget
-            if hasattr(self.plot_widget, "load_daily_nonwear_markers"):
+            if hasattr(self.plot_widget, "load_daily_nonwear_markers"):  # KEEP: Plot widget duck typing
                 self.plot_widget.load_daily_nonwear_markers(daily_nonwear_markers, markers_saved=True)
                 logger.debug("Loaded nonwear markers for %s on %s", filename, current_date)
 
@@ -1377,114 +1851,47 @@ class SleepScoringMainWindow(QMainWindow):
             logger.warning("Error loading nonwear markers: %s", e)
 
     def load_all_saved_markers_on_startup(self) -> None:
-        """Load all saved markers from database on application startup."""
-        try:
-            all_sleep_metrics = self._get_cached_metrics()
-            logger.debug("Loaded %s saved records on startup from database", len(all_sleep_metrics))
+        """
+        Load all saved markers from database on application startup.
 
-            # Log summary (extract filenames directly without expensive to_export_dict() conversion)
-            if all_sleep_metrics:
-                files_with_data = {metrics.filename for metrics in all_sleep_metrics}
-                logger.debug("Found data for %s files: %s", len(files_with_data), list(files_with_data))
-        except Exception as e:
-            logger.warning("Error loading saved data on startup: %s", e)
+        NOTE: This is now a no-op. MarkerLoadingCoordinator automatically loads
+        markers when file/date state changes are dispatched to the Redux store.
+        Keeping this method for backwards compatibility with existing callers.
+        """
+        logger.info("MAIN WINDOW: load_all_saved_markers_on_startup() - handled by MarkerLoadingCoordinator")
 
     def _load_diary_data_for_file(self) -> None:
         """Load diary data for the currently selected file."""
         self.diary_manager.load_diary_data_for_file()
 
     def auto_save_current_markers(self) -> None:
-        """Auto-save current markers before changing date/file."""
-        if hasattr(self.plot_widget, "sleep_markers") and self.plot_widget.sleep_markers and self.selected_file:
-            # Calculate comprehensive sleep metrics with algorithm results
-            self.data_manager.extract_enhanced_participant_info(self.selected_file)
+        """
+        Auto-save current markers before changing date/file.
 
-            # Get algorithm results and activity data from plot widget
-            sadeh_results = getattr(self.plot_widget, "sadeh_results", [])
-            choi_results = self.plot_widget.get_choi_results_per_minute() if hasattr(self.plot_widget, "get_choi_results_per_minute") else []
-            nwt_sensor_results = (
-                self.plot_widget.get_nonwear_sensor_results_per_minute() if hasattr(self.plot_widget, "get_nonwear_sensor_results_per_minute") else []
-            )
-            # For Sadeh algorithm, we MUST use axis_y data specifically
-            axis_y_data = self._get_axis_y_data_for_sadeh()
-            x_data = getattr(self.plot_widget, "x_data", [])
+        Uses the SAME save path as manual save for consistency.
+        """
+        # Get daily_sleep_markers from plot widget
+        daily_sleep_markers = getattr(self.plot_widget, "daily_sleep_markers", None)
+        if not daily_sleep_markers:
+            return
 
-            # Calculate comprehensive sleep metrics using the new object method
-            sleep_metrics = self.data_manager.calculate_sleep_metrics_object(
-                self.plot_widget.sleep_markers,
-                sadeh_results,
-                choi_results,
-                axis_y_data,
-                x_data,
-                self.selected_file,
-                nwt_sensor_results,
-            )
+        main_sleep = daily_sleep_markers.get_main_sleep()
+        if not main_sleep or not main_sleep.is_complete or not self.selected_file:
+            return
 
-            if sleep_metrics:
-                # Update metadata
-                current_date = self.available_dates[self.current_date_index] if self.available_dates else datetime.now()
-                sleep_metrics.analysis_date = current_date.strftime("%Y-%m-%d")
-                sleep_metrics.updated_at = datetime.now().isoformat()
+        if not FeatureFlags.ENABLE_AUTOSAVE:
+            return
 
-                # Use autosave instead of regular save (if enabled)
-                if FeatureFlags.ENABLE_AUTOSAVE:
-                    self.export_manager.autosave_sleep_metrics([sleep_metrics], AlgorithmType.SADEH_1994_ACTILIFE)
-
-                    # Invalidate marker status cache for this file after auto-save
-                    if self.selected_file:
-                        self._invalidate_marker_status_cache(Path(self.selected_file).name)
+        # Delegate to the autosave callback which now uses the same path as manual save
+        self._autosave_sleep_markers_to_db(daily_sleep_markers)
 
     def set_ui_enabled(self, enabled) -> None:
         """Enable or disable UI controls based on folder selection status."""
-        # File selection and navigation
-        self.file_selector.setEnabled(enabled)
-        self.prev_date_btn.setEnabled(enabled and self.current_date_index > 0)
-        self.next_date_btn.setEnabled(enabled and self.current_date_index < len(self.available_dates) - 1)
-
-        # View mode buttons
-        self.view_24h_btn.setEnabled(enabled)
-        self.view_48h_btn.setEnabled(enabled)
-
-        # Manual time entry
-        if hasattr(self, "onset_time_input"):
-            self.onset_time_input.setEnabled(enabled)
-        if hasattr(self, "offset_time_input"):
-            self.offset_time_input.setEnabled(enabled)
-
-        # Action buttons
-        if hasattr(self, "save_markers_btn"):
-            self.save_markers_btn.setEnabled(enabled)
-        if hasattr(self, "no_sleep_btn"):
-            self.no_sleep_btn.setEnabled(enabled)
-        if hasattr(self, "clear_markers_btn"):
-            self.clear_markers_btn.setEnabled(enabled)
-        if hasattr(self, "export_btn"):
-            self.export_btn.setEnabled(enabled)
-
-        # Plot widget
-        self.plot_widget.setEnabled(enabled)
-
-        # Update folder info
-        if enabled:
-            self.update_folder_info_label()
+        self.ui_state_coordinator.set_ui_enabled(enabled)
 
     def update_folder_info_label(self) -> None:
         """Update the file selection label with current file count."""
-        file_count = len(self.data_service.available_files) if hasattr(self.data_service, "available_files") else 0
-
-        # Update the file selection label instead of folder info label
-        if hasattr(self, "file_selection_label"):
-            if self.data_service.get_database_mode():
-                self.file_selection_label.setText(f"File Selection ({file_count} files from database)")
-            elif hasattr(self.data_service, "get_data_folder") and self.data_service.get_data_folder():
-                folder_name = Path(self.data_service.get_data_folder()).name
-                self.file_selection_label.setText(f"File Selection ({file_count} files from {folder_name})")
-            else:
-                self.file_selection_label.setText(f"File Selection ({file_count} files)")
-
-        # Keep folder_info_label empty for compatibility
-        if hasattr(self, "folder_info_label"):
-            self.folder_info_label.setText("")
+        self.ui_state_coordinator.update_folder_info_label()
 
     # Add placeholder methods for configuration and import functionality
     def on_epoch_length_changed(self, value) -> None:
@@ -1511,427 +1918,67 @@ class SleepScoringMainWindow(QMainWindow):
 
     def update_status_bar(self, message: str | None = None) -> None:
         """Update the status bar with current information."""
-        if message:
-            self.status_bar.showMessage(message, 5000)  # Show for 5 seconds
+        self.ui_state_coordinator.update_status_bar(message)
 
-        # Update data source label - all data is now always from database
-        self.data_source_label.setText("Activity: Database")
+    def get_sleep_algorithm_display_name(self) -> str:
+        """Get the display name for the configured sleep algorithm."""
+        try:
+            if self.config_manager and self.config_manager.config:
+                algorithm_id = self.config_manager.config.sleep_algorithm_id
+                if algorithm_id:
+                    from sleep_scoring_app.services.algorithm_service import get_algorithm_service
 
-        # Update file count
-        if hasattr(self, "file_selector") and hasattr(self.file_selector, "table"):
-            row_count = self.file_selector.table.rowCount()
-            self.file_count_label.setText(f"Files: {row_count}")
-        else:
-            self.file_count_label.setText("Files: 0")
+                    available = get_algorithm_service().get_available_sleep_algorithms()
+                    if algorithm_id in available:
+                        return available[algorithm_id]
+        except Exception as e:
+            logger.warning("Failed to get sleep algorithm name: %s", e)
+
+        return "Sadeh"
 
     def update_data_source_status(self) -> None:
         """Update the data source status label."""
-        try:
-            # All data is now always stored in database
-            stats = self.db_manager.get_database_stats()
-            file_count = stats.get("unique_files", 0)
-            record_count = stats.get("total_records", 0)
-
-            status_text = f"{file_count} imported files, {record_count} total records"
-            style = "color: #27ae60; font-weight: bold;"
-
-            # Update the activity status label if it exists
-            if hasattr(self, "data_settings_tab") and hasattr(self.data_settings_tab, "activity_status_label"):
-                self.data_settings_tab.activity_status_label.setText(status_text)
-                self.data_settings_tab.activity_status_label.setStyleSheet(style)
-
-        except Exception as e:
-            error_text = "Status unavailable"
-            if hasattr(self, "data_settings_tab") and hasattr(self.data_settings_tab, "activity_status_label"):
-                self.data_settings_tab.activity_status_label.setText(error_text)
-                self.data_settings_tab.activity_status_label.setStyleSheet("color: #e74c3c;")
-            logger.warning("Error updating data source status: %s", e)
+        self.ui_state_coordinator.update_data_source_status()
 
     def browse_data_folder(self) -> None:
         """Browse for CSV data folder (does not automatically load files)."""
-        # Start from last used folder or home directory
-        start_dir = self.config_manager.config.data_folder or str(Path.home())
-        directory = QFileDialog.getExistingDirectory(self, "Select Data Folder", start_dir)
-
-        if directory:
-            # Save to config but don't automatically load files
-            self.config_manager.update_data_folder(directory)
+        self.import_coordinator.browse_data_folder()
 
     def browse_activity_files(self) -> None:
         """Browse for activity data files (multi-select)."""
-        # Start from last used activity directory or home directory
-        start_dir = self.config_manager.config.import_activity_directory or str(Path.home())
-
-        # Build file filter based on current data paradigm
-        file_filter = self._get_paradigm_file_filter()
-
-        files, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Select Activity Data Files",
-            start_dir,
-            file_filter,
-        )
-
-        if files and hasattr(self, "data_settings_tab") and hasattr(self.data_settings_tab, "activity_import_files_label"):
-            # Store selected files
-            self._selected_activity_files = [Path(f) for f in files]
-            # Display file count
-            file_count = len(files)
-            display_text = f"{file_count} file(s) selected"
-            self.data_settings_tab._set_path_label_text(self.data_settings_tab.activity_import_files_label, display_text)
-            self.data_settings_tab.activity_import_btn.setEnabled(True)
-            # Save directory of first file to config for next browse
-            self.config_manager.config.import_activity_directory = str(Path(files[0]).parent)
-            self.config_manager.save_config()
-
-    def _get_paradigm_file_filter(self) -> str:
-        """
-        Build file filter string based on current data paradigm.
-
-        Returns:
-            File filter string for QFileDialog based on paradigm setting.
-            - EPOCH_BASED: CSV and Excel files only
-            - RAW_ACCELEROMETER: GT3X, CSV, and Excel files
-
-        """
-        try:
-            paradigm_value = self.config_manager.config.data_paradigm
-            paradigm = StudyDataParadigm(paradigm_value)
-        except (ValueError, AttributeError):
-            paradigm = StudyDataParadigm.get_default()
-
-        if paradigm == StudyDataParadigm.RAW_ACCELEROMETER:
-            # Raw accelerometer mode - GT3X files primary, CSV/Excel secondary
-            return "Supported Files (*.gt3x *.csv *.xlsx *.xls);;GT3X Files (*.gt3x);;CSV Files (*.csv);;Excel Files (*.xlsx *.xls);;All Files (*)"
-        # Default: EPOCH_BASED - CSV and Excel files only
-        return "Epoch Data Files (*.csv *.xlsx *.xls);;CSV Files (*.csv);;Excel Files (*.xlsx *.xls);;All Files (*)"
+        self.import_coordinator.browse_activity_files()
 
     def browse_nonwear_files(self) -> None:
         """Browse for nonwear sensor files (multi-select)."""
-        # Start from last used nonwear directory or home directory
-        start_dir = self.config_manager.config.import_nonwear_directory or str(Path.home())
-        files, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Select Nonwear Sensor Files",
-            start_dir,
-            "CSV Files (*.csv);;All Files (*)",
-        )
-
-        if files and hasattr(self, "data_settings_tab") and hasattr(self.data_settings_tab, "nwt_import_files_label"):
-            # Store selected files
-            self._selected_nonwear_files = [Path(f) for f in files]
-            # Display file count
-            file_count = len(files)
-            display_text = f"{file_count} file(s) selected"
-            self.data_settings_tab._set_path_label_text(self.data_settings_tab.nwt_import_files_label, display_text)
-            self.data_settings_tab.nwt_import_btn.setEnabled(True)
-            # Save directory of first file to config for next browse
-            self.config_manager.config.import_nonwear_directory = str(Path(files[0]).parent)
-            self.config_manager.save_config()
-
-    def _validate_files_against_paradigm(self, files: list[Path]) -> tuple[list[Path], list[Path]]:
-        """
-        Validate selected files against the current data paradigm.
-
-        Args:
-            files: List of file paths to validate
-
-        Returns:
-            Tuple of (compatible_files, incompatible_files)
-
-        """
-        try:
-            paradigm_value = self.config_manager.config.data_paradigm
-            paradigm = StudyDataParadigm(paradigm_value)
-        except (ValueError, AttributeError):
-            paradigm = StudyDataParadigm.get_default()
-
-        compatible_extensions = paradigm.get_compatible_file_extensions()
-        compatible_files = []
-        incompatible_files = []
-
-        for file_path in files:
-            ext = file_path.suffix.lower()
-            if ext in compatible_extensions:
-                compatible_files.append(file_path)
-            else:
-                incompatible_files.append(file_path)
-
-        return compatible_files, incompatible_files
+        self.import_coordinator.browse_nonwear_files()
 
     def start_activity_import(self) -> None:
         """Start the activity data import process."""
-        if not hasattr(self, "data_settings_tab"):
-            return
-
-        # Check for selected files
-        if not hasattr(self, "_selected_activity_files") or not self._selected_activity_files:
-            QMessageBox.warning(
-                self,
-                "No Files Selected",
-                "Please select activity data files to import",
-            )
-            return
-
-        # Validate files against current paradigm
-        compatible_files, incompatible_files = self._validate_files_against_paradigm(self._selected_activity_files)
-
-        if incompatible_files:
-            # Get current paradigm for message
-            try:
-                paradigm_value = self.config_manager.config.data_paradigm
-                paradigm = StudyDataParadigm(paradigm_value)
-            except (ValueError, AttributeError):
-                paradigm = StudyDataParadigm.get_default()
-
-            paradigm_name = paradigm.get_display_name()
-            compatible_exts = ", ".join(paradigm.get_compatible_file_extensions())
-            incompatible_names = "\n".join(f"  - {f.name}" for f in incompatible_files[:10])
-            if len(incompatible_files) > 10:
-                incompatible_names += f"\n  ... and {len(incompatible_files) - 10} more"
-
-            if compatible_files:
-                # Some files are compatible - ask user what to do
-                msg = (
-                    f"The following files are not compatible with the current paradigm "
-                    f"({paradigm_name}):\n\n{incompatible_names}\n\n"
-                    f"Compatible file types: {compatible_exts}\n\n"
-                    f"Do you want to import only the {len(compatible_files)} compatible file(s)?"
-                )
-                reply = QMessageBox.question(
-                    self,
-                    "Incompatible Files",
-                    msg,
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                )
-                if reply == QMessageBox.StandardButton.No:
-                    return
-                # Use only compatible files
-                self._selected_activity_files = compatible_files
-            else:
-                # No compatible files at all
-                QMessageBox.warning(
-                    self,
-                    "Incompatible Files",
-                    f"None of the selected files are compatible with the current paradigm "
-                    f"({paradigm_name}).\n\n"
-                    f"Compatible file types: {compatible_exts}\n\n"
-                    f"Please select different files or change the data paradigm in Study Settings.",
-                )
-                return
-
-        tab = self.data_settings_tab
-
-        tab.activity_import_btn.setEnabled(False)
-        tab.activity_import_btn.setText("Import in Progress...")
-        tab.activity_progress_label.setText("Starting import...")
-        tab.activity_progress_label.setVisible(True)
-        tab.activity_progress_bar.setVisible(True)
-        tab.activity_progress_bar.setValue(0)
-
-        # Build custom columns dict if using Generic CSV
-        custom_columns = None
-        if self.config_manager.config.device_preset == "generic_csv":
-            config = self.config_manager.config
-            if config.custom_date_column:  # Only use custom columns if configured
-                custom_columns = {
-                    "date": config.custom_date_column,
-                    "time": config.custom_time_column if not config.datetime_combined else None,
-                    "activity": config.custom_activity_column or config.custom_axis_y_column,
-                    "datetime_combined": config.datetime_combined,
-                    # Axis columns for algorithm use (Y=vertical, X=lateral, Z=forward)
-                    "axis_y": config.custom_axis_y_column,
-                    "axis_x": config.custom_axis_x_column,
-                    "axis_z": config.custom_axis_z_column,
-                    "vector_magnitude": config.custom_vector_magnitude_column,
-                }
-
-        # Start worker thread with selected files
-        self.import_worker = ImportWorker(
-            tab.import_service,
-            self._selected_activity_files,
-            tab.skip_rows_spin.value(),
-            False,  # force_reimport
-            include_nonwear=False,
-            custom_columns=custom_columns,
-        )
-
-        # Connect worker signals with thread-safe queued connections
-        self.import_worker.progress_updated.connect(self.update_activity_progress, Qt.ConnectionType.QueuedConnection)
-        self.import_worker.nonwear_progress_updated.connect(self.update_nonwear_progress, Qt.ConnectionType.QueuedConnection)
-        self.import_worker.import_completed.connect(self.activity_import_finished, Qt.ConnectionType.QueuedConnection)
-
-        # Start import
-        self.import_worker.start()
+        self.import_coordinator.start_activity_import()
 
     def start_nonwear_import(self) -> None:
         """Start the nonwear sensor data import process."""
-        if not hasattr(self, "data_settings_tab"):
-            return
-
-        # Check for selected files
-        if not hasattr(self, "_selected_nonwear_files") or not self._selected_nonwear_files:
-            QMessageBox.warning(
-                self,
-                "No Files Selected",
-                "Please select nonwear sensor files to import",
-            )
-            return
-
-        tab = self.data_settings_tab
-        tab.nwt_import_btn.setEnabled(False)
-        tab.nwt_import_btn.setText("Import in Progress...")
-
-        # Show progress components
-        if hasattr(tab, "nwt_progress_label") and hasattr(tab, "nwt_progress_bar"):
-            tab.nwt_progress_label.setText("Starting NWT import...")
-            tab.nwt_progress_label.setVisible(True)
-            tab.nwt_progress_bar.setVisible(True)
-            tab.nwt_progress_bar.setValue(0)
-
-        try:
-            # Import NonwearImportWorker
-            from sleep_scoring_app.services.nonwear_import_worker import NonwearImportWorker
-
-            # Create and configure the nonwear import worker with selected files
-            self.nonwear_import_worker = NonwearImportWorker(tab.import_service, self._selected_nonwear_files)
-
-            # Connect signals for progress updates
-            self.nonwear_import_worker.progress_updated.connect(self.update_nonwear_progress, Qt.ConnectionType.QueuedConnection)
-            self.nonwear_import_worker.import_completed.connect(self.nonwear_import_finished, Qt.ConnectionType.QueuedConnection)
-
-            # Start the async import
-            self.nonwear_import_worker.start()
-
-        except Exception as e:
-            QMessageBox.critical(self, "Import Error", f"Failed to start nonwear import: {e}")
-            tab.nwt_import_btn.setEnabled(True)
-            tab.nwt_import_btn.setText("Import NWT Data to Database")
+        self.import_coordinator.start_nonwear_import()
 
     def update_activity_progress(self, progress) -> None:
         """Update activity import progress."""
-        if hasattr(self, "data_settings_tab"):
-            tab = self.data_settings_tab
-            tab.activity_progress_bar.setValue(int(progress.file_progress_percent))
-            tab.activity_progress_label.setText(f"Files: {progress.processed_files}/{progress.total_files}")
+        self.import_coordinator.update_activity_progress(progress)
 
     def update_nonwear_progress(self, progress) -> None:
         """Update nonwear import progress."""
-        if hasattr(self, "data_settings_tab"):
-            tab = self.data_settings_tab
-            if hasattr(tab, "nwt_progress_bar") and hasattr(tab, "nwt_progress_label"):
-                tab.nwt_progress_bar.setValue(int(progress.nonwear_progress_percent))
-                tab.nwt_progress_label.setText(f"NWT Files: {progress.processed_nonwear_files}/{progress.total_nonwear_files}")
+        self.import_coordinator.update_nonwear_progress(progress)
 
     def activity_import_finished(self, progress) -> None:
         """Handle activity import completion."""
-        if hasattr(self, "data_settings_tab"):
-            tab = self.data_settings_tab
-            tab.activity_import_btn.setEnabled(False)
-            tab.activity_import_btn.setText("Import")
-            tab.activity_progress_label.setText("Import completed")
-            # Clear the file selection label and stored files
-            tab._set_path_label_text(tab.activity_import_files_label, "No files selected")
-            self.pending_activity_import_files = []
-            # Hide progress components after a delay
-            QTimer.singleShot(3000, lambda: self._hide_progress_components())
-
-            if progress.errors:
-                QMessageBox.warning(
-                    self,
-                    "Import Completed with Errors",
-                    f"Import completed with {len(progress.errors)} errors.",
-                )
-            else:
-                QMessageBox.information(
-                    self,
-                    "Import Successful",
-                    f"Successfully imported {len(progress.imported_files)} files.",
-                )
-
-            # Invalidate marker status cache since new files might have markers
-            self._invalidate_marker_status_cache()
-
-            # Refresh file list
-            self.load_available_files(preserve_selection=False)
-
-            # Auto-refresh imported files table
-            if hasattr(tab, "file_management_widget"):
-                tab.file_management_widget.refresh_files()
+        self.import_coordinator.activity_import_finished(progress)
 
     def nonwear_import_finished(self, progress) -> None:
         """Handle nonwear import completion."""
-        if hasattr(self, "data_settings_tab"):
-            tab = self.data_settings_tab
-            tab.nwt_import_btn.setEnabled(True)
-            tab.nwt_import_btn.setText("Import NWT Data to Database")
-
-            # Update and hide progress components
-            if hasattr(tab, "nwt_progress_label") and hasattr(tab, "nwt_progress_bar"):
-                tab.nwt_progress_label.setText("Import completed")
-                # Hide after a delay
-                QTimer.singleShot(3000, lambda: self._hide_nonwear_progress_components())
-
-            # Show results
-            if progress.errors:
-                QMessageBox.warning(
-                    self,
-                    "Import Completed with Errors",
-                    f"Nonwear sensor data import completed with {len(progress.errors)} errors.",
-                )
-            else:
-                QMessageBox.information(
-                    self,
-                    "Import Successful",
-                    f"Nonwear sensor data imported successfully. Imported {len(progress.imported_nonwear_files)} files.",
-                )
-
-            # Clear nonwear cache and refresh plot to show newly imported data
-            if hasattr(self, "data_service") and hasattr(self.data_service, "nonwear_data_factory"):
-                self.data_service.nonwear_data_factory.clear_cache()
-            if hasattr(self, "selected_file") and self.selected_file:
-                self.load_nonwear_data_for_plot()
+        self.import_coordinator.nonwear_import_finished(progress)
 
     def load_data_folder(self) -> None:
         """Load data folder and enable UI."""
-        folder_path = QFileDialog.getExistingDirectory(
-            self,
-            "Select folder containing CSV data files",
-            "",  # Start in current directory
-            QFileDialog.Option.ShowDirsOnly,
-        )
-
-        if folder_path:
-            # Set the data folder and load files
-            self.data_service.set_data_folder(folder_path)
-
-            # Only load CSV files if we're in CSV mode
-            if not self.data_service.get_database_mode():
-                self.load_available_files(preserve_selection=False)
-            else:
-                # In database mode, load files from database with completion counts
-                self.load_available_files(preserve_selection=False)
-
-            self.set_ui_enabled(True)
-
-            # Save to config
-            self.config_manager.update_data_folder(folder_path)
-
-            # Show feedback to user
-            file_count = len(self.available_files)
-            if file_count > 0:
-                QMessageBox.information(
-                    self,
-                    "Folder Loaded",
-                    f"Successfully loaded {file_count} CSV file{'s' if file_count != 1 else ''} from:\n\n{folder_path}\n\n"
-                    "Files are now available in the file selector dropdown.",
-                )
-            else:
-                QMessageBox.warning(
-                    self,
-                    "No Files Found",
-                    f"No CSV files found in:\n\n{folder_path}\n\nPlease select a folder containing CSV data files.",
-                )
+        self.import_coordinator.load_data_folder()
 
     def clear_all_markers(self) -> None:
         """Clear all sleep markers and metrics from database (preserves imported data)."""
@@ -1939,14 +1986,14 @@ class SleepScoringMainWindow(QMainWindow):
 
     def save_export_options(self) -> None:
         """Save export options to config."""
-        if hasattr(self, "export_tab"):
+        if self.export_tab is not None:
             tab = self.export_tab
             self.config_manager.update_export_options(
                 tab.include_headers_checkbox.isChecked(),
                 tab.include_metadata_checkbox.isChecked(),
             )
             # Save nonwear separate file option
-            if hasattr(tab, "separate_nonwear_file_checkbox"):
+            if hasattr(tab, "separate_nonwear_file_checkbox"):  # KEEP: Tab duck typing
                 self.config_manager.config.export_nonwear_separate = tab.separate_nonwear_file_checkbox.isChecked()
                 self.config_manager.save_config()
 
@@ -1957,7 +2004,7 @@ class SleepScoringMainWindow(QMainWindow):
         directory = QFileDialog.getExistingDirectory(self, "Select Output Directory", start_dir)
         if directory:
             self.export_output_path = directory
-            if hasattr(self, "export_tab") and hasattr(self.export_tab, "export_output_label"):
+            if self.export_tab and hasattr(self.export_tab, "export_output_label"):  # KEEP: Tab duck typing
                 self.export_tab.export_output_label.setText(directory)
             # Save to config
             self.config_manager.update_export_directory(directory)
@@ -2004,10 +2051,12 @@ class SleepScoringMainWindow(QMainWindow):
             self.config_manager.update_export_grouping(self.export_grouping_group.checkedId())
 
             # Check if nonwear should be exported separately
-            export_nonwear_separate = hasattr(self, "separate_nonwear_file_checkbox") and self.separate_nonwear_file_checkbox.isChecked()
+            export_nonwear_separate = hasattr(
+                self, "separate_nonwear_file_checkbox"
+            )  # KEEP: Optional UI element and self.separate_nonwear_file_checkbox.isChecked()
 
             # Perform the export directly with data
-            success = self.export_manager.perform_direct_export(
+            result = self.export_manager.perform_direct_export(
                 all_sleep_metrics,
                 self.export_grouping_group.checkedId(),
                 self.export_output_path,
@@ -2017,18 +2066,71 @@ class SleepScoringMainWindow(QMainWindow):
                 export_nonwear_separate=export_nonwear_separate,
             )
 
-            if success:
+            # Display results with warnings and errors
+            if result.success:
                 data_source = "database" if self.data_manager.use_database else "CSV markers"
-                QMessageBox.information(
-                    self,
-                    "Export Complete",
-                    f"Successfully exported {len(all_sleep_metrics)} records from {data_source} to:\n{self.export_output_path}",
-                )
+                message_parts = [f"Successfully exported {result.files_exported} file(s) from {data_source} to:\n{self.export_output_path}"]
+
+                if result.files_with_issues > 0:
+                    message_parts.append(f"\n{result.files_with_issues} file(s) had issues during export.")
+
+                if result.warnings:
+                    message_parts.append(f"\n\nWarnings ({len(result.warnings)}):")
+                    for warning in result.warnings[:5]:  # Show first 5 warnings
+                        message_parts.append(f"  - {warning}")
+                    if len(result.warnings) > 5:
+                        message_parts.append(f"  ... and {len(result.warnings) - 5} more warnings")
+
+                if result.errors:
+                    message_parts.append(f"\n\nErrors ({len(result.errors)}):")
+                    for error in result.errors[:5]:  # Show first 5 errors
+                        message_parts.append(f"  - {error}")
+                    if len(result.errors) > 5:
+                        message_parts.append(f"  ... and {len(result.errors) - 5} more errors")
+
+                # Choose appropriate message box type
+                if result.errors:
+                    QMessageBox.warning(
+                        self,
+                        "Export Completed with Errors",
+                        "\n".join(message_parts),
+                    )
+                elif result.warnings:
+                    QMessageBox.information(
+                        self,
+                        "Export Completed with Warnings",
+                        "\n".join(message_parts),
+                    )
+                else:
+                    QMessageBox.information(
+                        self,
+                        "Export Complete",
+                        "\n".join(message_parts),
+                    )
             else:
-                QMessageBox.warning(
+                # Export completely failed
+                message_parts = ["Export operation failed."]
+
+                if result.errors:
+                    message_parts.append(f"\n\nErrors ({len(result.errors)}):")
+                    for error in result.errors[:10]:  # Show more errors on failure
+                        message_parts.append(f"  - {error}")
+                    if len(result.errors) > 10:
+                        message_parts.append(f"  ... and {len(result.errors) - 10} more errors")
+
+                if result.warnings:
+                    message_parts.append(f"\n\nWarnings ({len(result.warnings)}):")
+                    for warning in result.warnings[:5]:
+                        message_parts.append(f"  - {warning}")
+                    if len(result.warnings) > 5:
+                        message_parts.append(f"  ... and {len(result.warnings) - 5} more warnings")
+
+                message_parts.append("\n\nCheck the console for full details.")
+
+                QMessageBox.critical(
                     self,
                     "Export Failed",
-                    "Export operation failed. Check the console for details.",
+                    "\n".join(message_parts),
                 )
 
         except Exception as e:
@@ -2056,11 +2158,11 @@ class SleepScoringMainWindow(QMainWindow):
     def _hide_progress_components(self) -> None:
         """Hide activity progress components after import completion."""
         try:
-            if hasattr(self, "data_settings_tab"):
+            if hasattr(self, "data_settings_tab"):  # KEEP: Cleanup during shutdown
                 tab = self.data_settings_tab
-                if hasattr(tab, "activity_progress_label"):
+                if hasattr(tab, "activity_progress_label"):  # KEEP: Tab duck typing  # KEEP: Tab duck typing
                     tab.activity_progress_label.setVisible(False)
-                if hasattr(tab, "activity_progress_bar"):
+                if hasattr(tab, "activity_progress_bar"):  # KEEP: Tab duck typing
                     tab.activity_progress_bar.setVisible(False)
         except Exception as e:
             logger.warning("Error hiding activity progress components: %s", e)
@@ -2068,11 +2170,11 @@ class SleepScoringMainWindow(QMainWindow):
     def _hide_nonwear_progress_components(self) -> None:
         """Hide nonwear progress components after import completion."""
         try:
-            if hasattr(self, "data_settings_tab"):
+            if hasattr(self, "data_settings_tab"):  # KEEP: Cleanup during shutdown
                 tab = self.data_settings_tab
-                if hasattr(tab, "nwt_progress_label"):
+                if hasattr(tab, "nwt_progress_label"):  # KEEP: Tab duck typing
                     tab.nwt_progress_label.setVisible(False)
-                if hasattr(tab, "nwt_progress_bar"):
+                if hasattr(tab, "nwt_progress_bar"):  # KEEP: Tab duck typing
                     tab.nwt_progress_bar.setVisible(False)
         except Exception as e:
             logger.warning("Error hiding nonwear progress components: %s", e)
@@ -2081,25 +2183,29 @@ class SleepScoringMainWindow(QMainWindow):
         """Clean up resources before shutdown."""
         try:
             # Stop and cleanup timers
-            if hasattr(self, "_table_update_timer") and self._table_update_timer:
+            if self._table_update_timer:
                 self._table_update_timer.stop()
                 self._table_update_timer.deleteLater()
                 self._table_update_timer = None
 
+            # Disconnect store connectors
+            if self._store_connector_manager is not None:
+                self._store_connector_manager.disconnect_all()
+
             # Clean up analysis tab
-            if hasattr(self, "analysis_tab") and self.analysis_tab:
-                if hasattr(self.analysis_tab, "cleanup_tab"):
+            if hasattr(self, "analysis_tab") and self.analysis_tab:  # KEEP: Cleanup during shutdown
+                if hasattr(self.analysis_tab, "cleanup_tab"):  # KEEP: Optional cleanup method
                     self.analysis_tab.cleanup_tab()
 
             # Clean up plot widget (if not already cleaned by analysis tab)
-            if hasattr(self, "plot_widget") and self.plot_widget:
-                if hasattr(self.plot_widget, "cleanup_widget"):
+            if hasattr(self, "plot_widget") and self.plot_widget:  # KEEP: Cleanup during shutdown
+                if hasattr(self.plot_widget, "cleanup_widget"):  # KEEP: Plot widget duck typing
                     self.plot_widget.cleanup_widget()
 
             # Clear data caches
             self.current_date_48h_cache.clear()
             self.main_48h_data = None
-            if hasattr(self.plot_widget, "main_48h_axis_y_data"):
+            if hasattr(self.plot_widget, "main_48h_axis_y_data"):  # KEEP: Plot widget duck typing
                 self.plot_widget.main_48h_axis_y_data = None
 
             # Clear available data
@@ -2113,11 +2219,29 @@ class SleepScoringMainWindow(QMainWindow):
         except Exception as e:
             logger.warning("Error cleaning up main window resources: %s", e)
 
-    def closeEvent(self, event) -> None:  # Qt naming convention
+    def closeEvent(self, event: QCloseEvent) -> None:  # type: ignore[override]
         """Handle window close event with proper cleanup."""
         try:
-            # Auto-save current markers
+            # Force save all pending changes through autosave coordinator
+            if self.autosave_coordinator is not None:  # Guaranteed after Phase 2
+                self.autosave_coordinator.force_save()
+
+            # Auto-save current markers (legacy - will be replaced by autosave coordinator)
             self.auto_save_current_markers()
+
+            # Save session state - session_manager guaranteed after Phase 2
+            current_file = Path(self.selected_file).name if self.selected_file else None
+            self.session_manager.save_all(
+                current_file=current_file,
+                date_index=self.current_date_index,
+                view_mode=self.current_view_mode,
+                current_tab=self.tab_widget.currentIndex(),
+                window=self,
+            )
+
+            # Clean up autosave coordinator
+            if self.autosave_coordinator is not None:  # Guaranteed after Phase 2
+                self.autosave_coordinator.cleanup()
 
             # Clean up resources
             self._cleanup_resources()

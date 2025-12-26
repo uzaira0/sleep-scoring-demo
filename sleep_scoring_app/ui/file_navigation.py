@@ -8,15 +8,22 @@ Manages file and date navigation, dropdown population, and selection handling.
 from __future__ import annotations
 
 import logging
-from datetime import date
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QMessageBox
 
+from sleep_scoring_app.ui.store import Actions
+
 if TYPE_CHECKING:
-    from sleep_scoring_app.ui.main_window import SleepScoringMainWindow
+    from sleep_scoring_app.core.dataclasses import FileInfo
+    from sleep_scoring_app.ui.protocols import (
+        AppStateInterface,
+        MainWindowProtocol,
+        NavigationInterface,
+        ServiceContainer,
+    )
+    from sleep_scoring_app.ui.store import UIStore
 
 logger = logging.getLogger(__name__)
 
@@ -34,80 +41,77 @@ class FileNavigationManager:
     - Handle file selection from table
     """
 
-    def __init__(self, parent: SleepScoringMainWindow) -> None:
+    def __init__(
+        self, store: UIStore, navigation: NavigationInterface, app_state: AppStateInterface, services: ServiceContainer, parent: MainWindowProtocol
+    ) -> None:
         """
         Initialize the file navigation manager.
 
         Args:
-            parent: Reference to main window for navigation controls
+            store: The UI store
+            navigation: Navigation interface
+            app_state: App state coordination interface
+            services: Service container
+            parent: Main window (still needed for some Qt-level access for now)
 
         """
+        self.store = store
+        self.navigation = navigation
+        self.app_state = app_state
+        self.services = services
+        self.main_window = parent
         self.parent = parent
-        logger.info("FileNavigationManager initialized")
 
-    def populate_date_dropdown(self) -> None:
-        """Populate date dropdown with available dates."""
-        if hasattr(self.parent, "data_service") and self.parent.data_service:
-            self.parent.data_service.populate_date_dropdown()
+        logger.info("FileNavigationManager initialized with decoupled interfaces")
 
     def on_date_dropdown_changed(self, index: int) -> None:
-        """Handle date dropdown selection change."""
-        if not hasattr(self.parent, "available_dates") or not self.parent.available_dates:
+        """Handle date dropdown selection change via Redux store."""
+        if not self.navigation.available_dates or index < 0:
             return
 
-        if index >= 0 and index < len(self.parent.available_dates):
-            if index != self.parent.current_date_index:
-                # Check for unsaved markers
-                if self._check_unsaved_markers():
-                    return
+        if index < len(self.navigation.available_dates) and index != self.navigation.current_date_index:
+            # Check for unsaved markers
+            if self._check_unsaved_markers():
+                return
 
-                self.parent.current_date_index = index
-                self.parent.load_current_date()
-                self.parent.state_manager.load_saved_markers()
-
-                if hasattr(self.parent, "data_service") and self.parent.data_service:
-                    self.parent.data_service._update_date_dropdown_current_color()
+            logger.info(f"NAV MANAGER: Dispatching DATE_SELECTED ({index})")
+            # MW-04 FIX: We ONLY dispatch. Connector handles the rest.
+            self.store.dispatch(Actions.date_selected(index))
 
     def prev_date(self) -> None:
-        """Navigate to previous date."""
+        """Navigate to previous date via Redux store."""
         if self._check_unsaved_markers():
             return
 
-        if self.parent.current_date_index > 0:
-            self.parent.current_date_index -= 1
-
-            if hasattr(self.parent.analysis_tab, "date_dropdown"):
-                self.parent.analysis_tab.date_dropdown.setCurrentIndex(self.parent.current_date_index)
-
-            self.parent.load_current_date()
-            self.parent.state_manager.load_saved_markers()
-
-            if hasattr(self.parent, "data_service") and self.parent.data_service:
-                self.parent.data_service._update_date_dropdown_current_color()
+        if self.navigation.current_date_index > 0:
+            logger.info("NAV MANAGER: Dispatching DATE_NAVIGATED (-1)")
+            self.store.dispatch(Actions.date_navigated(-1))
 
     def next_date(self) -> None:
-        """Navigate to next date."""
+        """Navigate to next date via Redux store."""
         if self._check_unsaved_markers():
             return
 
-        if self.parent.current_date_index < len(self.parent.available_dates) - 1:
-            self.parent.current_date_index += 1
-
-            if hasattr(self.parent.analysis_tab, "date_dropdown"):
-                self.parent.analysis_tab.date_dropdown.setCurrentIndex(self.parent.current_date_index)
-
-            self.parent.load_current_date()
-            self.parent.state_manager.load_saved_markers()
-
-            if hasattr(self.parent, "data_service") and self.parent.data_service:
-                self.parent.data_service._update_date_dropdown_current_color()
+        if self.navigation.current_date_index < len(self.navigation.available_dates) - 1:
+            logger.info("NAV MANAGER: Dispatching DATE_NAVIGATED (1)")
+            self.store.dispatch(Actions.date_navigated(1))
 
     def _check_unsaved_markers(self) -> bool:
-        """Check for unsaved markers before navigation."""
-        if not hasattr(self.parent, "plot_widget") or not self.parent.plot_widget:
-            return False
+        """
+        Check for unsaved markers before navigation.
 
-        if hasattr(self.parent.plot_widget, "markers_saved") and not self.parent.plot_widget.markers_saved:
+        Uses Redux store as the source of truth.
+        """
+        logger.info("=== _check_unsaved_markers (file_navigation) START ===")
+
+        # Use the Redux store selectors
+        from sleep_scoring_app.ui.store import Selectors
+
+        has_dirty = Selectors.is_any_markers_dirty(self.parent.store.state)
+        logger.info(f"Redux store is_any_markers_dirty = {has_dirty}")
+
+        if has_dirty:
+            logger.info("Prompting user about unsaved markers")
             reply = QMessageBox.question(
                 self.parent,
                 "Unsaved Markers",
@@ -115,154 +119,63 @@ class FileNavigationManager:
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
-            return reply == QMessageBox.StandardButton.No
+            result = reply == QMessageBox.StandardButton.No
+            logger.info(f"User chose to cancel: {result}")
+            return result
 
+        logger.info("=== _check_unsaved_markers (file_navigation) END - No unsaved markers ===")
         return False
 
     def refresh_file_dropdown_indicators(self) -> None:
         """Refresh file dropdown to show marker indicators."""
-        if hasattr(self.parent, "_refresh_file_dropdown_indicators"):
-            self.parent._refresh_file_dropdown_indicators()
+        # Main window always has this method
+        self.parent._refresh_file_dropdown_indicators()
 
     def update_navigation_buttons(self) -> None:
         """Update navigation button states."""
-        if not hasattr(self.parent, "analysis_tab"):
+        # Analysis tab and navigation buttons always exist after UI setup
+        self.parent.analysis_tab.prev_date_btn.setEnabled(self.parent.current_date_index > 0)
+        self.parent.analysis_tab.next_date_btn.setEnabled(self.parent.current_date_index < len(self.parent.available_dates) - 1)
+
+    def on_file_selected_from_table(self, file_info: FileInfo) -> None:
+        """
+        Handle file selection from table widget using Redux pattern.
+        This is an 'Effect' that orchestrates data loading and store updates.
+        """
+        if not file_info:
             return
 
-        if hasattr(self.parent.analysis_tab, "prev_date_btn"):
-            self.parent.analysis_tab.prev_date_btn.setEnabled(self.parent.current_date_index > 0)
-
-        if hasattr(self.parent.analysis_tab, "next_date_btn"):
-            self.parent.analysis_tab.next_date_btn.setEnabled(self.parent.current_date_index < len(self.parent.available_dates) - 1)
-
-    def on_file_selected_from_table(self, file_info: dict) -> None:
-        """Handle file selection from table widget."""
-        # Clear marker index cache when new file is selected for performance
-        if hasattr(self.parent, "_marker_index_cache"):
-            self.parent._marker_index_cache.clear()
-
-        # CRITICAL FIX: Clear algorithm caches when file selection changes
-        if hasattr(self.parent, "data_service") and self.parent.data_service:
-            self.parent.data_service._clear_all_algorithm_caches()
-            logger.debug("Cleared algorithm caches due to file selection change")
+        logger.info(f"NAV MANAGER: Processing file selection for {file_info.filename}")
 
         try:
-            logger.info("=== TABLE FILE SELECTION START: file_info=%s ===", file_info)
-
-            # Disable activity source dropdown during file loading
-            if hasattr(self.parent, "analysis_tab") and hasattr(self.parent.analysis_tab, "set_activity_source_dropdown_enabled"):
-                self.parent.analysis_tab.set_activity_source_dropdown_enabled(False)
-
-            # Check for unsaved markers before changing file
-            logger.info("Step 1: Checking for unsaved markers")
-            if not self.parent._check_unsaved_markers_before_navigation():
-                logger.info("Step 1: User canceled file change due to unsaved markers")
-                # Re-enable activity source dropdown since we're not changing files
-                if hasattr(self.parent, "analysis_tab") and hasattr(self.parent.analysis_tab, "set_activity_source_dropdown_enabled"):
-                    self.parent.analysis_tab.set_activity_source_dropdown_enabled(True)
-                return
-            logger.info("Step 1: Unsaved marker check completed successfully")
-
-            # Validate file info
-            if not file_info or not file_info.get("filename"):
-                logger.error("Step 2: Invalid file info: %s", file_info)
-                QMessageBox.critical(self.parent, "File Error", "Invalid file information.")
+            # 1. Check for unsaved changes (User interaction permitted here)
+            if self._check_unsaved_markers():
                 return
 
-            filename = file_info.get("filename")
-            logger.info("Step 2: Processing file: %s", filename)
+            # NOTE: file_selected action is ALREADY dispatched by SignalsConnector
+            # DO NOT dispatch again here - it would clear dates that we're about to load
 
-            # Store file info
-            self.parent.current_file_info = file_info
-            self.parent.selected_file = file_info.get("path") or filename
+            # 2. Perform data loading
+            skip_rows = self.services.config_manager.config.skip_rows
+            logger.info(f"NAV MANAGER: Loading dates for {file_info.filename} (skip_rows={skip_rows})")
 
-            # Clear cache when new file is selected
-            logger.info("Step 3: Clearing caches")
-            self.parent.main_48h_data = None
-            if hasattr(self.parent.plot_widget, "main_48h_axis_y_data"):
-                self.parent.plot_widget.main_48h_axis_y_data = None
-            self.parent.current_date_48h_cache.clear()
-            logger.info("Step 3: Cache clearing completed")
+            # This is a pure data call to the service
+            new_dates = self.services.data_service.load_selected_file(file_info, skip_rows)
 
-            # Load the file and get available dates using DataManager
-            logger.info("Step 4: Preparing to load file")
-            skip_rows = self.parent.skip_rows_spin.value() if hasattr(self.parent, "skip_rows_spin") else 10
-            logger.info("Step 4: Loading file with skip_rows: %s", skip_rows)
-
-            # Wrap file loading in try-catch
-            try:
-                logger.info("Step 5: Calling data_service.data_manager.load_selected_file")
-                self.parent.available_dates = self.parent.data_service.data_manager.load_selected_file(file_info, skip_rows)
-                logger.info(
-                    "Step 5: File loaded successfully - available dates: %s", len(self.parent.available_dates) if self.parent.available_dates else 0
-                )
-            except Exception as load_error:
-                logger.exception("Step 5: Failed to load file %s: %s", filename, load_error)
-                import traceback
-
-                logger.exception("Step 5: Full traceback: %s", traceback.format_exc())
-                QMessageBox.critical(
-                    self.parent,
-                    "File Loading Error",
-                    f"Could not load file:\n{filename}\n\nError: {load_error!s}",
-                )
-                return
-
-            logger.info("Step 6: Checking if dates were loaded")
-            if self.parent.available_dates:
-                logger.info("Step 6: Dates available, proceeding with UI updates")
-                # Reset date index for new file
-                self.parent.current_date_index = 0
-                logger.info("Step 6a: Set current_date_index to 0")
-
-                logger.info("Step 7: Populating date dropdown")
-                self.parent.populate_date_dropdown()
-                logger.info("Step 7: Date dropdown populated successfully")
-
-                # Update the current date color based on marker status
-                if hasattr(self.parent, "data_service"):
-                    self.parent.data_service._update_date_dropdown_current_color()
-
-                logger.info("Step 8: Loading current date")
-                self.parent.load_current_date()
-                logger.info("Step 8: Current date loaded successfully")
-
-                logger.info("Step 9: Loading saved markers")
-                self.parent.load_saved_markers()
-                logger.info("Step 9: Saved markers loaded successfully")
-
-                logger.info("Step 10: Loading diary data")
-                self.parent._load_diary_data_for_file()
-                logger.info("Step 10: Diary data loaded successfully")
-
-                # Update activity source dropdown to reflect current preferences
-                if hasattr(self.parent, "analysis_tab") and hasattr(self.parent.analysis_tab, "update_activity_source_dropdown"):
-                    self.parent.analysis_tab.update_activity_source_dropdown()
+            if new_dates:
+                logger.info(f"NAV MANAGER: Found {len(new_dates)} dates for {file_info.filename}. First date: {new_dates[0]}")
+                # 4. Dispatch DATES_LOADED to Store
+                self.store.dispatch(Actions.dates_loaded(new_dates))
+                logger.info("NAV MANAGER: Dispatched DATES_LOADED")
             else:
-                logger.warning("Step 6: No available dates found")
+                logger.warning(f"NAV MANAGER: NO DATES FOUND for {file_info.filename} via service")
+                self.store.dispatch(Actions.dates_loaded([]))
 
-            logger.info("=== TABLE FILE SELECTION COMPLETED SUCCESSFULLY ===")
+            # 5. Load auxiliary data
+            # MainWindowProtocol guarantees this method exists
+            self.main_window._load_diary_data_for_file()
 
         except Exception as e:
-            logger.exception("=== TABLE FILE SELECTION FAILED ===")
-            import traceback
-
-            logger.exception("Full traceback: %s", traceback.format_exc())
-
-            # Show user-friendly error
-            QMessageBox.critical(
-                self.parent,
-                "File Selection Error",
-                f"An error occurred while selecting the file:\n{e!s}",
-            )
-
-            # Reset to safe state
-            self.parent.selected_file = None
-            self.parent.available_dates = []
-            self.parent.current_date_index = 0
-            self.parent.date_dropdown.clear()
-            self.parent.date_dropdown.addItem("Error loading file")
-            self.parent.date_dropdown.setItemData(0, Qt.AlignmentFlag.AlignCenter, Qt.ItemDataRole.TextAlignmentRole)
-            self.parent.date_dropdown.setEnabled(False)
-            self.parent.prev_date_btn.setEnabled(False)
-            self.parent.next_date_btn.setEnabled(False)
+            logger.exception("NAV MANAGER: File selection failed")
+            # Using main_window as parent for dialog is acceptable (Qt parent-child relationship)
+            QMessageBox.critical(self.main_window, "File Error", f"Failed to load file:\n{e}")

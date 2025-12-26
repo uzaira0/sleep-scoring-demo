@@ -719,7 +719,7 @@ class DiaryMappingHelpers:
             return None
 
         # Handle pandas datetime objects
-        if hasattr(date_str, "strftime"):
+        if hasattr(date_str, "strftime"):  # KEEP: Duck typing date/datetime
             try:
                 return date_str.strftime("%Y-%m-%d")
             except Exception as e:

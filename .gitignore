@@ -221,7 +221,7 @@ backups/
 venv-test/
 
 # Documentation and planning files
-*.md
+#*.md
 !README.md
 
 # Data files

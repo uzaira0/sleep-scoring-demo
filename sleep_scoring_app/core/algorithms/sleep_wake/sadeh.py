@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from sleep_scoring_app.core.constants import AlgorithmType
 from sleep_scoring_app.core.pipeline.types import AlgorithmDataRequirement
 
 from .utils import find_datetime_column, scale_counts, validate_and_collapse_epochs
@@ -97,7 +98,7 @@ def sadeh_score(
 
     Validation:
         - Finds datetime/date+time columns automatically
-        - Verifies 1-minute epochs (±1 second tolerance)
+        - Verifies 1-minute epochs (+/-1 second tolerance)
         - Collapses to 1-minute if epochs < 1 minute
         - Raises error if epochs > 1 minute
 
@@ -390,10 +391,12 @@ class SadehAlgorithm:
     def identifier(self) -> str:
         """Unique algorithm identifier."""
         if self._variant_name == "count_scaled" or self._enable_count_scaling:
+            # NOTE: count_scaled is a disabled/experimental variant not in AlgorithmType enum.
+            # Keep as string literal until variant is validated and added to enum.
             return "sadeh_1994_count_scaled"
         if self._variant_name == "original" or self._threshold == 0.0:
-            return "sadeh_1994_original"
-        return "sadeh_1994_actilife"
+            return AlgorithmType.SADEH_1994_ORIGINAL
+        return AlgorithmType.SADEH_1994_ACTILIFE
 
     @property
     def requires_axis(self) -> str:

@@ -129,17 +129,11 @@ class AlgorithmType(StrEnum):
     SADEH_1994_ACTILIFE = "sadeh_1994_actilife"
     COLE_KRIPKE_1992_ORIGINAL = "cole_kripke_1992_original"
     COLE_KRIPKE_1992_ACTILIFE = "cole_kripke_1992_actilife"
+    VAN_HEES_2015_SIB = "van_hees_2015_sib"
 
     # Special values for UI/workflow states
     MANUAL = "manual"  # Manual scoring without algorithm
     CHOI = "choi"  # Nonwear detection (not sleep scoring)
-
-    # Legacy values - kept for database migration compatibility
-    # These should be migrated to specific algorithm IDs
-    _LEGACY_SADEH = "Sadeh"  # Migrate to SADEH_1994_ACTILIFE
-    _LEGACY_COMBINED = "Manual + Algorithm"  # Migrate to SADEH_1994_ACTILIFE
-    _LEGACY_MANUAL_SADEH = "Manual + Sadeh"  # Migrate to SADEH_1994_ACTILIFE
-    _LEGACY_COLE_KRIPKE = "cole_kripke_1992"  # Migrate to COLE_KRIPKE_1992_ACTILIFE
 
     @classmethod
     def get_default(cls) -> "AlgorithmType":
@@ -147,38 +141,11 @@ class AlgorithmType(StrEnum):
         return cls.SADEH_1994_ACTILIFE
 
     @classmethod
-    def migrate_legacy_value(cls, value: str) -> "AlgorithmType":
-        """
-        Migrate legacy algorithm type values to current values.
-
-        Args:
-            value: Legacy or current algorithm type string
-
-        Returns:
-            Current AlgorithmType value
-
-        """
-        # Map legacy values to current values
-        legacy_mapping = {
-            "Sadeh": cls.SADEH_1994_ACTILIFE,
-            "Manual + Algorithm": cls.SADEH_1994_ACTILIFE,
-            "Manual + Sadeh": cls.SADEH_1994_ACTILIFE,
-            "Cole-Kripke": cls.COLE_KRIPKE_1992_ACTILIFE,
-            "cole_kripke_1992": cls.COLE_KRIPKE_1992_ACTILIFE,  # Old single variant
-            "Manual": cls.MANUAL,
-            "Choi": cls.CHOI,
-            "Automatic": cls.SADEH_1994_ACTILIFE,
-        }
-
-        # Check if it's a legacy value
-        if value in legacy_mapping:
-            return legacy_mapping[value]
-
-        # Check if it's already a valid current value
+    def from_value(cls, value: str) -> "AlgorithmType":
+        """Parse algorithm type from string, defaulting to SADEH_1994_ACTILIFE if invalid."""
         try:
             return cls(value)
         except ValueError:
-            # Unknown value, default to SADEH_1994_ACTILIFE
             return cls.SADEH_1994_ACTILIFE
 
 
@@ -201,15 +168,9 @@ class NonwearAlgorithm(StrEnum):
     For creating algorithm instances, use NonwearAlgorithmFactory.create(algorithm_id).
     """
 
-    # Nonwear detection algorithms (registered in NonwearAlgorithmFactory)
     CHOI_2011 = "choi_2011"
     VAN_HEES_2023 = "van_hees_2023"
-
-    # Future algorithms
     VANHEES_2013 = "vanhees_2013"
-
-    # Legacy values - kept for migration compatibility
-    _LEGACY_CHOI = "choi"  # Migrate to CHOI_2011
 
     @classmethod
     def get_default(cls) -> "NonwearAlgorithm":
@@ -217,42 +178,51 @@ class NonwearAlgorithm(StrEnum):
         return cls.CHOI_2011
 
     @classmethod
-    def migrate_legacy_value(cls, value: str) -> "NonwearAlgorithm":
-        """
-        Migrate legacy algorithm type values to current values.
-
-        Args:
-            value: Legacy or current algorithm type string
-
-        Returns:
-            Current NonwearAlgorithm value
-
-        """
-        # Map legacy values to current values
-        legacy_mapping = {
-            "choi": cls.CHOI_2011,
-            "Choi": cls.CHOI_2011,
-            "choi_algorithm": cls.CHOI_2011,
-            "vanhees_2023": cls.VAN_HEES_2023,
-            "van_hees_2023": cls.VAN_HEES_2023,
-        }
-
-        # Check if it's a legacy value
-        if value in legacy_mapping:
-            return legacy_mapping[value]
-
-        # Check if it's already a valid current value
+    def from_value(cls, value: str) -> "NonwearAlgorithm":
+        """Parse nonwear algorithm from string, defaulting to CHOI_2011 if invalid."""
         try:
             return cls(value)
         except ValueError:
-            # Unknown value, default to CHOI_2011
             return cls.CHOI_2011
+
+
+class SleepPeriodDetectorType(StrEnum):
+    """
+    Sleep period detector identifiers.
+
+    These values match the detector IDs registered in SleepPeriodDetectorFactory.
+    Use these for storing/retrieving detector type in database and config.
+
+    For creating detector instances, use SleepPeriodDetectorFactory.create(detector_id).
+    """
+
+    # Epoch-based detectors (work on pre-classified sleep/wake epochs)
+    CONSECUTIVE_ONSET3S_OFFSET5S = "consecutive_onset3s_offset5s"
+    CONSECUTIVE_ONSET5S_OFFSET10S = "consecutive_onset5s_offset10s"
+    TUDOR_LOCKE_2014 = "tudor_locke_2014"
+
+    # Raw-data detectors (work directly on raw accelerometer data)
+    HDCZA_2018 = "hdcza_2018"
+
+    @classmethod
+    def get_default(cls) -> "SleepPeriodDetectorType":
+        """Get the default sleep period detector type."""
+        return cls.CONSECUTIVE_ONSET3S_OFFSET5S
+
+    @classmethod
+    def from_value(cls, value: str) -> "SleepPeriodDetectorType":
+        """Parse detector type from string, defaulting to CONSECUTIVE_ONSET3S_OFFSET5S if invalid."""
+        try:
+            return cls(value)
+        except ValueError:
+            return cls.CONSECUTIVE_ONSET3S_OFFSET5S
 
 
 class NonwearDataSource(StrEnum):
     """Nonwear data source types."""
 
     CHOI_ALGORITHM = "Choi Algorithm"  # Choi nonwear detection from accelerometer
+    VAN_HEES_2023 = "van Hees 2023"  # van Hees 2023 nonwear detection from raw data
     NONWEAR_SENSOR = "Nonwear Sensor"  # External nonwear sensor data
     NWT_SENSOR = "NWT Sensor"  # Alternative name for nonwear time sensor
     MANUAL_NWT = "Manual NWT"  # Manually marked non-wear time

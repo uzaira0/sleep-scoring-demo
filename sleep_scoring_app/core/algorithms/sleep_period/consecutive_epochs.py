@@ -109,7 +109,7 @@ class ConsecutiveEpochsSleepPeriodDetector:
         if self.config.offset_preceding_epoch:
             offset_desc += " (preceding epoch)"
 
-        return f"{onset_desc}. {offset_desc}. Search extension: ±{self.config.search_extension_minutes} minutes."
+        return f"{onset_desc}. {offset_desc}. Search extension: +/-{self.config.search_extension_minutes} minutes."
 
     # === Protocol Methods ===
 

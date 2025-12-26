@@ -11,7 +11,7 @@ import pytest
 
 from sleep_scoring_app.core.constants import DeleteStatus
 from sleep_scoring_app.core.dataclasses import BatchDeleteResult, DeleteResult, ImportedFileInfo
-from sleep_scoring_app.services.file_management_service import FileManagementServiceImpl
+from sleep_scoring_app.services.file_service import FileService as FileManagementServiceImpl
 
 
 class TestFileManagementService:
@@ -204,9 +204,3 @@ class TestFileManagementService:
         result = service.check_has_metrics("test1.csv")
 
         assert result is False
-
-    def test_protocol_compliance(self, service):
-        """Test that implementation complies with Protocol."""
-        from sleep_scoring_app.services.file_management_service import FileManagementService
-
-        assert isinstance(service, FileManagementService)

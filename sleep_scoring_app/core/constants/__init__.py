@@ -34,6 +34,7 @@ from .algorithms import (
     NonwearDataSource,
     SadehDataSource,
     SelectionState,
+    SleepPeriodDetectorType,
     SleepStatusValue,
     StudyDataParadigm,
 )
@@ -53,11 +54,14 @@ from .io import (
     DeleteStatus,
     DevicePreset,
     DiaryFileType,
+    DiaryPeriodKey,
     DirectoryName,
     ExportColumn,
     FileExtension,
     FileName,
+    FileSourceType,
     ImportStatus,
+    MetadataKey,
     ParticipantGroup,
     ParticipantTimepoint,
     RegexPattern,
@@ -65,7 +69,9 @@ from .io import (
     sanitize_filename_component,
 )
 
-# UI constants
+# NOTE: UI constants moved to sleep_scoring_app.ui.constants
+# Import from there instead. These re-exports maintained for backwards compatibility
+# but will be removed in a future version.
 from .ui import (
     AlgorithmHelpText,
     AlgorithmTooltip,
@@ -76,6 +82,7 @@ from .ui import (
     ConfigKey,
     ConfirmationMessage,
     DebugMessage,
+    EditMode,
     ErrorMessage,
     FeatureFlags,
     FileDialogText,
@@ -111,13 +118,15 @@ from .ui import (
 )
 
 __all__ = [
+    # I/O constants
     "ActivityColumn",
     "ActivityDataPreference",
+    # UI constants (DEPRECATED - import from sleep_scoring_app.ui.constants instead)
     "AlgorithmHelpText",
+    # Algorithm constants
     "AlgorithmParams",
     "AlgorithmResult",
     "AlgorithmTooltip",
-    # Algorithm constants
     "AlgorithmType",
     "AppArgument",
     "ButtonStyle",
@@ -126,24 +135,25 @@ __all__ = [
     "ConfigKey",
     "ConfirmationMessage",
     "DataSourceType",
-    "DatabaseColumn",
     # Database constants
+    "DatabaseColumn",
     "DatabaseTable",
     "DebugMessage",
     "DefaultColumn",
     "DeleteStatus",
     "DevicePreset",
     "DiaryFileType",
+    "DiaryPeriodKey",
     "DirectoryName",
+    "EditMode",
     "ErrorMessage",
     "ExportColumn",
-    # UI constants
     "FeatureFlags",
     "FileDialogText",
     "FileExtension",
     "FileName",
+    "FileSourceType",
     "GroupBoxTitle",
-    # I/O constants
     "ImportStatus",
     "InfoMessage",
     "LabelStyle",
@@ -156,6 +166,7 @@ __all__ = [
     "MemoryConstants",
     "MenuText",
     "MessageType",
+    "MetadataKey",
     "NonwearAlgorithm",
     "NonwearDataSource",
     "ParadigmInfoText",
@@ -172,6 +183,7 @@ __all__ = [
     "SadehDataSource",
     "SelectionState",
     "SettingsSection",
+    "SleepPeriodDetectorType",
     "SleepStatusValue",
     "StatusMessage",
     "StudyDataParadigm",

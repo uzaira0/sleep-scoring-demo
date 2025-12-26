@@ -31,6 +31,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from sleep_scoring_app.core.constants import AlgorithmType
+
 from .cole_kripke import ColeKripkeAlgorithm
 from .sadeh import SadehAlgorithm
 from .van_hees_2015 import VanHees2015SIB
@@ -85,19 +87,19 @@ class AlgorithmFactory:
         # Epoch-based algorithms (require pre-aggregated 60-second epoch count data)
         # These work with ActiLife CSV exports that contain activity counts (Axis1, VM, etc.)
         # =============================================================================
-        "sadeh_1994_original": _AlgorithmEntry(
+        AlgorithmType.SADEH_1994_ORIGINAL: _AlgorithmEntry(
             algorithm_class=SadehAlgorithm,
             display_name="Sadeh (1994) Original",
             params={"threshold": 0.0, "variant_name": "original"},
         ),
-        "sadeh_1994_actilife": _AlgorithmEntry(
+        AlgorithmType.SADEH_1994_ACTILIFE: _AlgorithmEntry(
             algorithm_class=SadehAlgorithm,
             display_name="Sadeh (1994) ActiLife",
             params={"threshold": -4.0, "variant_name": "actilife"},
         ),
         # DISABLED: Count-scaled variants need further investigation.
         # GGIR's Sadeh/Cole-Kripke use zero-crossing counts (ZC) calculated from raw data,
-        # NOT ActiLife activity counts. The count-scaled approach (÷100, cap 300) was designed
+        # NOT ActiLife activity counts. The count-scaled approach (/100, cap 300) was designed
         # for ZC counts, not ActiLife counts. Until we implement proper ZC count calculation
         # from raw GT3X data, these variants should not be used.
         # See: https://wadpac.github.io/GGIR/articles/chapter8_SleepFundamentalsSibs.html
@@ -107,12 +109,12 @@ class AlgorithmFactory:
         #     display_name="Sadeh (1994) Count-Scaled",
         #     params={"threshold": -4.0, "variant_name": "count_scaled", "enable_count_scaling": True, "scale_factor": 100.0, "count_cap": 300.0},
         # ),
-        "cole_kripke_1992_original": _AlgorithmEntry(
+        AlgorithmType.COLE_KRIPKE_1992_ORIGINAL: _AlgorithmEntry(
             algorithm_class=ColeKripkeAlgorithm,
             display_name="Cole-Kripke (1992) Original",
             params={"variant_name": "original"},
         ),
-        "cole_kripke_1992_actilife": _AlgorithmEntry(
+        AlgorithmType.COLE_KRIPKE_1992_ACTILIFE: _AlgorithmEntry(
             algorithm_class=ColeKripkeAlgorithm,
             display_name="Cole-Kripke (1992) ActiLife",
             params={"variant_name": "actilife"},
@@ -127,7 +129,7 @@ class AlgorithmFactory:
         # Raw data algorithms (require raw tri-axial accelerometer data from GT3X)
         # These calculate z-angle from raw X/Y/Z acceleration and detect sustained inactivity
         # =============================================================================
-        "van_hees_2015_sib": _AlgorithmEntry(
+        AlgorithmType.VAN_HEES_2015_SIB: _AlgorithmEntry(
             algorithm_class=VanHees2015SIB,
             display_name="van Hees (2015) SIB",
             params={},
@@ -242,7 +244,7 @@ class AlgorithmFactory:
             Default algorithm ID ('sadeh_1994_actilife')
 
         """
-        return "sadeh_1994_actilife"
+        return AlgorithmType.SADEH_1994_ACTILIFE
 
     @classmethod
     def is_registered(cls, algorithm_id: str) -> bool:

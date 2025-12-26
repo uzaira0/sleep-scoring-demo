@@ -185,11 +185,11 @@ class Gt3xRsBackend:
 
         # Add sensor data if requested
         if include_sensors:
-            if hasattr(data, "lux") and data.lux is not None:
+            if hasattr(data, "lux") and data.lux is not None:  # KEEP: Optional gt3x_rs data field
                 metadata["lux"] = np.array(data.lux)
-            if hasattr(data, "battery") and data.battery is not None:
+            if hasattr(data, "battery") and data.battery is not None:  # KEEP: Optional gt3x_rs data field
                 metadata["battery"] = np.array(data.battery)
-            if hasattr(data, "capsense") and data.capsense is not None:
+            if hasattr(data, "capsense") and data.capsense is not None:  # KEEP: Optional gt3x_rs data field
                 metadata["capsense"] = np.array(data.capsense)
 
         return RawAccelerometerData(
@@ -219,7 +219,7 @@ class Gt3xRsBackend:
         result: dict[str, Any] = {
             "sample_rate": data.sample_rate,
             "serial_number": data.serial_number,
-            "n_samples": len(data) if hasattr(data, "__len__") else len(data.x),
+            "n_samples": len(data) if hasattr(data, "__len__") else len(data.x),  # KEEP: Duck typing
         }
 
         # Try to get metadata dict if available
@@ -544,10 +544,10 @@ class Gt3xRsBackend:
         efficiency = 0.0
 
         return SleepDetResult(
-            onset_idx=result.onset_idx if hasattr(result, "onset_idx") else 0,
-            offset_idx=result.offset_idx if hasattr(result, "offset_idx") else 0,
-            onset_time=result.onset_time if hasattr(result, "onset_time") else None,
-            offset_time=result.offset_time if hasattr(result, "offset_time") else None,
+            onset_idx=result.onset_idx if hasattr(result, "onset_idx") else 0,  # KEEP: Optional result field
+            offset_idx=result.offset_idx if hasattr(result, "offset_idx") else 0,  # KEEP: Optional result field
+            onset_time=result.onset_time if hasattr(result, "onset_time") else None,  # KEEP: Optional result field
+            offset_time=result.offset_time if hasattr(result, "offset_time") else None,  # KEEP: Optional result field
             total_sleep_time_min=tst_min,
             wake_after_sleep_onset_min=waso_min,
             sleep_efficiency_pct=efficiency,
@@ -586,7 +586,7 @@ class Gt3xRsBackend:
 
         # Extract periods (simplified - would need proper implementation)
         periods = []
-        if hasattr(result, "nonwear_periods"):
+        if hasattr(result, "nonwear_periods"):  # KEEP: Optional result field
             periods = [(p.start, p.end) for p in result.nonwear_periods]
 
         return NonwearRes(

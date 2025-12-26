@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from sleep_scoring_app.ui.dialogs.column_mapping_dialog import ColumnMappingDialog
 from sleep_scoring_app.ui.dialogs.delete_file_dialog import DeleteFileDialog
 
-__all__ = ["DeleteFileDialog"]
+__all__ = ["ColumnMappingDialog", "DeleteFileDialog"]

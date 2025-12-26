@@ -47,8 +47,8 @@ class TestActivityDataLoading:
         for col in expected_cols:
             assert col in df.columns, f"Missing column {col} in {device} file. Columns: {list(df.columns)}"
 
-    @pytest.mark.parametrize("device,skip_rows,_", DEVICE_FORMATS)
-    def test_activity_data_has_rows(self, activity_dir: Path, device: str, skip_rows: int, _) -> None:
+    @pytest.mark.parametrize("device,skip_rows", [(d, s) for d, s, _ in DEVICE_FORMATS])
+    def test_activity_data_has_rows(self, activity_dir: Path, device: str, skip_rows: int) -> None:
         """Activity files should have substantial data (7+ days = 10080+ rows)."""
         files = list(activity_dir.glob(f"*_{device}.csv"))
         file_path = files[0]
@@ -57,8 +57,8 @@ class TestActivityDataLoading:
         # 7 days * 24 hours * 60 minutes = 10080 epochs minimum
         assert len(df) >= 10000, f"{device} file has only {len(df)} rows, expected 10000+"
 
-    @pytest.mark.parametrize("device,skip_rows,_", DEVICE_FORMATS)
-    def test_activity_counts_reasonable(self, activity_dir: Path, device: str, skip_rows: int, _) -> None:
+    @pytest.mark.parametrize("device,skip_rows", [(d, s) for d, s, _ in DEVICE_FORMATS])
+    def test_activity_counts_reasonable(self, activity_dir: Path, device: str, skip_rows: int) -> None:
         """Activity counts should be within reasonable range."""
         files = list(activity_dir.glob(f"*_{device}.csv"))
         file_path = files[0]

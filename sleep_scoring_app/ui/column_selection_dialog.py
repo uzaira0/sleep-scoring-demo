@@ -40,8 +40,11 @@ class ColumnSelectionDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        # Header with always-exported info
-        header_label = QLabel("Select which columns to include in the export.\nSleep Date and Saved Date are always included.")
+        # Header with always-exported info - dynamically list always-exported columns
+        always_exported = [c.display_name for c in column_registry.get_exportable() if c.is_always_exported]
+        self._always_exported_count = len(always_exported)
+        always_exported_str = ", ".join(always_exported) if always_exported else "None"
+        header_label = QLabel(f"Select which columns to include in the export.\nAlways included: {always_exported_str}")
         header_label.setStyleSheet("font-weight: bold; padding: 5px;")
         layout.addWidget(header_label)
 
@@ -125,8 +128,9 @@ class ColumnSelectionDialog(QDialog):
         """Update the column count label."""
         selected = sum(1 for cb in self.column_checkboxes.values() if cb.isChecked())
         total = len(self.column_checkboxes)
-        # +1 for Sleep Date which is always exported
-        self.column_count_label.setText(f"{selected + 1}/{total + 1} columns selected")
+        # Add always-exported columns to counts
+        always_count = self._always_exported_count
+        self.column_count_label.setText(f"{selected + always_count}/{total + always_count} columns selected")
 
     def get_selected_columns(self) -> list[str]:
         """Get list of selected export column names."""

@@ -126,7 +126,7 @@ class PlotStateSerializer:
                 "period_3": self._serialize_sleep_period(self.parent.daily_sleep_markers.period_3),
                 "period_4": self._serialize_sleep_period(self.parent.daily_sleep_markers.period_4),
             },
-            "markers_saved": self.parent.markers_saved,
+            # NOTE: markers_saved is managed by Redux store, not captured here
             "selected_marker_set_index": self.parent.selected_marker_set_index,
             "current_marker_being_placed": self._serialize_sleep_period(self.parent.current_marker_being_placed),
             "marker_click_in_progress": getattr(self.parent, "_marker_click_in_progress", False),
@@ -141,9 +141,9 @@ class PlotStateSerializer:
                     "marker_type": getattr(line, "marker_type", "unknown"),
                     "period": self._serialize_sleep_period(getattr(line, "period", None)),
                     "is_selected": getattr(line, "is_selected", False),
-                    "pen_color": line.pen.color().name() if hasattr(line.pen, "color") else None,
-                    "pen_width": line.pen.width() if hasattr(line.pen, "width") else None,
-                    "label": line.label.toPlainText() if hasattr(line, "label") and line.label else None,
+                    "pen_color": line.pen.color().name() if hasattr(line.pen, "color") else None,  # KEEP: Duck typing plot/marker attributes
+                    "pen_width": line.pen.width() if hasattr(line.pen, "width") else None,  # KEEP: Duck typing plot/marker attributes
+                    "label": line.label.toPlainText() if hasattr(line, "label") and line.label else None,  # KEEP: Duck typing plot/marker attributes
                     "is_draggable": line.movable,
                 }
                 marker_visual_state.append(marker_info)
@@ -227,8 +227,10 @@ class PlotStateSerializer:
                 try:
                     marker_info = {
                         "item_type": type(marker).__name__,
-                        "position": [marker.pos().x(), marker.pos().y()] if hasattr(marker, "pos") else None,
-                        "text": marker.toPlainText() if hasattr(marker, "toPlainText") else None,
+                        "position": [marker.pos().x(), marker.pos().y()]
+                        if hasattr(marker, "pos")
+                        else None,  # KEEP: Duck typing plot/marker attributes
+                        "text": marker.toPlainText() if hasattr(marker, "toPlainText") else None,  # KEEP: Duck typing plot/marker attributes
                     }
                     rule_markers.append(marker_info)
                 except Exception as e:
@@ -245,7 +247,9 @@ class PlotStateSerializer:
         }
 
         try:
-            ui_state["plot_menu_enabled"] = self.parent.plotItem.menuEnabled() if hasattr(self.parent, "plotItem") else False
+            ui_state["plot_menu_enabled"] = (
+                self.parent.plotItem.menuEnabled() if hasattr(self.parent, "plotItem") else False
+            )  # KEEP: Duck typing plot/marker attributes
         except (AttributeError, RuntimeError) as e:
             logger.debug("Could not get plot menu state: %s", e)
             ui_state["plot_menu_enabled"] = False
@@ -369,7 +373,7 @@ class PlotStateSerializer:
                 period_4=self._deserialize_sleep_period(daily_markers.get("period_4")),
             )
 
-            self.parent.markers_saved = marker_state.get("markers_saved", False)
+            # NOTE: markers_saved is managed by Redux store, not restored here
             self.parent.selected_marker_set_index = marker_state.get("selected_marker_set_index", 1)
             self.parent.current_marker_being_placed = self._deserialize_sleep_period(marker_state.get("current_marker_being_placed"))
             self.parent._marker_click_in_progress = marker_state.get("marker_click_in_progress", False)
@@ -386,12 +390,12 @@ class PlotStateSerializer:
         try:
             logger.debug("Skipping algorithm cache restoration to prevent stale results")
 
-            if hasattr(self.parent, "_algorithm_cache"):
+            if hasattr(self.parent, "_algorithm_cache"):  # KEEP: Duck typing plot/marker attributes
                 self.parent._algorithm_cache.clear()
 
             self.parent.main_48h_sadeh_results = None
 
-            if hasattr(self.parent, "sadeh_results"):
+            if hasattr(self.parent, "sadeh_results"):  # KEEP: Duck typing plot/marker attributes
                 self.parent.sadeh_results = None
 
             logger.debug("Cleared algorithm state instead of restoring (cache invalidation fix)")
@@ -419,7 +423,7 @@ class PlotStateSerializer:
             self.parent.current_filename = ui_state.get("current_filename")
 
             file_info_label = getattr(self.parent, "file_info_label", None)
-            if file_info_label and hasattr(self.parent, "plotItem"):
+            if file_info_label and hasattr(self.parent, "plotItem"):  # KEEP: Duck typing plot/marker attributes
                 try:
                     self.parent.plotItem.removeItem(file_info_label)
                 except (RuntimeError, ValueError) as e:

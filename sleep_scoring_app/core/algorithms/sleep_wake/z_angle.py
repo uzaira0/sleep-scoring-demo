@@ -8,16 +8,16 @@ This is a core component for van Hees (2015) SIB and HDCZA (2018) sleep detectio
 algorithms, which detect sustained inactivity by monitoring z-angle changes.
 
 Mathematical Formula:
-    z_angle = arctan(az / sqrt(ax² + ay²)) × (180/π)
+    z_angle = arctan(az / sqrt(ax^2 + ay^2)) * (180/pi)
 
 Where:
     - ax, ay, az: Acceleration in g-units along X, Y, Z axes
     - Result: Angle in degrees
 
 Physical Interpretation:
-    - 0°: Arm horizontal
-    - +90°: Arm pointing up (watch face down)
-    - -90°: Arm pointing down (watch face up)
+    - 0 deg: Arm horizontal
+    - +90 deg: Arm pointing up (watch face down)
+    - -90 deg: Arm pointing down (watch face up)
 
 The z-angle is orientation-invariant when using changes/differences rather than
 absolute values, which is why van Hees algorithms use z-angle differences.
@@ -36,7 +36,6 @@ References:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -98,7 +97,7 @@ def calculate_z_angle_from_arrays(
             msg = f"{name} contains infinite values"
             raise ValueError(msg)
 
-    # Calculate horizontal plane magnitude: sqrt(ax² + ay²)
+    # Calculate horizontal plane magnitude: sqrt(ax^2 + ay^2)
     # NaN values will propagate naturally through numpy operations
     horizontal_magnitude = np.sqrt(ax**2 + ay**2)
 
@@ -245,6 +244,9 @@ def resample_to_epochs(
         resampled = df_indexed[value_col].resample(resampling_rule).first()
     elif aggregation == "last":
         resampled = df_indexed[value_col].resample(resampling_rule).last()
+    else:
+        # Default to median if invalid aggregation method specified
+        resampled = df_indexed[value_col].resample(resampling_rule).median()
 
     # Reset index to get timestamp as column
     result_df = resampled.reset_index()
@@ -427,7 +429,7 @@ def validate_raw_accelerometer_data(
         if not pd.api.types.is_numeric_dtype(df[col]):
             errors.append(f"Acceleration column '{col}' must be numeric type")
 
-    # Check for reasonable acceleration values (±20g is extreme but possible)
+    # Check for reasonable acceleration values (+/-20g is extreme but possible)
     for col in [ax_col, ay_col, az_col]:
         if col in df.columns and pd.api.types.is_numeric_dtype(df[col]):
             max_val = df[col].abs().max()

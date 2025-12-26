@@ -8,7 +8,7 @@ raw accelerometer data from wrist-worn devices.
 Algorithm Overview:
 1. Calculate z-angle from raw tri-axial acceleration (median per 5s epoch)
 2. For each 5-minute window, check if z-angle changes by more than threshold
-3. If change ≤ threshold for time_threshold minutes: SLEEP
+3. If change <= threshold for time_threshold minutes: SLEEP
 4. If change > threshold: WAKE
 5. Resample to 60-second epochs for consistency
 
@@ -30,11 +30,12 @@ References:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
+from sleep_scoring_app.core.constants import AlgorithmType
 from sleep_scoring_app.core.pipeline.types import AlgorithmDataRequirement
 
 from .z_angle import (
@@ -114,7 +115,7 @@ class VanHees2015SIB:
     @property
     def identifier(self) -> str:
         """Unique algorithm identifier."""
-        return "van_hees_2015_sib"
+        return AlgorithmType.VAN_HEES_2015_SIB
 
     @property
     def requires_axis(self) -> str:
@@ -175,7 +176,7 @@ class VanHees2015SIB:
 
         logger.info(
             f"Running van Hees 2015 SIB algorithm on {len(df)} raw samples "
-            f"(angle_threshold={self._angle_threshold}°, time_threshold={self._time_threshold}min)"
+            f"(angle_threshold={self._angle_threshold} deg, time_threshold={self._time_threshold}min)"
         )
 
         # Step 1: Calculate z-angle from raw tri-axial data
@@ -252,7 +253,7 @@ class VanHees2015SIB:
         min_gap_epochs = int(self._time_threshold * (60 / self._epoch_length))
 
         logger.debug(
-            f"GGIR vanHees2015: angle_threshold={self._angle_threshold}°, time_threshold={self._time_threshold}min ({min_gap_epochs} epochs)"
+            f"GGIR vanHees2015: angle_threshold={self._angle_threshold} deg, time_threshold={self._time_threshold}min ({min_gap_epochs} epochs)"
         )
 
         # Initialize all as wake
@@ -263,7 +264,7 @@ class VanHees2015SIB:
         z_angle_diffs = np.abs(np.diff(z_angles))
         posture_changes = np.where(z_angle_diffs > self._angle_threshold)[0]
 
-        logger.debug(f"Found {len(posture_changes)} posture changes (z-angle diff > {self._angle_threshold}°)")
+        logger.debug(f"Found {len(posture_changes)} posture changes (z-angle diff > {self._angle_threshold} deg)")
 
         if len(posture_changes) < 2:
             # GGIR logic: if < 10 posture changes, mark all as sleep; otherwise all wake

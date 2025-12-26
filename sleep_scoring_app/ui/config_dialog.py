@@ -597,7 +597,7 @@ class ConfigImportDialog(QDialog):
         full_key = f"{section}.{key}"
         attr_name = attr_mapping.get(full_key)
 
-        if attr_name and hasattr(config, attr_name):
+        if attr_name and hasattr(config, attr_name):  # KEEP: Dynamic attribute name
             setattr(config, attr_name, value)
             logger.debug("Applied setting %s = %s", attr_name, value)
         else:

@@ -17,12 +17,14 @@ Example future usage:
 
     app = create_app()
 
-    # Or direct algorithm use:
-    from sleep_scoring_app.core.algorithms import SadehAlgorithm
+    # Use algorithm service (recommended):
+    from sleep_scoring_app.services.algorithm_service import get_algorithm_service
+    from sleep_scoring_app.core.constants import AlgorithmType
 
     @app.post("/api/score")
     async def score_activity(data: ActivityData):
-        algorithm = SadehAlgorithm()
+        service = get_algorithm_service()
+        algorithm = service.create_sleep_algorithm(AlgorithmType.SADEH_1994_ACTILIFE, config)
         results = algorithm.score(data.activity_counts)
         return {"scores": results}
     ```

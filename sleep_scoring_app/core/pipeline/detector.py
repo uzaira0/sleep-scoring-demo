@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -50,9 +50,9 @@ class DataSourceDetector:
     raw accelerometer data and pre-epoched count data.
 
     Detection Rules:
-        1. GT3X files → Always GT3X_RAW (binary format contains raw data)
-        2. CSV with AXIS_X, AXIS_Y, AXIS_Z → CSV_RAW (raw tri-axial data)
-        3. CSV with Axis1/Activity + ~60s intervals → CSV_EPOCH (epoch counts)
+        1. GT3X files -> Always GT3X_RAW (binary format contains raw data)
+        2. CSV with AXIS_X, AXIS_Y, AXIS_Z -> CSV_RAW (raw tri-axial data)
+        3. CSV with Axis1/Activity + ~60s intervals -> CSV_EPOCH (epoch counts)
 
     Example:
         >>> detector = DataSourceDetector()
@@ -63,12 +63,17 @@ class DataSourceDetector:
     """
 
     # Column patterns for detection
-    RAW_CSV_COLUMNS = {"AXIS_X", "AXIS_Y", "AXIS_Z"}
-    EPOCH_CSV_COLUMNS = {"Axis1"}  # Can also be "Activity"
-    TIMESTAMP_COLUMNS = {"timestamp", "datetime", "Timestamp", "Date Time"}
+    RAW_CSV_COLUMNS: ClassVar[set[str]] = {"AXIS_X", "AXIS_Y", "AXIS_Z"}
+    EPOCH_CSV_COLUMNS: ClassVar[set[str]] = {"Axis1"}  # Can also be "Activity"
+    TIMESTAMP_COLUMNS: ClassVar[set[str]] = {
+        "timestamp",
+        "datetime",
+        "Timestamp",
+        "Date Time",
+    }
 
     # Threshold for epoch detection (seconds)
-    # If median interval is ~60s (±10s tolerance), consider it epoch data
+    # If median interval is ~60s (+/-10s tolerance), consider it epoch data
     EPOCH_INTERVAL_MIN = 50
     EPOCH_INTERVAL_MAX = 70
 
@@ -266,7 +271,7 @@ class DataSourceDetector:
 
             logger.debug(f"Median timestamp interval: {median_interval}s")
 
-            # Check if ~60 seconds (±10s tolerance)
+            # Check if ~60 seconds (+/-10s tolerance)
             return self.EPOCH_INTERVAL_MIN <= median_interval <= self.EPOCH_INTERVAL_MAX
 
         except Exception as e:

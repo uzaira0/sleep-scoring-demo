@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PyQt6.QtCore import QSettings, Qt
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -13,6 +15,9 @@ from PyQt6.QtWidgets import (
 )
 
 from sleep_scoring_app.core.constants import TableColumn, TableDimensions, TooltipText, UIColors
+
+if TYPE_CHECKING:
+    from PyQt6.QtGui import QCloseEvent
 
 
 class PopOutTableWindow(QDialog):
@@ -49,7 +54,7 @@ class PopOutTableWindow(QDialog):
                 TableColumn.TIME,
                 TableColumn.AXIS_Y,
                 TableColumn.VM,
-                TableColumn.SADEH,
+                TableColumn.SLEEP_SCORE,
                 TableColumn.CHOI,
                 TableColumn.NWT_SENSOR,
             ]
@@ -62,7 +67,7 @@ class PopOutTableWindow(QDialog):
             TooltipText.TIME_COLUMN,
             TooltipText.ACTIVITY_COLUMN,
             TooltipText.VM_COLUMN,
-            TooltipText.SADEH_COLUMN,
+            TooltipText.SLEEP_SCORE_COLUMN,
             TooltipText.CHOI_COLUMN,
             TooltipText.NWT_SENSOR_COLUMN,
         ]
@@ -160,7 +165,7 @@ class PopOutTableWindow(QDialog):
             # Scroll to the row, positioning it in the center of the viewport
             self.table.scrollToItem(self.table.item(row, 0), hint=self.table.ScrollHint.PositionAtCenter)
 
-    def closeEvent(self, event) -> None:
+    def closeEvent(self, event: QCloseEvent) -> None:  # type: ignore[override]
         """Save window geometry before closing."""
         self._save_geometry()
         super().closeEvent(event)

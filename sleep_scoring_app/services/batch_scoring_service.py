@@ -33,10 +33,9 @@ from sleep_scoring_app.core.algorithms import (
     AlgorithmFactory,
     SleepPeriodDetectorFactory,
     choi_detect_nonwear,
-    sadeh_score,
 )
 from sleep_scoring_app.core.algorithms.types import ActivityColumn
-from sleep_scoring_app.core.constants import AlgorithmType
+from sleep_scoring_app.core.constants import AlgorithmType, SleepPeriodDetectorType
 from sleep_scoring_app.core.dataclasses import DailySleepMarkers, ParticipantInfo, SleepMetrics, SleepPeriod
 from sleep_scoring_app.utils.participant_extractor import extract_participant_info
 
@@ -109,6 +108,8 @@ def auto_score_activity_epoch_files(
 
     # 3. Process each activity file
     results = []
+    failed_files: list[tuple[str, str]] = []  # (filename, error_message)
+
     for activity_file in activity_files:
         try:
             sleep_metrics = _process_activity_file(activity_file, diary_df, choi_activity_column, sleep_algorithm, sleep_period_detector)
@@ -116,11 +117,28 @@ def auto_score_activity_epoch_files(
                 results.append(sleep_metrics)
                 num_periods = len(sleep_metrics.daily_sleep_markers.get_complete_periods())
                 logger.info("Processed %s: %d periods", activity_file.name, num_periods)
-        except Exception:
-            logger.exception("Error processing %s", activity_file.name)
+            else:
+                failed_files.append((activity_file.name, "Processing returned None (check logs for details)"))
+                logger.warning("Processing %s returned None", activity_file.name)
+        except Exception as e:
+            error_msg = str(e) if str(e) else type(e).__name__
+            failed_files.append((activity_file.name, error_msg))
+            logger.exception("Error processing %s: %s", activity_file.name, error_msg)
             continue
 
-    logger.info("Successfully processed %d/%d files", len(results), len(activity_files))
+    # Log summary with failure details
+    if failed_files:
+        logger.warning(
+            "Batch scoring completed with %d failures out of %d files:",
+            len(failed_files),
+            len(activity_files),
+        )
+        for filename, error in failed_files:
+            logger.warning("  - %s: %s", filename, error)
+    else:
+        logger.info("Successfully processed all %d files", len(activity_files))
+
+    logger.info("Batch scoring summary: %d succeeded, %d failed", len(results), len(failed_files))
     return results
 
 
@@ -245,7 +263,14 @@ def _process_activity_file(
     try:
         algorithm_type = AlgorithmType(algorithm_id)
     except ValueError:
-        # Fallback if identifier doesn't match enum
+        # Fallback if identifier doesn't match enum - log warning so user knows
+        logger.warning(
+            "Algorithm identifier '%s' does not match any AlgorithmType enum value. "
+            "Falling back to SADEH_1994_ACTILIFE for database storage. "
+            "The actual algorithm used (%s) is preserved in sleep_algorithm_name.",
+            algorithm_id,
+            sleep_algorithm.name,
+        )
         algorithm_type = AlgorithmType.SADEH_1994_ACTILIFE
 
     return SleepMetrics(
@@ -255,7 +280,7 @@ def _process_activity_file(
         daily_sleep_markers=daily_markers,
         participant=participant_info,
         sleep_algorithm_name=algorithm_id,
-        sleep_period_detector_id=sleep_period_detector.identifier if sleep_period_detector else "consecutive_onset3s_offset5s",
+        sleep_period_detector_id=sleep_period_detector.identifier if sleep_period_detector else SleepPeriodDetectorType.CONSECUTIVE_ONSET3S_OFFSET5S,
         **metrics_dict,
     )
 
@@ -529,6 +554,11 @@ def _calculate_metrics(
     period_activity = activity_df[activity_col].iloc[onset_idx : offset_idx + 1] if activity_col else None
 
     # Calculate basic metrics
+    from sleep_scoring_app.utils.calculations import calculate_total_minutes_in_bed_from_indices
+
+    # Note: batch scoring uses inclusive range (offset_idx - onset_idx + 1)
+    # while data_service uses exclusive range (offset_idx - onset_idx)
+    # This is intentional for batch processing compatibility
     total_minutes_in_bed = offset_idx - onset_idx + 1
     sleep_minutes = period_sadeh.sum()
     total_sleep_time = float(sleep_minutes)
@@ -582,7 +612,11 @@ def _calculate_metrics(
 
     # Calculate overlapping nonwear minutes during sleep period
     # Sum of 0/1 values per minute epoch = total nonwear minutes
-    overlapping_nonwear_minutes_algorithm = int(period_choi.sum()) if period_choi is not None else None
+    from sleep_scoring_app.utils.calculations import calculate_overlapping_nonwear_minutes
+
+    # Note: For batch scoring we need to convert series to list for the calculation
+    choi_list = period_choi.tolist() if period_choi is not None else None
+    overlapping_nonwear_minutes_algorithm = calculate_overlapping_nonwear_minutes(choi_list, 0, len(choi_list) - 1) if choi_list else None
 
     return {
         "onset_time": onset_dt.strftime("%H:%M"),

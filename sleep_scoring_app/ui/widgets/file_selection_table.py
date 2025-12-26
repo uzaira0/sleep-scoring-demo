@@ -23,9 +23,10 @@ from PyQt6.QtWidgets import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from typing import Any
 
     from PyQt6.QtGui import QColor
+
+    from sleep_scoring_app.core.dataclasses import FileInfo
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +51,8 @@ class ColumnDefinition:
     header: str
     width_mode: QHeaderView.ResizeMode
     width_hint: int | None = None
-    extractor: Callable[[dict[str, Any]], str] | None = None
-    formatter: Callable[[Any], str] | None = None
+    extractor: Callable[[FileInfo], str] | None = None
+    formatter: Callable[[FileInfo], str] | None = None
     alignment: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignCenter
 
 
@@ -67,49 +68,49 @@ class FileSelectionTable(QWidget):
             id=TableColumn.FILENAME,
             header="Filename",
             width_mode=QHeaderView.ResizeMode.Stretch,
-            extractor=lambda info: info.get("filename", ""),
+            extractor=lambda info: info.filename,
         ),
         ColumnDefinition(
             id=TableColumn.PARTICIPANT_ID,
             header="Participant ID",
             width_mode=QHeaderView.ResizeMode.ResizeToContents,
-            extractor=None,  # Will use special handling for parsed participant info
+            extractor=lambda info: info.participant_id,
         ),
         ColumnDefinition(
             id=TableColumn.TIMEPOINT,
             header="Timepoint",
             width_mode=QHeaderView.ResizeMode.ResizeToContents,
-            extractor=None,  # Will use special handling for parsed participant info
+            extractor=None,  # Parsed from filename
         ),
         ColumnDefinition(
             id=TableColumn.GROUP,
             header="Group",
             width_mode=QHeaderView.ResizeMode.ResizeToContents,
-            extractor=None,  # Will use special handling for parsed participant info
+            extractor=lambda info: info.participant_group,
         ),
         ColumnDefinition(
             id=TableColumn.START_DATE,
             header="Start Date",
             width_mode=QHeaderView.ResizeMode.ResizeToContents,
-            extractor=lambda info: info.get("start_date", ""),
+            extractor=lambda info: info.start_date or "",
         ),
         ColumnDefinition(
             id=TableColumn.END_DATE,
             header="End Date",
             width_mode=QHeaderView.ResizeMode.ResizeToContents,
-            extractor=lambda info: info.get("end_date", ""),
+            extractor=lambda info: info.end_date or "",
         ),
         ColumnDefinition(
             id=TableColumn.MARKERS,
             header="Markers",
             width_mode=QHeaderView.ResizeMode.ResizeToContents,
-            formatter=lambda info: f"({info.get('completed_count', 0)}/{info.get('total_count', 0)})",
+            formatter=lambda info: f"({info.completed_count}/{info.total_dates})",
         ),
     ]
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self._file_data = []  # Store complete file info for each row
+        self._file_data: list[FileInfo] = []  # Store complete file info for each row
         self._column_map = {col.id: idx for idx, col in enumerate(self.COLUMN_DEFINITIONS)}
         self.setup_ui()
 
@@ -177,23 +178,17 @@ class FileSelectionTable(QWidget):
 
         layout.addWidget(self.table)
 
-    def add_file(self, file_info: dict[str, Any], color: QColor | None = None) -> None:
-        """
-        Add a file to the table.
+    def populate_files(self, files: list[FileInfo]) -> None:
+        """Clear and populate the table with new file list."""
+        self.clear()
+        self.table.setSortingEnabled(False)  # Performance: disable sorting during batch add
+        for file_info in files:
+            self.add_file(file_info)
+        self.table.setSortingEnabled(True)
+        logger.info(f"FILE TABLE: Populated {len(files)} files")
 
-        Args:
-            file_info: Dictionary containing file information with keys:
-                - filename: str
-                - path: str (optional)
-                - source: str (optional, 'database' or 'csv')
-                - completed_count: int
-                - total_count: int
-                - start_date: str (optional)
-                - end_date: str (optional)
-                - date_range: str (optional)
-            color: Optional color for the marker status text
-
-        """
+    def add_file(self, file_info: FileInfo, color: QColor | None = None) -> None:
+        """Add a file to the table."""
         row = self.table.rowCount()
         self.table.insertRow(row)
 
@@ -201,27 +196,19 @@ class FileSelectionTable(QWidget):
         original_index = len(self._file_data)
         self._file_data.append(file_info)
 
-        # Extract participant info from filename
-        filename = file_info.get("filename", "")
-        participant_info = self._parse_participant_info(filename)
-
-        # Merge participant info with file info for extractors
-        merged_info = {**file_info, **participant_info}
+        # Extract participant info from filename for timepoint (not in FileInfo)
+        participant_info = self._parse_participant_info(file_info.filename)
 
         # Populate columns based on definitions
         for col_idx, col_def in enumerate(self.COLUMN_DEFINITIONS):
             # Get value using extractor or formatter
             if col_def.formatter:
-                value = col_def.formatter(merged_info)
+                value = col_def.formatter(file_info)
             elif col_def.extractor:
-                value = col_def.extractor(merged_info)
-            # Special handling for parsed participant fields
-            elif col_def.id == TableColumn.PARTICIPANT_ID:
-                value = participant_info.get("id", "")
+                value = col_def.extractor(file_info)
+            # Special handling for parsed participant fields not in FileInfo
             elif col_def.id == TableColumn.TIMEPOINT:
                 value = participant_info.get("timepoint", "")
-            elif col_def.id == TableColumn.GROUP:
-                value = participant_info.get("group", "")
             else:
                 value = ""
 
@@ -240,14 +227,12 @@ class FileSelectionTable(QWidget):
             self.table.setItem(row, col_idx, item)
 
     def _parse_participant_info(self, filename: str) -> dict[str, str]:
-        """Parse participant information from filename using centralized extraction logic."""
+        """Parse participant information from filename for fields not in FileInfo."""
         from sleep_scoring_app.utils.participant_extractor import extract_participant_info
 
         info = extract_participant_info(filename)
         return {
-            "id": info.numerical_id,
             "timepoint": info.timepoint_str,
-            "group": info.group_str,
         }
 
     def clear(self) -> None:
@@ -298,10 +283,10 @@ class FileSelectionTable(QWidget):
 
         # Get the actual file info using the original index
         file_info = self._file_data[original_index]
-        logger.info("File selected from table: visual_row=%s, original_index=%s, filename=%s", visual_row, original_index, file_info.get("filename"))
+        logger.info("File selected from table: visual_row=%s, original_index=%s, filename=%s", visual_row, original_index, file_info.filename)
         self.fileSelected.emit(original_index, file_info)
 
-    def get_file_info_for_row(self, visual_row: int) -> dict[str, Any] | None:
+    def get_file_info_for_row(self, visual_row: int) -> FileInfo | None:
         """Get the file info for a specific visual row in the table."""
         if visual_row < 0 or visual_row >= self.table.rowCount():
             return None
@@ -316,7 +301,7 @@ class FileSelectionTable(QWidget):
 
         return self._file_data[original_index]
 
-    def get_selected_file_info(self) -> dict[str, Any] | None:
+    def get_selected_file_info(self) -> FileInfo | None:
         """Get the currently selected file info."""
         selected_items = self.table.selectedItems()
         if not selected_items:

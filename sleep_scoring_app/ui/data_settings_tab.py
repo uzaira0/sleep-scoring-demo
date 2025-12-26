@@ -10,7 +10,6 @@ to all import operations.
 
 from __future__ import annotations
 
-import csv
 import logging
 import random
 from pathlib import Path
@@ -22,7 +21,6 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
-    QDialogButtonBox,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -35,452 +33,27 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSpinBox,
-    QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from sleep_scoring_app.core.constants import ButtonText, DataSourceType, DevicePreset, InfoMessage, StudyDataParadigm
+from sleep_scoring_app.io.sources.loader_factory import DataSourceFactory
+from sleep_scoring_app.preprocessing.calibration import CalibrationConfig
+from sleep_scoring_app.ui.builders import DataSourceConfigBuilder
+from sleep_scoring_app.ui.dialogs import ColumnMappingDialog
 
 if TYPE_CHECKING:
-    from sleep_scoring_app.ui.main_window import SleepScoringMainWindow
+    from sleep_scoring_app.ui.protocols import (
+        AppStateInterface,
+        MainWindowProtocol,
+        MarkerOperationsInterface,
+        NavigationInterface,
+        ServiceContainer,
+    )
+    from sleep_scoring_app.ui.store import UIStore
 
 logger = logging.getLogger(__name__)
-
-
-class ColumnMappingDialog(QDialog):
-    """Dialog for configuring custom column mappings for Generic CSV format."""
-
-    def __init__(
-        self,
-        parent: QWidget | None = None,
-        config_manager: object | None = None,
-        sample_file: Path | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self.config_manager = config_manager
-        self.sample_file = sample_file
-        self.detected_columns: list[str] = []
-
-        self.setWindowTitle("Configure Column Mappings")
-        self.setModal(True)
-        self.setMinimumWidth(600)
-        self.setMinimumHeight(500)
-
-        self._setup_ui()
-        self._load_current_config()
-
-        if sample_file:
-            self._detect_columns_from_file()
-
-    def _setup_ui(self) -> None:
-        """Set up the dialog UI."""
-        layout = QVBoxLayout(self)
-
-        # Instructions
-        instructions = QLabel(
-            "<b>Custom Column Mapping</b><br><br>"
-            "Configure which columns contain your date, time, and activity data. "
-            "Select a sample file to auto-detect available columns.<br>"
-            "<span style='color: #666;'>Note: Sadeh algorithm requires Y-Axis (vertical). "
-            "Choi algorithm can use Vector Magnitude or any axis.</span>"
-        )
-        instructions.setWordWrap(True)
-        layout.addWidget(instructions)
-
-        # File selection for column detection
-        file_layout = QHBoxLayout()
-        file_layout.addWidget(QLabel("Sample File:"))
-        self.file_label = QLabel(self.sample_file.name if self.sample_file else "No file selected")
-        self.file_label.setStyleSheet("color: #666;")
-        file_layout.addWidget(self.file_label, 1)
-        browse_btn = QPushButton("Browse...")
-        browse_btn.clicked.connect(self._browse_sample_file)
-        file_layout.addWidget(browse_btn)
-        detect_btn = QPushButton("Detect Columns")
-        detect_btn.clicked.connect(self._detect_columns_from_file)
-        file_layout.addWidget(detect_btn)
-        layout.addLayout(file_layout)
-
-        # Column mapping section - Datetime
-        datetime_group = QGroupBox("Datetime Columns")
-        datetime_layout = QGridLayout(datetime_group)
-
-        # Datetime format selection
-        datetime_layout.addWidget(QLabel("Format:"), 0, 0)
-        self.datetime_combined_check = QCheckBox("Combined datetime in single column")
-        self.datetime_combined_check.stateChanged.connect(self._on_datetime_format_changed)
-        datetime_layout.addWidget(self.datetime_combined_check, 0, 1, 1, 2)
-
-        # Date column
-        datetime_layout.addWidget(QLabel("Date Column:"), 1, 0)
-        self.date_column_combo = QComboBox()
-        self.date_column_combo.setEditable(True)
-        self.date_column_combo.setMinimumWidth(200)
-        datetime_layout.addWidget(self.date_column_combo, 1, 1, 1, 2)
-
-        # Time column
-        self.time_label = QLabel("Time Column:")
-        datetime_layout.addWidget(self.time_label, 2, 0)
-        self.time_column_combo = QComboBox()
-        self.time_column_combo.setEditable(True)
-        self.time_column_combo.setMinimumWidth(200)
-        datetime_layout.addWidget(self.time_column_combo, 2, 1, 1, 2)
-
-        layout.addWidget(datetime_group)
-
-        # Axis columns section
-        axis_group = QGroupBox("Activity/Axis Columns")
-        axis_layout = QGridLayout(axis_group)
-
-        # Helper to create optional combo with "(not available)" option
-        def create_axis_combo() -> QComboBox:
-            combo = QComboBox()
-            combo.setEditable(True)
-            combo.setMinimumWidth(180)
-            combo.addItem("(not available)", "")
-            return combo
-
-        # Y-Axis (vertical - required for Sadeh, ActiGraph Axis1)
-        axis_y_label = QLabel("Y-Axis (Vertical):")
-        axis_y_label.setToolTip("Required for Sadeh algorithm. ActiGraph: Axis1")
-        axis_layout.addWidget(axis_y_label, 0, 0)
-        self.axis_y_combo = create_axis_combo()
-        axis_layout.addWidget(self.axis_y_combo, 0, 1)
-        axis_layout.addWidget(QLabel("<span style='color: #e67e22;'>*Required for Sadeh</span>"), 0, 2)
-
-        # X-Axis (lateral - ActiGraph Axis2)
-        axis_layout.addWidget(QLabel("X-Axis (Lateral):"), 1, 0)
-        self.axis_x_combo = create_axis_combo()
-        axis_layout.addWidget(self.axis_x_combo, 1, 1)
-        axis_layout.addWidget(QLabel("<span style='color: #999;'>(optional)</span>"), 1, 2)
-
-        # Z-Axis (forward - ActiGraph Axis3)
-        axis_layout.addWidget(QLabel("Z-Axis (Forward):"), 2, 0)
-        self.axis_z_combo = create_axis_combo()
-        axis_layout.addWidget(self.axis_z_combo, 2, 1)
-        axis_layout.addWidget(QLabel("<span style='color: #999;'>(optional)</span>"), 2, 2)
-
-        # Vector Magnitude
-        vm_label = QLabel("Vector Magnitude:")
-        vm_label.setToolTip("Recommended for Choi algorithm")
-        axis_layout.addWidget(vm_label, 3, 0)
-        self.vector_magnitude_combo = create_axis_combo()
-        axis_layout.addWidget(self.vector_magnitude_combo, 3, 1)
-        axis_layout.addWidget(QLabel("<span style='color: #27ae60;'>*Recommended for Choi</span>"), 3, 2)
-
-        layout.addWidget(axis_group)
-
-        # Preview section
-        preview_group = QGroupBox("Data Preview (first 5 rows)")
-        preview_layout = QVBoxLayout(preview_group)
-        self.preview_table = QTableWidget()
-        self.preview_table.setMaximumHeight(120)
-        preview_layout.addWidget(self.preview_table)
-        layout.addWidget(preview_group)
-
-        # Detected columns info
-        self.columns_info_label = QLabel("")
-        self.columns_info_label.setStyleSheet("color: #666; font-style: italic;")
-        self.columns_info_label.setWordWrap(True)
-        layout.addWidget(self.columns_info_label)
-
-        # Buttons
-        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok)
-        button_box.rejected.connect(self.reject)
-        button_box.accepted.connect(self._save_and_accept)
-        layout.addWidget(button_box)
-
-    def _load_current_config(self) -> None:
-        """Load current configuration into UI."""
-        if not self.config_manager:
-            return
-
-        config = self.config_manager.config
-
-        # Set datetime combined checkbox
-        self.datetime_combined_check.setChecked(config.datetime_combined)
-        self._on_datetime_format_changed()
-
-        # Set datetime column values if they exist
-        if config.custom_date_column:
-            self.date_column_combo.setCurrentText(config.custom_date_column)
-        if config.custom_time_column:
-            self.time_column_combo.setCurrentText(config.custom_time_column)
-
-        # Set axis column values if they exist
-        if config.custom_axis_y_column:
-            self.axis_y_combo.setCurrentText(config.custom_axis_y_column)
-        if config.custom_axis_x_column:
-            self.axis_x_combo.setCurrentText(config.custom_axis_x_column)
-        if config.custom_axis_z_column:
-            self.axis_z_combo.setCurrentText(config.custom_axis_z_column)
-        if config.custom_vector_magnitude_column:
-            self.vector_magnitude_combo.setCurrentText(config.custom_vector_magnitude_column)
-
-    def _on_datetime_format_changed(self) -> None:
-        """Handle datetime format checkbox change."""
-        is_combined = self.datetime_combined_check.isChecked()
-        self.time_label.setVisible(not is_combined)
-        self.time_column_combo.setVisible(not is_combined)
-
-        # Update date label
-        if is_combined:
-            self.date_column_combo.setToolTip("Column containing combined date and time")
-        else:
-            self.date_column_combo.setToolTip("Column containing date only")
-
-    def _browse_sample_file(self) -> None:
-        """Browse for a sample CSV file."""
-        start_dir = str(self.sample_file.parent) if self.sample_file else str(Path.home())
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Sample CSV File",
-            start_dir,
-            "CSV Files (*.csv);;All Files (*.*)",
-        )
-        if file_path:
-            self.sample_file = Path(file_path)
-            self.file_label.setText(self.sample_file.name)
-            self.file_label.setStyleSheet("color: #333;")
-            self._detect_columns_from_file()
-
-    def _detect_columns_from_file(self) -> None:
-        """Detect columns from the sample file."""
-        if not self.sample_file or not self.sample_file.exists():
-            return
-
-        try:
-            # Read first few lines to detect columns
-            with open(self.sample_file, encoding="utf-8", errors="ignore") as f:
-                # Detect delimiter
-                sample = f.read(8192)
-                f.seek(0)
-
-                try:
-                    dialect = csv.Sniffer().sniff(sample, delimiters=",\t;")
-                except csv.Error:
-                    dialect = csv.excel
-
-                reader = csv.reader(f, dialect)
-                lines = []
-                for i, row in enumerate(reader):
-                    if i >= 20:  # Read first 20 lines to find header
-                        break
-                    lines.append(row)
-
-            # Find the header row (first row with mostly non-numeric strings)
-            header_row_idx = 0
-            for i, row in enumerate(lines):
-                non_numeric = sum(1 for c in row if c and not self._is_numeric(c))
-                if non_numeric >= len(row) * 0.5 and len(row) >= 3:
-                    header_row_idx = i
-                    break
-
-            # Get columns from header row
-            if lines:
-                self.detected_columns = [c.strip() for c in lines[header_row_idx] if c.strip()]
-                self._populate_column_combos()
-                self._update_preview(lines, header_row_idx, dialect)
-
-                # Show detected columns
-                self.columns_info_label.setText(
-                    f"Detected {len(self.detected_columns)} columns: {', '.join(self.detected_columns[:10])}"
-                    + ("..." if len(self.detected_columns) > 10 else "")
-                )
-
-                # Auto-select likely columns
-                self._auto_select_columns()
-
-        except Exception as e:
-            logger.exception("Error detecting columns from file")
-            QMessageBox.warning(self, "Detection Error", f"Failed to detect columns: {e}")
-
-    def _is_numeric(self, value: str) -> bool:
-        """Check if a string value is numeric."""
-        try:
-            float(value.replace(",", ""))
-            return True
-        except ValueError:
-            return False
-
-    def _populate_column_combos(self) -> None:
-        """Populate column combo boxes with detected columns."""
-        # Save current selections
-        current_date = self.date_column_combo.currentText()
-        current_time = self.time_column_combo.currentText()
-        current_axis_y = self.axis_y_combo.currentText()
-        current_axis_x = self.axis_x_combo.currentText()
-        current_axis_z = self.axis_z_combo.currentText()
-        current_vm = self.vector_magnitude_combo.currentText()
-
-        # Datetime combos - just add columns directly
-        for combo in [self.date_column_combo, self.time_column_combo]:
-            combo.clear()
-            combo.addItems(self.detected_columns)
-
-        # Axis combos - add "(not available)" option first, then columns
-        for combo in [self.axis_y_combo, self.axis_x_combo, self.axis_z_combo, self.vector_magnitude_combo]:
-            combo.clear()
-            combo.addItem("(not available)", "")
-            combo.addItems(self.detected_columns)
-
-        # Restore selections if they exist in new columns
-        if current_date in self.detected_columns:
-            self.date_column_combo.setCurrentText(current_date)
-        if current_time in self.detected_columns:
-            self.time_column_combo.setCurrentText(current_time)
-        if current_axis_y in self.detected_columns:
-            self.axis_y_combo.setCurrentText(current_axis_y)
-        if current_axis_x in self.detected_columns:
-            self.axis_x_combo.setCurrentText(current_axis_x)
-        if current_axis_z in self.detected_columns:
-            self.axis_z_combo.setCurrentText(current_axis_z)
-        if current_vm in self.detected_columns:
-            self.vector_magnitude_combo.setCurrentText(current_vm)
-
-    def _auto_select_columns(self) -> None:
-        """Auto-select likely column names based on common patterns."""
-        columns_lower = {c.lower(): c for c in self.detected_columns}
-
-        # Date patterns
-        date_patterns = ["date", "datetime", "timestamp", "time"]
-        for pattern in date_patterns:
-            for col_lower, col_orig in columns_lower.items():
-                if pattern in col_lower:
-                    self.date_column_combo.setCurrentText(col_orig)
-                    # Check if it's likely a combined datetime
-                    if "datetime" in col_lower or "timestamp" in col_lower:
-                        self.datetime_combined_check.setChecked(True)
-                    break
-            else:
-                continue
-            break
-
-        # Time patterns (only if not combined)
-        if not self.datetime_combined_check.isChecked():
-            time_patterns = ["time"]
-            for pattern in time_patterns:
-                for col_lower, col_orig in columns_lower.items():
-                    if col_lower == pattern or col_lower.endswith("time"):
-                        self.time_column_combo.setCurrentText(col_orig)
-                        break
-                else:
-                    continue
-                break
-
-        # Y-Axis patterns (ActiGraph: Axis1 = Y-axis vertical, GENEActiv/Axivity: y)
-        for col_lower, col_orig in columns_lower.items():
-            if col_lower == "y" or "axis_y" in col_lower or "axis y" in col_lower or "axisy" in col_lower:
-                self.axis_y_combo.setCurrentText(col_orig)
-                break
-
-        # X-Axis patterns (ActiGraph: Axis2 = X-axis lateral, GENEActiv/Axivity: x)
-        for col_lower, col_orig in columns_lower.items():
-            if col_lower == "x" or "axis2" in col_lower or "axis 2" in col_lower:
-                self.axis_x_combo.setCurrentText(col_orig)
-                break
-
-        # Z-Axis patterns (ActiGraph: Axis3 = Z-axis forward, GENEActiv/Axivity: z)
-        for col_lower, col_orig in columns_lower.items():
-            if col_lower == "z" or "axis3" in col_lower or "axis 3" in col_lower:
-                self.axis_z_combo.setCurrentText(col_orig)
-                break
-
-        # Vector Magnitude patterns
-        vm_patterns = ["vector magnitude", "vectormagnitude", "vm", "svm", "magnitude"]
-        for col_lower, col_orig in columns_lower.items():
-            if any(p in col_lower for p in vm_patterns):
-                self.vector_magnitude_combo.setCurrentText(col_orig)
-                break
-
-    def _update_preview(self, lines: list[list[str]], header_idx: int, dialect) -> None:
-        """Update the preview table with sample data."""
-        if not lines or header_idx >= len(lines):
-            return
-
-        headers = lines[header_idx]
-        data_rows = lines[header_idx + 1 : header_idx + 6]  # Next 5 rows
-
-        self.preview_table.clear()
-        self.preview_table.setColumnCount(min(len(headers), 8))  # Limit to 8 columns
-        self.preview_table.setRowCount(len(data_rows))
-        self.preview_table.setHorizontalHeaderLabels(headers[: min(len(headers), 8)])
-
-        for row_idx, row in enumerate(data_rows):
-            for col_idx, value in enumerate(row[: min(len(row), 8)]):
-                item = QTableWidgetItem(value)
-                self.preview_table.setItem(row_idx, col_idx, item)
-
-        self.preview_table.resizeColumnsToContents()
-
-    def _get_combo_value(self, combo: QComboBox) -> str:
-        """Get combo value, returning empty string for '(not available)'."""
-        text = combo.currentText().strip()
-        return "" if text == "(not available)" else text
-
-    def _save_and_accept(self) -> None:
-        """Save configuration and accept dialog."""
-        if not self.config_manager:
-            self.accept()
-            return
-
-        # Get values
-        date_col = self.date_column_combo.currentText().strip()
-        time_col = self.time_column_combo.currentText().strip()
-        is_combined = self.datetime_combined_check.isChecked()
-
-        # Get axis columns
-        axis_y_col = self._get_combo_value(self.axis_y_combo)
-        axis_x_col = self._get_combo_value(self.axis_x_combo)
-        axis_z_col = self._get_combo_value(self.axis_z_combo)
-        vm_col = self._get_combo_value(self.vector_magnitude_combo)
-
-        # Validate datetime columns
-        if not date_col:
-            QMessageBox.warning(self, "Validation Error", "Please select a date column.")
-            return
-
-        if not is_combined and not time_col:
-            QMessageBox.warning(self, "Validation Error", "Please select a time column.")
-            return
-
-        # Warn if Y-Axis not set (required for Sadeh - vertical axis)
-        if not axis_y_col:
-            reply = QMessageBox.warning(
-                self,
-                "Missing Y-Axis",
-                "Y-Axis (vertical) column is not set. The Sadeh algorithm requires Y-Axis data.\n\nContinue anyway?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if reply != QMessageBox.StandardButton.Yes:
-                return
-
-        # Save to config
-        config = self.config_manager.config
-        config.custom_date_column = date_col
-        config.custom_time_column = time_col if not is_combined else ""
-        config.datetime_combined = is_combined
-        config.custom_axis_y_column = axis_y_col
-        config.custom_axis_x_column = axis_x_col
-        config.custom_axis_z_column = axis_z_col
-        config.custom_vector_magnitude_column = vm_col
-        self.config_manager.save_config()
-
-        logger.info(
-            "Column mapping saved: date=%s, time=%s, combined=%s, axis_y=%s, axis_x=%s, axis_z=%s, vm=%s",
-            date_col,
-            time_col,
-            is_combined,
-            axis_y_col,
-            axis_x_col,
-            axis_z_col,
-            vm_col,
-        )
-
-        self.accept()
 
 
 class DataSettingsTab(QWidget):
@@ -492,158 +65,78 @@ class DataSettingsTab(QWidget):
     to all import operations.
     """
 
-    def __init__(self, parent: SleepScoringMainWindow) -> None:
+    def __init__(self, store: UIStore, app_state: AppStateInterface, services: ServiceContainer, parent: MainWindowProtocol) -> None:
+        """Initialize the data settings tab presentational shell."""
         super().__init__(parent)
-        self.parent = parent  # Reference to main window
+        self.store = store
+        self.app_state = app_state
+        self.services = services
+        self.main_window = parent  # Store reference to main window for method access
+
+        # Purely UI state
+        self.import_worker = None
+        self.progress_timer = QTimer()
+        self.selected_diary_files: list[Path] = []
+
         self.setup_ui()
-        # Filter loaders based on current paradigm after UI is fully set up
-        self.update_loaders_for_paradigm()
+        logger.info("DataSettingsTab initialized as Presenter")
 
     def setup_ui(self) -> None:
-        """Create the data settings tab UI."""
+        """Create the presentational layout."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # Initialize import components
-        self._init_import_components()
-
-        # Create scroll area with always-visible scrollbars
+        # Create scroll area
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
 
-        # Create content widget that will be scrollable
         content_widget = QWidget()
         content_layout = QVBoxLayout(content_widget)
         content_layout.setContentsMargins(20, 20, 20, 20)
 
-        # Add explanation header
+        # 1. Header
         header_label = QLabel(
-            "<b>Data Configuration</b><br>"
-            "Configure settings for data import. All data is stored in the database for fast loading. "
-            "Duplicate files are automatically detected and skipped during import.",
+            "<b>Data Configuration</b><br>Configure settings for data import. All data is stored in the database for fast loading.",
         )
         header_label.setWordWrap(True)
-        header_label.setStyleSheet("QLabel { background-color: #f0f0f0; padding: 10px; border-radius: 5px; }")
+        header_label.setStyleSheet("background-color: #f0f0f0; padding: 10px; border-radius: 5px;")
         content_layout.addWidget(header_label)
 
-        # Current Paradigm indicator (link to Study Settings to change it)
-        paradigm_indicator = self._create_paradigm_indicator()
-        content_layout.addWidget(paradigm_indicator)
+        # 2. Paradigm Indicator
+        content_layout.addWidget(self._create_paradigm_indicator())
 
-        # Activity Data Section
-        activity_group = self._create_activity_data_section()
-        content_layout.addWidget(activity_group)
+        # 3. Activity Data Section (includes file management)
+        content_layout.addWidget(self._create_activity_data_section())
 
-        # NWT Sensor Data Section
-        nwt_group = self._create_nwt_data_section()
-        content_layout.addWidget(nwt_group)
+        # 4. Diary Section
+        content_layout.addWidget(self._create_diary_data_section())
 
-        # Diary Data Section
-        diary_group = self._create_diary_data_section()
-        content_layout.addWidget(diary_group)
+        # 5. NWT Sensor Data Section (Nonwear Detection)
+        content_layout.addWidget(self._create_nwt_data_section())
 
         content_layout.addStretch()
-
-        # Set the content widget in the scroll area
         scroll_area.setWidget(content_widget)
-
-        # Add scroll area to main layout
         layout.addWidget(scroll_area)
 
-    def _init_import_components(self) -> None:
-        """Initialize import service components."""
-        from sleep_scoring_app.services.import_service import ImportService
-
-        # Initialize import service
-        self.import_service = ImportService(self.parent.db_manager)
-        self.import_worker = None
-        self.progress_timer = QTimer()
-
-    def _init_file_management(self) -> None:
-        """Initialize file management widget."""
-        try:
-            from sleep_scoring_app.services.file_management_service import FileManagementServiceImpl
-            from sleep_scoring_app.ui.widgets.file_management_widget import FileManagementWidget
-
-            # Create file management service
-            file_service = FileManagementServiceImpl(self.parent.db_manager)
-
-            # Create widget
-            self.file_management_widget = FileManagementWidget(file_service, parent=self)
-
-            # Connect signals
-            self.file_management_widget.filesDeleted.connect(self._on_files_deleted)
-
-            logger.info("File management widget initialized")
-        except Exception as e:
-            logger.exception("Failed to initialize file management widget")
-            # Don't create widget if initialization fails
-            if hasattr(self, "file_management_widget"):
-                delattr(self, "file_management_widget")
-
-    def _on_files_deleted(self, filenames: list[str]) -> None:
-        """
-        Handle files deleted signal.
-
-        Clears caches, refreshes the Analysis tab file list, and handles
-        the case where the currently selected file was deleted.
-
-        Args:
-            filenames: List of deleted file names
-
-        """
-        logger.info("Files deleted: %s", filenames)
-
-        # Clear cache in unified data service for each deleted file
-        if hasattr(self.parent, "data_service"):
-            for filename in filenames:
-                self.parent.data_service.clear_file_cache(filename)
-
-        # Check if the currently selected file was deleted
-        current_file_deleted = False
-        if hasattr(self.parent, "selected_file") and self.parent.selected_file:
-            from pathlib import Path
-
-            current_filename = Path(self.parent.selected_file).name
-            if current_filename in filenames:
-                current_file_deleted = True
-                logger.info("Currently selected file %s was deleted", current_filename)
-
-        # Reload the file list in the Analysis tab (this updates the FileSelectionTable)
-        if hasattr(self.parent, "load_available_files"):
-            # Don't preserve selection if the current file was deleted
-            self.parent.load_available_files(preserve_selection=not current_file_deleted)
-
-        # If current file was deleted, clear the plot and reset UI state
-        if current_file_deleted:
-            self._handle_current_file_deleted()
-
     def _handle_current_file_deleted(self) -> None:
-        """Handle cleanup when the currently selected file is deleted."""
+        """
+        Handle cleanup when the currently selected file is deleted.
+
+        Uses Redux store dispatch instead of direct MainWindow mutation.
+        Connectors will handle the UI updates in response to state changes.
+        """
         try:
-            # Clear selected file reference
-            if hasattr(self.parent, "selected_file"):
-                self.parent.selected_file = None
+            from sleep_scoring_app.ui.store import Actions
 
-            # Clear available dates
-            if hasattr(self.parent, "available_dates"):
-                self.parent.available_dates = []
+            # Dispatch Redux actions to update state - connectors handle UI updates
+            self.store.dispatch(Actions.file_selected(None))
+            self.store.dispatch(Actions.dates_loaded([]))
 
-            # Clear the plot widget
-            if hasattr(self.parent, "plot_widget") and self.parent.plot_widget is not None:
-                self.parent.plot_widget.clear_plot()
+            # Note: DateDropdownConnector handles dropdown clearing
+            # StatusConnector handles status bar updates
+            # PlotConnector handles plot clearing (if exists)
 
-            # Clear date dropdown
-            if hasattr(self.parent, "date_dropdown") and self.parent.date_dropdown is not None:
-                self.parent.date_dropdown.clear()
-
-            # Update status bar
-            if hasattr(self.parent, "update_status_bar"):
-                self.parent.update_status_bar()
-
-            logger.info("Cleared UI state after current file deletion")
+            logger.info("Dispatched file deletion cleanup actions to store")
         except Exception as e:
             logger.warning("Error during file deletion cleanup: %s", e)
 
@@ -653,9 +146,9 @@ class DataSettingsTab(QWidget):
         indicator_layout = QHBoxLayout(indicator_widget)
         indicator_layout.setContentsMargins(0, 10, 0, 10)
 
-        # Get current paradigm
+        # Get current paradigm via services
         try:
-            paradigm_value = self.parent.config_manager.config.data_paradigm
+            paradigm_value = self.services.config_manager.config.data_paradigm
             paradigm = StudyDataParadigm(paradigm_value)
         except (ValueError, AttributeError):
             paradigm = StudyDataParadigm.get_default()
@@ -712,12 +205,12 @@ class DataSettingsTab(QWidget):
         self.paradigm_indicator_label.setWordWrap(True)
 
     def _go_to_study_settings(self) -> None:
-        """Switch to Study Settings tab."""
-        if hasattr(self.parent, "tab_widget"):
-            # Find the Study Settings tab index
-            for i in range(self.parent.tab_widget.count()):
-                if self.parent.tab_widget.tabText(i) == "Study Settings":
-                    self.parent.tab_widget.setCurrentIndex(i)
+        """Switch to the Study Settings tab."""
+        if self.services.tab_widget:
+            # Find Study Settings tab index
+            for i in range(self.services.tab_widget.count()):
+                if self.services.tab_widget.tabText(i) == "Study Settings":
+                    self.services.tab_widget.setCurrentIndex(i)
                     break
 
     def _create_section_separator(self) -> QFrame:
@@ -766,7 +259,7 @@ class DataSettingsTab(QWidget):
         """Create Activity Data section with global settings and import."""
         # Make title paradigm-aware
         try:
-            paradigm_value = self.parent.config_manager.config.data_paradigm
+            paradigm_value = self.services.config_manager.config.data_paradigm
             paradigm = StudyDataParadigm(paradigm_value)
         except (ValueError, AttributeError):
             paradigm = StudyDataParadigm.get_default()
@@ -799,12 +292,14 @@ class DataSettingsTab(QWidget):
 
         # Set current value from config (block signals during initialization)
         self.data_source_combo.blockSignals(True)
-        current_loader_id = self.parent.config_manager.config.data_source_type_id
-        for i in range(self.data_source_combo.count()):
-            if self.data_source_combo.itemData(i) == current_loader_id:
-                self.data_source_combo.setCurrentIndex(i)
-                break
-        self.data_source_combo.blockSignals(False)
+        try:
+            current_loader_id = self.services.config_manager.config.data_source_type_id
+            for i in range(self.data_source_combo.count()):
+                if self.data_source_combo.itemData(i) == current_loader_id:
+                    self.data_source_combo.setCurrentIndex(i)
+                    break
+        finally:
+            self.data_source_combo.blockSignals(False)
 
         self.data_source_combo.currentIndexChanged.connect(self._on_data_source_changed)
         self.data_source_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
@@ -825,8 +320,8 @@ class DataSettingsTab(QWidget):
         for preset in DevicePreset:
             self.device_preset_combo.addItem(device_display_names[preset], preset.value)
 
-        # Set current value from config
-        current_preset = self.parent.config_manager.config.device_preset
+        # Set current value from config via services
+        current_preset = self.services.config_manager.config.device_preset
         for i in range(self.device_preset_combo.count()):
             if self.device_preset_combo.itemData(i) == current_preset:
                 self.device_preset_combo.setCurrentIndex(i)
@@ -852,8 +347,9 @@ class DataSettingsTab(QWidget):
         settings_grid.addWidget(QLabel("Epoch Length (seconds):"), 2, 0)
         self.epoch_length_spin = QSpinBox()
         self.epoch_length_spin.setRange(1, 300)
-        self.epoch_length_spin.setValue(self.parent.config_manager.config.epoch_length)
-        self.epoch_length_spin.valueChanged.connect(self.parent.on_epoch_length_changed)
+        self.epoch_length_spin.setValue(self.services.config_manager.config.epoch_length)
+        # MainWindowProtocol guarantees this method exists
+        self.epoch_length_spin.valueChanged.connect(self.main_window.on_epoch_length_changed)
         self.epoch_length_spin.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         settings_grid.addWidget(self.epoch_length_spin, 2, 1)
 
@@ -866,8 +362,9 @@ class DataSettingsTab(QWidget):
         settings_grid.addWidget(QLabel("Skip Rows:"), 3, 0)
         self.skip_rows_spin = QSpinBox()
         self.skip_rows_spin.setRange(0, 100)
-        self.skip_rows_spin.setValue(self.parent.config_manager.config.skip_rows)
-        self.skip_rows_spin.valueChanged.connect(self.parent.on_skip_rows_changed)
+        self.skip_rows_spin.setValue(self.services.config_manager.config.skip_rows)
+        # MainWindowProtocol guarantees this method exists
+        self.skip_rows_spin.valueChanged.connect(self.main_window.on_skip_rows_changed)
         self.skip_rows_spin.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         settings_grid.addWidget(self.skip_rows_spin, 3, 1)
 
@@ -915,8 +412,10 @@ class DataSettingsTab(QWidget):
         self.gt3x_epoch_length_spin = QSpinBox()
         self.gt3x_epoch_length_spin.setRange(1, 300)
         self.gt3x_epoch_length_spin.blockSignals(True)
-        self.gt3x_epoch_length_spin.setValue(self.parent.config_manager.config.gt3x_epoch_length)
-        self.gt3x_epoch_length_spin.blockSignals(False)
+        try:
+            self.gt3x_epoch_length_spin.setValue(self.services.config_manager.config.gt3x_epoch_length)
+        finally:
+            self.gt3x_epoch_length_spin.blockSignals(False)
         self.gt3x_epoch_length_spin.valueChanged.connect(self._on_gt3x_epoch_length_changed)
         self.gt3x_epoch_length_spin.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.gt3x_epoch_length_spin.setToolTip("Epoch length for GT3X data processing")
@@ -925,8 +424,10 @@ class DataSettingsTab(QWidget):
         gt3x_options_layout.addWidget(QLabel("Return Raw Data:"), 1, 0)
         self.gt3x_return_raw_check = QCheckBox()
         self.gt3x_return_raw_check.blockSignals(True)
-        self.gt3x_return_raw_check.setChecked(self.parent.config_manager.config.gt3x_return_raw)
-        self.gt3x_return_raw_check.blockSignals(False)
+        try:
+            self.gt3x_return_raw_check.setChecked(self.services.config_manager.config.gt3x_return_raw)
+        finally:
+            self.gt3x_return_raw_check.blockSignals(False)
         self.gt3x_return_raw_check.stateChanged.connect(self._on_gt3x_return_raw_changed)
         self.gt3x_return_raw_check.setToolTip("Return raw acceleration data instead of activity counts")
         gt3x_options_layout.addWidget(self.gt3x_return_raw_check, 1, 1)
@@ -957,13 +458,15 @@ class DataSettingsTab(QWidget):
         import_layout.addWidget(self.activity_import_files_label)
 
         self.activity_browse_btn = QPushButton("Select Files...")
-        self.activity_browse_btn.clicked.connect(self.parent.browse_activity_files)
+        # MainWindowProtocol guarantees this method exists
+        self.activity_browse_btn.clicked.connect(self.main_window.browse_activity_files)
         import_layout.addWidget(self.activity_browse_btn)
 
         self.activity_import_btn = QPushButton("Import")
         self.activity_import_btn.setEnabled(False)
         self.activity_import_btn.setToolTip("Select CSV files to enable import")
-        self.activity_import_btn.clicked.connect(self.parent.start_activity_import)
+        # MainWindowProtocol guarantees this method exists
+        self.activity_import_btn.clicked.connect(self.main_window.start_activity_import)
         self.activity_import_btn.setStyleSheet("""
             QPushButton:enabled {
                 background-color: #27ae60;
@@ -999,9 +502,10 @@ class DataSettingsTab(QWidget):
         activity_layout.addWidget(file_mgmt_label)
 
         # Initialize file management widget
-        self._init_file_management()
-        if hasattr(self, "file_management_widget"):
-            activity_layout.addWidget(self.file_management_widget)
+        from sleep_scoring_app.ui.widgets.file_management_widget import FileManagementWidget
+
+        self.file_management_widget = FileManagementWidget(parent=self)
+        activity_layout.addWidget(self.file_management_widget)
 
         # Clear buttons row
         clear_layout = QHBoxLayout()
@@ -1022,7 +526,7 @@ class DataSettingsTab(QWidget):
             }
         """)
         self.clear_markers_btn.setToolTip("Clear all sleep markers and metrics (preserves imported data)")
-        self.clear_markers_btn.clicked.connect(self.parent.clear_all_markers)
+        self.clear_markers_btn.clicked.connect(self.app_state.clear_all_markers)
         clear_layout.addWidget(self.clear_markers_btn)
 
         clear_activity_btn = self._create_clear_button(
@@ -1052,13 +556,15 @@ class DataSettingsTab(QWidget):
         import_layout.addWidget(self.nwt_import_files_label)
 
         self.nwt_browse_btn = QPushButton("Select Files...")
-        self.nwt_browse_btn.clicked.connect(self.parent.browse_nonwear_files)
+        # MainWindowProtocol guarantees this method exists
+        self.nwt_browse_btn.clicked.connect(self.main_window.browse_nonwear_files)
         import_layout.addWidget(self.nwt_browse_btn)
 
         self.nwt_import_btn = QPushButton("Import")
         self.nwt_import_btn.setEnabled(False)
         self.nwt_import_btn.setToolTip("Select NWT sensor data files to enable import")
-        self.nwt_import_btn.clicked.connect(self.parent.start_nonwear_import)
+        # MainWindowProtocol guarantees this method exists
+        self.nwt_import_btn.clicked.connect(self.main_window.start_nonwear_import)
         self.nwt_import_btn.setStyleSheet("""
             QPushButton:enabled {
                 background-color: #27ae60;
@@ -1166,9 +672,6 @@ class DataSettingsTab(QWidget):
 
         diary_layout.addLayout(clear_layout)
 
-        # Store selected files
-        self.selected_diary_files: list[Path] = []
-
         return diary_group
 
     def _create_clear_button(self, text: str, tooltip: str, click_handler) -> QPushButton:
@@ -1197,7 +700,7 @@ class DataSettingsTab(QWidget):
 
     def _update_column_mapping_status(self) -> None:
         """Update the column mapping status label."""
-        config = self.parent.config_manager.config
+        config = self.services.config_manager.config
 
         if config.device_preset != DevicePreset.GENERIC_CSV.value:
             self.column_mapping_status.setText("")
@@ -1229,16 +732,17 @@ class DataSettingsTab(QWidget):
         self._update_column_mapping_status()
 
         # Update config
-        self.parent.config_manager.config.device_preset = preset
-        self.parent.config_manager.save_config()
-        logger.info("Device preset changed to: %s", preset)
+        if self.services.config_manager:
+            self.services.config_manager.config.device_preset = preset
+            self.services.config_manager.save_config()
+            logger.info("Device preset changed to: %s", preset)
 
     def _on_data_source_changed(self, index: int) -> None:
         """Handle data source type selection change."""
         loader_id = self.data_source_combo.itemData(index)
-        if self.parent and self.parent.config_manager:
-            self.parent.config_manager.config.data_source_type_id = loader_id
-            self.parent.config_manager.save_config()
+        if self.services.config_manager:
+            self.services.config_manager.config.data_source_type_id = loader_id
+            self.services.config_manager.save_config()
             logger.info("Data source type changed to: %s", loader_id)
 
         # Update visibility of data source specific sections
@@ -1256,122 +760,116 @@ class DataSettingsTab(QWidget):
         self.gt3x_options_widget.setVisible(is_gt3x)
 
     def update_loaders_for_paradigm(self, paradigm: StudyDataParadigm | None = None) -> None:
-        """
-        Update the data source loader combo based on current paradigm.
-
-        Args:
-            paradigm: The paradigm to filter loaders for. If None, reads from config.
-
-        This method filters the available loaders:
-        - EPOCH_BASED: Only shows CSV loader (for pre-epoched CSV/Excel files)
-        - RAW_ACCELEROMETER: Shows both CSV and GT3X loaders
-
-        """
-        from sleep_scoring_app.io.sources.loader_factory import DataSourceFactory
-
-        # Get current paradigm if not provided
-        if paradigm is None:
-            try:
-                paradigm_value = self.parent.config_manager.config.data_paradigm
-                paradigm = StudyDataParadigm(paradigm_value)
-            except (ValueError, AttributeError):
-                paradigm = StudyDataParadigm.get_default()
+        """Filter available data loaders based on the current data paradigm."""
+        try:
+            if paradigm is None:
+                # Use current paradigm from config via services
+                if self.services.config_manager and self.services.config_manager.config:
+                    paradigm_val = self.services.config_manager.config.data_paradigm
+                    paradigm = StudyDataParadigm(paradigm_val)
+                else:
+                    paradigm = StudyDataParadigm.get_default()
+            elif isinstance(paradigm, str):
+                paradigm = StudyDataParadigm(paradigm)
+        except Exception as e:
+            logger.warning(f"Error getting current paradigm: {e}")
+            paradigm = StudyDataParadigm.get_default()
 
         # Store current selection to try to restore it
         current_loader_id = self.data_source_combo.currentData()
 
         # Block signals during update
         self.data_source_combo.blockSignals(True)
-        self.data_source_combo.clear()
+        try:
+            self.data_source_combo.clear()
 
-        # Get all available loaders
-        available_loaders = DataSourceFactory.get_available_loaders()
+            # Get all available loaders
+            available_loaders = DataSourceFactory.get_available_loaders()
 
-        # Filter loaders based on paradigm
-        if paradigm == StudyDataParadigm.EPOCH_BASED:
-            # Epoch-based: only CSV loader (GT3X requires raw processing)
-            filtered_loaders = {k: v for k, v in available_loaders.items() if k == DataSourceType.CSV}
-        else:
-            # Raw accelerometer: all loaders available
-            filtered_loaders = available_loaders
+            # Filter loaders based on paradigm
+            if paradigm == StudyDataParadigm.EPOCH_BASED:
+                # Epoch-based: only CSV loader (GT3X requires raw processing)
+                filtered_loaders = {k: v for k, v in available_loaders.items() if k == DataSourceType.CSV}
+            else:
+                # Raw accelerometer: all loaders available
+                filtered_loaders = available_loaders
 
-        # Populate combo with filtered loaders
-        for loader_id, display_name in filtered_loaders.items():
-            self.data_source_combo.addItem(display_name, loader_id)
+            # Populate combo with filtered loaders
+            for loader_id, display_name in filtered_loaders.items():
+                self.data_source_combo.addItem(display_name, loader_id)
 
-        # Try to restore previous selection if still available
-        restored = False
-        if current_loader_id:
-            for i in range(self.data_source_combo.count()):
-                if self.data_source_combo.itemData(i) == current_loader_id:
-                    self.data_source_combo.setCurrentIndex(i)
-                    restored = True
-                    break
+            # Try to restore previous selection if still available
+            restored = False
+            if current_loader_id:
+                for i in range(self.data_source_combo.count()):
+                    if self.data_source_combo.itemData(i) == current_loader_id:
+                        self.data_source_combo.setCurrentIndex(i)
+                        restored = True
+                        break
 
-        # If previous selection not available, select first item
-        if not restored and self.data_source_combo.count() > 0:
-            self.data_source_combo.setCurrentIndex(0)
-            # Update config with new loader
-            new_loader_id = self.data_source_combo.itemData(0)
-            if self.parent and self.parent.config_manager:
-                self.parent.config_manager.config.data_source_type_id = new_loader_id
-                self.parent.config_manager.save_config()
+            # If previous selection not available, select first item
+            if not restored and self.data_source_combo.count() > 0:
+                self.data_source_combo.setCurrentIndex(0)
+                new_loader_id = self.data_source_combo.currentData()
 
-        self.data_source_combo.blockSignals(False)
+                # Update config with new default loader for this paradigm
+                if self.services.config_manager:
+                    self.services.config_manager.config.data_source_type_id = new_loader_id
+                    self.services.config_manager.save_config()
+        finally:
+            self.data_source_combo.blockSignals(False)
 
         # Update visibility of loader-specific options
         self._update_data_source_visibility()
 
         # Update paradigm indicator
-        if hasattr(self, "paradigm_indicator_label"):
+        if self.paradigm_indicator_label is not None:
             self._update_paradigm_indicator_label(paradigm)
 
         # Update Activity Data GroupBox title
-        if hasattr(self, "activity_group"):
+        if self.activity_group is not None:
             if paradigm == StudyDataParadigm.EPOCH_BASED:
                 self.activity_group.setTitle("Activity Data (CSV/Excel with epoch counts)")
             else:
                 self.activity_group.setTitle("Activity Data (GT3X or raw CSV files)")
 
-        logger.info("Updated data source loaders for paradigm: %s", paradigm.get_display_name())
+        logger.info("Updated data source loaders for paradigm: %s", paradigm.name)
 
     def _on_gt3x_epoch_length_changed(self, value: int) -> None:
-        """Handle GT3X epoch length spinner change."""
-        if self.parent and self.parent.config_manager:
-            self.parent.config_manager.config.gt3x_epoch_length = value
-            self.parent.config_manager.save_config()
-            logger.debug("GT3X epoch length changed to: %s", value)
+        """Handle GT3X epoch length spin box change."""
+        if self.services.config_manager:
+            self.services.config_manager.config.gt3x_epoch_length = value
+            self.services.config_manager.save_config()
+            logger.info("GT3X epoch length changed to: %d", value)
 
     def _on_gt3x_return_raw_changed(self, state: int) -> None:
-        """Handle GT3X return raw checkbox change."""
-        if self.parent and self.parent.config_manager:
-            self.parent.config_manager.config.gt3x_return_raw = bool(state)
-            self.parent.config_manager.save_config()
-            logger.debug("GT3X return raw changed to: %s", bool(state))
+        """Handle GT3X return raw check box change."""
+        if self.services.config_manager:
+            self.services.config_manager.config.gt3x_return_raw = bool(state)
+            self.services.config_manager.save_config()
+            logger.info("GT3X return raw changed to: %s", bool(state))
 
     def _open_column_mapping_dialog(self) -> None:
         """Open the column mapping configuration dialog."""
-        # Try to get a sample file from selected files or import directory
+        # Try to get a sample file from selected files via services interface
         sample_file = None
-        if hasattr(self.parent, "_selected_activity_files") and self.parent._selected_activity_files:
+        selected_files = getattr(self.services, "_selected_activity_files", None)
+        if selected_files:
             # Use one of the selected files
-            csv_files = [f for f in self.parent._selected_activity_files if f.suffix.lower() == ".csv"]
+            csv_files = [f for f in selected_files if f.suffix.lower() == ".csv"]
             if csv_files:
                 sample_file = random.choice(csv_files)
-        elif self.parent.config_manager.config.import_activity_directory:
+        elif self.services.config_manager.config.import_activity_directory:
             # Fall back to import directory
-            folder = Path(self.parent.config_manager.config.import_activity_directory)
-            csv_files = list(folder.glob("*.csv"))
-            if csv_files:
-                sample_file = random.choice(csv_files)
+            folder = Path(self.services.config_manager.config.import_activity_directory)
+            if folder.exists():
+                csv_files = list(folder.glob("*.csv"))
+                if csv_files:
+                    sample_file = random.choice(csv_files)
 
-        dialog = ColumnMappingDialog(
-            parent=self,
-            config_manager=self.parent.config_manager,
-            sample_file=sample_file,
-        )
-
+        dialog = ColumnMappingDialog(self, sample_file, self.services.config_manager)
         if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Update status after dialog closed
             self._update_column_mapping_status()
 
     def _autodetect_device_format(self) -> None:
@@ -1571,23 +1069,24 @@ class DataSettingsTab(QWidget):
 
     def _get_sample_csv_files(self) -> list[Path]:
         """Get CSV files for sampling - from selected files or fallback to directories."""
-        # Try selected activity files first
-        if hasattr(self.parent, "_selected_activity_files") and self.parent._selected_activity_files:
-            csv_files = [f for f in self.parent._selected_activity_files if f.suffix.lower() == ".csv"]
+        # Try selected activity files first via services interface
+        selected_files = getattr(self.services, "_selected_activity_files", None)
+        if selected_files:
+            csv_files = [f for f in selected_files if f.suffix.lower() == ".csv"]
             if csv_files:
                 return csv_files
 
-        # Fall back to config import directory
-        if self.parent.config_manager.config.import_activity_directory:
-            folder = Path(self.parent.config_manager.config.import_activity_directory)
+        # Fall back to config import directory via services
+        if self.services.config_manager.config.import_activity_directory:
+            folder = Path(self.services.config_manager.config.import_activity_directory)
             if folder.exists():
                 csv_files = list(folder.glob("*.csv"))
                 if csv_files:
                     return csv_files
 
-        # Fall back to config data folder
-        if self.parent.config_manager.config.data_folder:
-            folder = Path(self.parent.config_manager.config.data_folder)
+        # Fall back to config data folder via services
+        if self.services.config_manager.config.data_folder:
+            folder = Path(self.services.config_manager.config.data_folder)
             if folder.exists():
                 csv_files = list(folder.glob("*.csv"))
                 if csv_files:
@@ -1598,8 +1097,8 @@ class DataSettingsTab(QWidget):
     # Diary import methods
     def _select_diary_import_files(self) -> None:
         """Select diary files for import to database."""
-        # Start from last used diary directory or home directory
-        start_dir = self.parent.config_manager.config.diary_import_directory or str(Path.home())
+        # Start from last used diary directory via services
+        start_dir = self.services.config_manager.config.diary_import_directory or str(Path.home())
         files, _ = QFileDialog.getOpenFileNames(
             self,
             "Select Diary Files to Import",
@@ -1618,8 +1117,8 @@ class DataSettingsTab(QWidget):
 
             # Save the directory of the first selected file for next time
             first_file_dir = str(Path(files[0]).parent)
-            self.parent.config_manager.config.diary_import_directory = first_file_dir
-            self.parent.config_manager.save_config()
+            self.services.config_manager.config.diary_import_directory = first_file_dir
+            self.services.config_manager.save_config()
         else:
             self.selected_diary_files = []
             self.diary_import_files_label.setText("No files selected")
@@ -1628,22 +1127,33 @@ class DataSettingsTab(QWidget):
 
     def _import_diary_data(self) -> None:
         """Import diary data using selected files."""
+        logger.info("=== DIARY IMPORT START ===")
+        logger.info(f"Selected diary files: {self.selected_diary_files}")
+
         if not self.selected_diary_files:
+            logger.warning("No diary files selected")
             self._show_diary_status("No files selected", error=True)
             return
 
         # Start import process
+        logger.info(f"Importing {len(self.selected_diary_files)} diary files...")
         self.diary_import_btn.setEnabled(False)
         self.diary_progress.setVisible(True)
         self.diary_progress.setRange(0, 0)  # Indeterminate progress
         self._show_diary_status("Starting import...")
 
         try:
-            # Use the simplified diary service for import
-            if hasattr(self.parent, "data_service") and hasattr(self.parent.data_service, "diary_service"):
-                result = self.parent.data_service.diary_service.import_diary_files(
+            # Use the simplified diary service for import via services interface
+            diary_service = self.services.data_service.diary_service if self.services.data_service else None
+
+            if diary_service:
+                logger.info("Calling diary_service.import_diary_files()...")
+                result = diary_service.import_diary_files(
                     self.selected_diary_files,
                     progress_callback=self._on_diary_import_progress,
+                )
+                logger.info(
+                    f"Diary import result: successful={len(result.successful_files)}, failed={len(result.failed_files)}, entries={result.total_entries_imported}"
                 )
 
                 # Show results
@@ -1677,15 +1187,12 @@ class DataSettingsTab(QWidget):
                         error_details += f" (and {len(result.failed_files) - 3} more)"
 
                     self._show_diary_status(f"Some files failed: {error_details}", error=True)
-            elif not hasattr(self.parent, "data_service"):
+            elif not self.services.data_service:
                 self._show_diary_status("Main data service not initialized", error=True)
-                logger.error("Parent window missing data_service attribute")
-            elif not hasattr(self.parent.data_service, "diary_service"):
-                self._show_diary_status("Diary service not initialized in data service", error=True)
-                logger.error("data_service missing diary_service attribute")
+                logger.error("Services data_service is None")
             else:
-                self._show_diary_status("Data service not available", error=True)
-                logger.error("Unknown data service availability issue")
+                self._show_diary_status("Diary service not initialized in data service", error=True)
+                logger.error("data_service.diary_service is None")
 
         except Exception as e:
             logger.exception("Diary import failed with exception: %s", e)
@@ -1702,6 +1209,24 @@ class DataSettingsTab(QWidget):
             self.diary_progress.setRange(0, total)
             self.diary_progress.setValue(current)
 
+    def _show_activity_status(self, message: str, error: bool = False) -> None:
+        """Show status message for activity data import."""
+        if hasattr(self, "activity_status_label"):
+            self.activity_status_label.setText(message)
+            if error:
+                self.activity_status_label.setStyleSheet("color: #d32f2f; font-size: 10px;")
+            else:
+                self.activity_status_label.setStyleSheet("color: #666; font-size: 10px;")
+
+    def _show_nwt_status(self, message: str, error: bool = False) -> None:
+        """Show status message for NWT sensor data import."""
+        if hasattr(self, "nwt_status_label"):
+            self.nwt_status_label.setText(message)
+            if error:
+                self.nwt_status_label.setStyleSheet("color: #d32f2f; font-size: 10px;")
+            else:
+                self.nwt_status_label.setStyleSheet("color: #666; font-size: 10px;")
+
     def _show_diary_status(self, message: str, error: bool = False) -> None:
         """Show status message for diary import."""
         self.diary_status_label.setText(message)
@@ -1712,28 +1237,31 @@ class DataSettingsTab(QWidget):
 
     # Clear data methods
     def _clear_activity_data(self) -> None:
-        """Clear all imported activity data from database."""
-        reply = QMessageBox.question(
-            self,
-            "Clear Activity Data",
-            "Are you sure you want to clear all imported activity data?\n\n"
-            "This will remove:\n"
-            "- All activity file records\n"
-            "- All sleep markers and metrics\n"
-            "- This action cannot be undone!",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
+        """
+        Clear all activity data from the database.
 
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                self.parent.db_manager.clear_activity_data()
-                QMessageBox.information(self, "Success", "Activity data cleared successfully!")
-                self.parent.load_available_files(preserve_selection=False)
-                logger.info("Activity data cleared by user")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to clear activity data: {e}")
-                logger.exception("Failed to clear activity data")
+        Uses Redux store dispatch instead of direct MainWindow access.
+        """
+        try:
+            from sleep_scoring_app.ui.store import Actions
+
+            # Clear data in database via services interface
+            self.services.db_manager.clear_activity_data()
+
+            # Dispatch refresh action - FileListConnector will handle the reload
+            self.store.dispatch(Actions.refresh_files_requested())
+
+            # Dispatch state reset - connectors handle UI updates
+            self.store.dispatch(Actions.file_selected(None))
+            self.store.dispatch(Actions.dates_loaded([]))
+
+            # Note: Connectors handle plot clearing and status bar updates
+
+            self._show_activity_status("Activity data cleared successfully")
+            logger.info("Activity data cleared from database")
+        except Exception as e:
+            logger.exception("Failed to clear activity data")
+            self._show_activity_status(f"Error clearing data: {e}", error=True)
 
     def _clear_nwt_data(self) -> None:
         """Clear all imported NWT sensor data from database."""
@@ -1747,7 +1275,7 @@ class DataSettingsTab(QWidget):
 
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                self.parent.db_manager.clear_nwt_data()
+                self.services.db_manager.clear_nwt_data()
                 QMessageBox.information(self, "Success", "NWT data cleared successfully!")
                 logger.info("NWT data cleared by user")
             except Exception as e:
@@ -1770,7 +1298,7 @@ class DataSettingsTab(QWidget):
 
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                self.parent.db_manager.clear_diary_data()
+                self.services.db_manager.clear_diary_data()
                 QMessageBox.information(self, "Success", "Diary data cleared successfully!")
                 logger.info("Diary data cleared by user")
             except Exception as e:

@@ -29,7 +29,13 @@ from sleep_scoring_app.ui.column_selection_dialog import ColumnSelectionDialog
 from sleep_scoring_app.utils.column_registry import column_registry
 
 if TYPE_CHECKING:
-    from sleep_scoring_app.ui.main_window import SleepScoringMainWindow
+    from sleep_scoring_app.ui.protocols import (
+        AppStateInterface,
+        MainWindowProtocol,
+        MarkerOperationsInterface,
+        ServiceContainer,
+    )
+    from sleep_scoring_app.ui.store import UIStore
 
 logger = logging.getLogger(__name__)
 
@@ -37,13 +43,29 @@ logger = logging.getLogger(__name__)
 class ExportTab(QWidget):
     """Export Tab for data export functionality."""
 
-    def __init__(self, parent: SleepScoringMainWindow) -> None:
+    def __init__(
+        self,
+        store: UIStore,
+        marker_ops: MarkerOperationsInterface,
+        app_state: AppStateInterface,
+        services: ServiceContainer,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
-        self.parent = parent
+        self.store = store
+        self.marker_ops = marker_ops
+        self.app_state = app_state
+        self.services = services
+        self.main_window_ref = parent  # Keep reference for transition
+
+        # UI members
+        self.summary_label = None  # Will be initialized in setup_ui
+
         self.setup_ui()
 
     def setup_ui(self) -> None:
         """Create the export tab UI."""
+        logger.debug("=== ExportTab.setup_ui() START ===")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
@@ -84,13 +106,12 @@ class ExportTab(QWidget):
 
         # Export button
         self.export_btn = QPushButton("Export Data")
-        self.export_btn.clicked.connect(self.parent.perform_direct_export)
+        # Delegate export via marker_ops interface (protocol guarantees method exists)
+        self.export_btn.clicked.connect(self.marker_ops.perform_direct_export)
+
         self.export_btn.setToolTip("Export sleep markers and metrics to CSV with selected options")
         self.export_btn.setStyleSheet("font-weight: bold; padding: 12px; font-size: 14px; background-color: #2c3e50; color: white;")
         content_layout.addWidget(self.export_btn)
-
-        # Store reference in parent for backward compatibility
-        self.parent.export_btn = self.export_btn
 
         content_layout.addStretch()
 
@@ -102,15 +123,16 @@ class ExportTab(QWidget):
 
     def _init_export_config(self) -> None:
         """Initialize export configuration."""
-        if not hasattr(self.parent, "_export_config_initialized"):
+        # Use services interface for config access
+        if not getattr(self.services, "_export_config_initialized", False):
             # Get ALL possible export columns from column registry
             exportable_columns = column_registry.get_exportable()
-            self.parent.selected_export_columns = [col.export_column for col in exportable_columns if col.export_column]
-            self.parent.export_output_path = self.parent.config_manager.config.export_directory or str(Path.cwd() / "sleep_data_exports")
+            self.services.selected_export_columns = [col.export_column for col in exportable_columns if col.export_column]
+            self.services.export_output_path = self.services.config_manager.config.export_directory or str(Path.cwd() / "sleep_data_exports")
 
             # Ensure export directory exists
-            Path(self.parent.export_output_path).mkdir(parents=True, exist_ok=True)
-            self.parent._export_config_initialized = True
+            Path(self.services.export_output_path).mkdir(parents=True, exist_ok=True)
+            self.services._export_config_initialized = True
 
     def _create_data_summary_section(self) -> QGroupBox:
         """Create data summary section."""
@@ -129,11 +151,13 @@ class ExportTab(QWidget):
 
     def refresh_data_summary(self) -> None:
         """Refresh the data summary section with current metrics from database."""
-        if not hasattr(self, "summary_label"):
+        if self.summary_label is None:
             return
 
         try:
-            all_metrics = self.parent._get_cached_metrics()
+            # Load metrics from database via services
+            all_metrics = self.services.db_manager.load_sleep_metrics() if self.services.db_manager else []
+
             summary_lines = [f"Total records: {len(all_metrics)}"]
 
             if all_metrics:
@@ -142,12 +166,14 @@ class ExportTab(QWidget):
                 timepoints = set()
 
                 for metrics in all_metrics:
-                    if hasattr(metrics, "participant") and metrics.participant:
-                        if hasattr(metrics.participant, "numerical_id"):
+                    # JUSTIFIED hasattr: Metrics structure may vary, participant may be None
+                    if metrics.participant is not None:  # participant is a dataclass field
+                        # JUSTIFIED hasattr: ParticipantInfo attributes may vary by version
+                        if metrics.participant.numerical_id is not None:  # numerical_id is a dataclass field
                             participants.add(metrics.participant.numerical_id)
-                        if hasattr(metrics.participant, "group_str"):
+                        if metrics.participant.group_str is not None:  # group_str is a dataclass field
                             groups.add(metrics.participant.group_str)
-                        if hasattr(metrics.participant, "timepoint_str"):
+                        if metrics.participant.timepoint_str is not None:  # timepoint_str is a dataclass field
                             timepoints.add(metrics.participant.timepoint_str)
 
                 summary_lines.append(f"Participants: {len(participants)}")
@@ -180,14 +206,14 @@ class ExportTab(QWidget):
 
     def _open_column_selection_dialog(self) -> None:
         """Open the column selection dialog."""
-        dialog = ColumnSelectionDialog(self, self.parent.selected_export_columns)
+        dialog = ColumnSelectionDialog(self, self.services.selected_export_columns)
         if dialog.exec():
-            self.parent.selected_export_columns = dialog.get_selected_columns()
+            self.services.selected_export_columns = dialog.get_selected_columns()
             self._update_column_count()
 
     def _update_column_count(self) -> None:
         """Update the column count label."""
-        selected = len(self.parent.selected_export_columns)
+        selected = len(self.services.selected_export_columns)
         # Count only toggleable columns (not always_exported)
         toggleable = len([c for c in column_registry.get_exportable() if c.export_column and not c.is_always_exported])
         always_exported = len([c for c in column_registry.get_exportable() if c.export_column and c.is_always_exported])
@@ -230,15 +256,15 @@ class ExportTab(QWidget):
             self.export_grouping_group.addButton(radio, id)
             layout.addWidget(radio)
 
-        # Restore saved preference
-        saved_grouping = self.parent.config_manager.config.export_grouping
+        # Restore saved preference via services
+        saved_grouping = self.services.config_manager.config.export_grouping
         if 0 <= saved_grouping <= 3:
             button = self.export_grouping_group.button(saved_grouping)
             if button:
                 button.setChecked(True)
 
-        # Store reference in parent for backward compatibility
-        self.parent.export_grouping_group = self.export_grouping_group
+        # Store reference in services for access
+        self.services.export_grouping_group = self.export_grouping_group
 
         return group
 
@@ -247,24 +273,26 @@ class ExportTab(QWidget):
         group = QGroupBox("Output Directory")
         layout = QVBoxLayout(group)
 
-        # Initialize with saved export directory or default
-        saved_dir = self.parent.config_manager.config.export_directory
+        # Initialize with saved export directory or default via services
+        saved_dir = self.services.config_manager.config.export_directory
         dir_display = saved_dir if saved_dir else "No directory selected"
         self.export_output_label = QLabel(dir_display)
         self.export_output_label.setStyleSheet("padding: 8px; background-color: white; border: 1px solid #ccc; border-radius: 3px;")
         layout.addWidget(self.export_output_label)
 
         browse_btn = QPushButton(ButtonText.BROWSE)
-        browse_btn.clicked.connect(self.parent.browse_export_output_directory)
+        # MainWindowProtocol guarantees this method exists
+        browse_btn.clicked.connect(self.main_window_ref.browse_export_output_directory)
+
         browse_btn.setStyleSheet("font-weight: bold; padding: 5px 10px;")
         layout.addWidget(browse_btn)
 
         # Set initial directory if saved
-        if self.parent.export_output_path and Path(self.parent.export_output_path).exists():
-            self.export_output_label.setText(self.parent.export_output_path)
+        if self.services.export_output_path and Path(self.services.export_output_path).exists():
+            self.export_output_label.setText(self.services.export_output_path)
 
-        # Store reference in parent for backward compatibility
-        self.parent.export_output_label = self.export_output_label
+        # Store reference in services for access
+        self.services.export_output_label = self.export_output_label
 
         return group
 
@@ -274,27 +302,30 @@ class ExportTab(QWidget):
         layout = QVBoxLayout(group)
 
         self.include_headers_checkbox = QCheckBox("Include column headers")
-        self.include_headers_checkbox.setChecked(bool(self.parent.config_manager.config.include_headers))
-        self.include_headers_checkbox.stateChanged.connect(self.parent.save_export_options)
+        self.include_headers_checkbox.setChecked(bool(self.services.config_manager.config.include_headers))
+        # MainWindowProtocol guarantees this method exists
+        self.include_headers_checkbox.stateChanged.connect(self.main_window_ref.save_export_options)
         layout.addWidget(self.include_headers_checkbox)
 
         self.include_metadata_checkbox = QCheckBox("Include metadata (participant info, dates)")
-        self.include_metadata_checkbox.setChecked(bool(self.parent.config_manager.config.include_metadata))
-        self.include_metadata_checkbox.stateChanged.connect(self.parent.save_export_options)
+        self.include_metadata_checkbox.setChecked(bool(self.services.config_manager.config.include_metadata))
+        # MainWindowProtocol guarantees this method exists
+        self.include_metadata_checkbox.stateChanged.connect(self.main_window_ref.save_export_options)
         layout.addWidget(self.include_metadata_checkbox)
 
         self.separate_nonwear_file_checkbox = QCheckBox("Export nonwear markers to separate file")
-        self.separate_nonwear_file_checkbox.setChecked(bool(getattr(self.parent.config_manager.config, "export_nonwear_separate", True)))
+        self.separate_nonwear_file_checkbox.setChecked(bool(getattr(self.services.config_manager.config, "export_nonwear_separate", True)))
         self.separate_nonwear_file_checkbox.setToolTip(
             "When enabled, manual nonwear markers will be exported to a separate CSV file\n"
             "instead of being included as columns in the sleep data export."
         )
-        self.separate_nonwear_file_checkbox.stateChanged.connect(self.parent.save_export_options)
+        # MainWindowProtocol guarantees this method exists
+        self.separate_nonwear_file_checkbox.stateChanged.connect(self.main_window_ref.save_export_options)
         layout.addWidget(self.separate_nonwear_file_checkbox)
 
-        # Store reference in parent for backward compatibility
-        self.parent.include_headers_checkbox = self.include_headers_checkbox
-        self.parent.include_metadata_checkbox = self.include_metadata_checkbox
-        self.parent.separate_nonwear_file_checkbox = self.separate_nonwear_file_checkbox
+        # Store references in services for access
+        self.services.include_headers_checkbox = self.include_headers_checkbox
+        self.services.include_metadata_checkbox = self.include_metadata_checkbox
+        self.services.separate_nonwear_file_checkbox = self.separate_nonwear_file_checkbox
 
         return group

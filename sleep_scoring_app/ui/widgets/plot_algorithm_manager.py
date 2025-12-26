@@ -16,11 +16,11 @@ from typing import TYPE_CHECKING, Any
 
 import pyqtgraph as pg
 
-from sleep_scoring_app.core.algorithms import AlgorithmFactory, NonwearAlgorithmFactory, SleepPeriodDetectorFactory, SleepScoringAlgorithm
-from sleep_scoring_app.core.constants import ActivityDataPreference, UIColors
+from sleep_scoring_app.core.constants import ActivityDataPreference, NonwearAlgorithm, UIColors
 
 if TYPE_CHECKING:
-    from sleep_scoring_app.core.algorithms import SleepPeriodDetector
+    from sleep_scoring_app.core.algorithms.sleep_period.protocol import SleepPeriodDetector
+    from sleep_scoring_app.core.algorithms.sleep_wake.protocol import SleepScoringAlgorithm
     from sleep_scoring_app.core.dataclasses import SleepPeriod
     from sleep_scoring_app.ui.widgets.activity_plot import ActivityPlotWidget
 
@@ -75,18 +75,10 @@ class PlotAlgorithmManager:
 
         """
         try:
-            # Try direct main_window attribute first
-            main_window = getattr(self.parent, "main_window", None)
-            # If not found, try Qt parent() - plot_widget's parent IS main_window directly
-            if main_window is None and hasattr(self.parent, "parent") and callable(self.parent.parent):
-                main_window = self.parent.parent()  # Qt parent() method
-            if main_window and hasattr(main_window, "config_manager"):
-                choi_axis = main_window.config_manager.config.choi_axis
-                if choi_axis:
-                    return choi_axis  # Already stored as lowercase column name
+            return self.parent.get_choi_activity_column()
         except Exception as e:
             logger.debug("Exception getting Choi activity column: %s", e)
-        return ActivityDataPreference.VECTOR_MAGNITUDE  # Default
+            return ActivityDataPreference.VECTOR_MAGNITUDE
 
     def get_sleep_scoring_algorithm(self) -> SleepScoringAlgorithm:
         """
@@ -101,19 +93,14 @@ class PlotAlgorithmManager:
         """
         if self._sleep_scoring_algorithm is None:
             # Get config from main window
-            config = None
-            main_window = getattr(self.parent, "main_window", None)
-            if main_window is None and hasattr(self.parent, "parent") and callable(self.parent.parent):
-                main_window = self.parent.parent()
-            if main_window and hasattr(main_window, "config_manager"):
-                config = main_window.config_manager.config
+            config = self.parent.get_algorithm_config()
 
             # Get algorithm ID from config or use default
-            algorithm_id = AlgorithmFactory.get_default_algorithm_id()
-            if config and hasattr(config, "sleep_algorithm_id") and config.sleep_algorithm_id:
+            algorithm_id = self.parent.get_default_sleep_algorithm_id()
+            if config and hasattr(config, "sleep_algorithm_id") and config.sleep_algorithm_id:  # KEEP: Duck typing plot/marker attributes
                 algorithm_id = config.sleep_algorithm_id
 
-            self._sleep_scoring_algorithm = AlgorithmFactory.create(algorithm_id, config)
+            self._sleep_scoring_algorithm = self.parent.create_sleep_algorithm(algorithm_id, config)
             logger.debug("Created sleep scoring algorithm: %s (id: %s)", self._sleep_scoring_algorithm.name, algorithm_id)
 
         return self._sleep_scoring_algorithm
@@ -147,19 +134,14 @@ class PlotAlgorithmManager:
         """
         if self._sleep_period_detector is None:
             # Get config from main window
-            config = None
-            main_window = getattr(self.parent, "main_window", None)
-            if main_window is None and hasattr(self.parent, "parent") and callable(self.parent.parent):
-                main_window = self.parent.parent()
-            if main_window and hasattr(main_window, "config_manager"):
-                config = main_window.config_manager.config
+            config = self.parent.get_algorithm_config()
 
             # Get detector ID from config or use default
-            detector_id = SleepPeriodDetectorFactory.get_default_detector_id()
-            if config and hasattr(config, "onset_offset_rule_id") and config.onset_offset_rule_id:
+            detector_id = self.parent.get_default_sleep_period_detector_id()
+            if config and hasattr(config, "onset_offset_rule_id") and config.onset_offset_rule_id:  # KEEP: Duck typing plot/marker attributes
                 detector_id = config.onset_offset_rule_id
 
-            self._sleep_period_detector = SleepPeriodDetectorFactory.create(detector_id)
+            self._sleep_period_detector = self.parent.create_sleep_period_detector(detector_id)
             logger.debug("Created sleep period detector: %s (id: %s)", self._sleep_period_detector.name, detector_id)
 
         return self._sleep_period_detector
@@ -228,7 +210,7 @@ class PlotAlgorithmManager:
 
     def plot_algorithms(self) -> None:
         """Run and plot algorithms with performance optimization and caching."""
-        if not hasattr(self.parent, "activity_data") or not self.activity_data:
+        if not self.activity_data:
             logger.debug("No activity data available for algorithm plotting")
             return
 
@@ -251,14 +233,18 @@ class PlotAlgorithmManager:
         timestamp_hash = ""
         sadeh_axis_y_hash = ""
 
-        if hasattr(self.parent, "main_48h_axis_y_timestamps") and self.parent.main_48h_axis_y_timestamps:
-            timestamp_str = repr([ts.isoformat() if hasattr(ts, "isoformat") else str(ts) for ts in self.parent.main_48h_axis_y_timestamps[:10]])
+        if self.parent.main_48h_axis_y_timestamps:
+            timestamp_str = repr(
+                [ts.isoformat() if hasattr(ts, "isoformat") else str(ts) for ts in self.parent.main_48h_axis_y_timestamps[:10]]
+            )  # KEEP: Duck typing plot/marker attributes
             sadeh_axis_y_hash = hashlib.md5(timestamp_str.encode()).hexdigest()[:8]
 
         if data_type == "axis_y":
             timestamp_hash = sadeh_axis_y_hash
         elif algorithm_timestamps:
-            timestamp_str = repr([ts.isoformat() if hasattr(ts, "isoformat") else str(ts) for ts in algorithm_timestamps[:10]])
+            timestamp_str = repr(
+                [ts.isoformat() if hasattr(ts, "isoformat") else str(ts) for ts in algorithm_timestamps[:10]]
+            )  # KEEP: Duck typing plot/marker attributes
             timestamp_hash = hashlib.md5(timestamp_str.encode()).hexdigest()[:8]
 
         # Include algorithm parameters in cache key so changing settings invalidates cache
@@ -272,6 +258,15 @@ class PlotAlgorithmManager:
             cached_results = self._algorithm_cache[cache_key]
             self.main_48h_sadeh_results = cached_results["sadeh"]
             logger.debug("Using cached 48hr algorithm results for %s", cache_key)
+
+            # CRITICAL FIX: Ensure axis_y timestamps are loaded even on cache hit
+            # Without this, _extract_view_subset_from_main_results() will fail
+            # because main_48h_axis_y_timestamps is cleared on each load_current_date
+            if self.parent.main_48h_axis_y_timestamps is None:
+                # Force load axis_y data which also sets the timestamps
+                self.parent._get_axis_y_data_for_sadeh()
+                logger.debug("Loaded axis_y timestamps on cache hit")
+
             self._extract_view_subset_from_main_results()
             return
 
@@ -289,10 +284,10 @@ class PlotAlgorithmManager:
         # Run Choi algorithm (nonwear detection) with configured activity column using DI pattern
         choi_activity_column = self._get_choi_activity_column()
         logger.debug("Running Choi algorithm with activity_column: %s", choi_activity_column)
-        choi_algorithm = NonwearAlgorithmFactory.create("choi_2011")
+        choi_algorithm = self.parent.create_nonwear_algorithm(NonwearAlgorithm.CHOI_2011)
         choi_periods = choi_algorithm.detect(
             activity_data=algorithm_activity,
-            timestamps=self.parent.timestamps if hasattr(self.parent, "timestamps") else [],
+            timestamps=self.parent.timestamps if self.parent.timestamps else [],
             activity_column=choi_activity_column,
         )
         logger.debug("Choi algorithm returned %d periods", len(choi_periods))
@@ -305,7 +300,7 @@ class PlotAlgorithmManager:
             logger.error("Sadeh algorithm cannot run: axis_y_data is None or empty")
 
         # Run Sadeh algorithm with axis_y timestamps
-        if hasattr(self.parent, "main_48h_axis_y_timestamps") and self.parent.main_48h_axis_y_timestamps:
+        if self.parent.main_48h_axis_y_timestamps:
             if len(self.parent.main_48h_axis_y_timestamps) == len(axis_y_data):
                 sadeh_timestamps = self.parent.main_48h_axis_y_timestamps
                 logger.debug("Using axis_y-specific timestamps (%d points)", len(sadeh_timestamps))
@@ -341,74 +336,62 @@ class PlotAlgorithmManager:
 
     def _extract_view_subset_from_main_results(self) -> None:
         """Extract the current view subset from main 48hr algorithm results."""
-        from datetime import timedelta
+        import numpy as np
 
         # CRITICAL: Sadeh MUST use axis_y timestamps since it processes axis_y data
-        if (
-            self.main_48h_sadeh_results is None
-            or not hasattr(self.parent, "main_48h_axis_y_timestamps")
-            or self.parent.main_48h_axis_y_timestamps is None
-        ):
-            logger.debug("No main 48hr Sadeh results or axis_y timestamps to extract subset from (expected during initial load)")
+        if self.main_48h_sadeh_results is None or self.parent.main_48h_axis_y_timestamps is None:
+            logger.debug("No main 48hr Sadeh results or axis_y timestamps to extract subset from")
             self.sadeh_results = []
             return
 
         # If we're in 48hr view, use full results
         if self.parent.current_view_hours == 48:
             self.sadeh_results = self.main_48h_sadeh_results
-            logger.debug("Using full 48hr Sadeh results: %d points", len(self.sadeh_results))
             return
 
         # For 24hr view, extract noon-to-noon subset
         if not self.timestamps:
-            logger.warning("No current timestamps to match against")
             self.sadeh_results = []
             return
 
-        # CRITICAL FIX: Use axis_y timestamps for Sadeh alignment since Sadeh processes axis_y data
         main_axis_y_timestamps = self.parent.main_48h_axis_y_timestamps
 
-        # Use fuzzy timestamp matching with tolerance for microsecond differences
-        tolerance = timedelta(seconds=30)  # 30 second tolerance for timestamp matching
+        # Performance optimization: Convert to unix timestamps for faster matching
+        try:
+            main_ts_array = np.array([ts.timestamp() if hasattr(ts, "timestamp") else ts for ts in main_axis_y_timestamps])
+            current_ts_array = np.array([ts.timestamp() if hasattr(ts, "timestamp") else ts for ts in self.timestamps])
 
-        def find_closest_timestamp_index(target_ts, timestamp_list, tolerance_delta):
-            """Find the closest timestamp within tolerance."""
-            for i, ts in enumerate(timestamp_list):
-                if abs((target_ts - ts).total_seconds()) <= tolerance_delta.total_seconds():
-                    return i
-            return None
+            # Map indices using searchsorted (assuming main_ts_array is sorted)
+            indices = np.searchsorted(main_ts_array, current_ts_array)
 
-        # Map each current timestamp to its corresponding Sadeh result
-        subset_results = []
-        for ts in self.timestamps:
-            # First try exact match for performance
-            try:
-                idx = main_axis_y_timestamps.index(ts)
-            except ValueError:
-                # Fall back to fuzzy matching with tolerance
-                idx = find_closest_timestamp_index(ts, main_axis_y_timestamps, tolerance)
+            # Bound and verify matches (1 second tolerance)
+            indices = np.clip(indices, 0, len(main_ts_array) - 1)
 
-            if idx is not None:
-                # Comprehensive bounds checking
-                if 0 <= idx < len(self.main_48h_sadeh_results) and idx < len(main_axis_y_timestamps):
-                    subset_results.append(self.main_48h_sadeh_results[idx])
-                else:
-                    logger.warning(
-                        f"Index {idx} out of bounds for Sadeh results at timestamp {ts} (results length: {len(self.main_48h_sadeh_results)})"
-                    )
-                    subset_results.append(0)  # Default to Wake if out of bounds
-            else:
-                # Timestamp not found in main axis_y data even with tolerance
-                logger.warning(f"Timestamp {ts} not found in main axis_y timestamps (even with {tolerance} tolerance)")
-                subset_results.append(0)  # Default to Wake if timestamp not found
+            # Check for actual closeness
+            diffs = np.abs(main_ts_array[indices] - current_ts_array)
+            valid_mask = diffs <= 1.0  # 1 second tolerance
 
-        self.sadeh_results = subset_results
+            subset_results = []
+            results_array = np.array(self.main_48h_sadeh_results)
+
+            # Fill results
+            mapped_results = results_array[indices]
+            # Zero out (Wake) anything that didn't match within tolerance
+            mapped_results[~valid_mask] = 0
+
+            self.sadeh_results = mapped_results.tolist()
+
+            missing_count = np.sum(~valid_mask)
+            if missing_count > 0:
+                logger.warning(f"SADEH ALIGNMENT: {missing_count}/{len(current_ts_array)} timestamps had no close match in main dataset")
+
+        except Exception as e:
+            logger.exception(f"Error during Sadeh alignment: {e}")
+            self.sadeh_results = [0] * len(self.timestamps)
 
         # Verify alignment
         if len(self.sadeh_results) != len(self.timestamps):
-            logger.error("Sadeh subset length mismatch after extraction: timestamps=%d, results=%d", len(self.timestamps), len(self.sadeh_results))
-        else:
-            logger.debug("Extracted 24hr subset from main: %d points from %d total", len(self.sadeh_results), len(self.main_48h_sadeh_results))
+            logger.error("Sadeh subset length mismatch: timestamps=%d, results=%d", len(self.timestamps), len(self.sadeh_results))
 
     def plot_choi_results(self, nonwear_periods) -> None:
         """Plot Choi nonwear periods as purple background regions (optimized)."""
@@ -436,10 +419,23 @@ class PlotAlgorithmManager:
     def apply_sleep_scoring_rules(self, main_sleep_period: SleepPeriod) -> None:
         """Apply onset/offset detection rules to selected marker set using injected rule."""
         selected_period = self.parent.get_selected_marker_period()
-        if not selected_period or not selected_period.is_complete or not hasattr(self.parent, "sadeh_results"):
+        if not selected_period or not selected_period.is_complete or not self.parent.sadeh_results:
+            logger.debug("apply_sleep_scoring_rules: No selected period or sadeh_results")
             return
 
         if not self.sadeh_results or len(self.sadeh_results) == 0:
+            logger.debug("apply_sleep_scoring_rules: sadeh_results is empty")
+            return
+
+        # CRITICAL: sadeh_results are indexed based on main_48h_axis_y_timestamps
+        # We MUST use those same timestamps for the detector, not x_data
+        axis_y_timestamps = getattr(self.parent, "main_48h_axis_y_timestamps", None)
+        if not axis_y_timestamps or len(axis_y_timestamps) != len(self.sadeh_results):
+            logger.warning(
+                "apply_sleep_scoring_rules: axis_y_timestamps mismatch - timestamps=%s, sadeh_results=%s",
+                len(axis_y_timestamps) if axis_y_timestamps else 0,
+                len(self.sadeh_results),
+            )
             return
 
         self.clear_sleep_onset_offset_markers()
@@ -451,23 +447,26 @@ class PlotAlgorithmManager:
         sleep_start_time = datetime.fromtimestamp(selected_period.onset_timestamp)
         sleep_end_time = datetime.fromtimestamp(selected_period.offset_timestamp)
 
-        # Convert x_data (Unix timestamps) to datetime objects
-        timestamps = [datetime.fromtimestamp(ts) for ts in self.x_data]
-
-        # Apply detector via protocol
+        # Apply detector via protocol - use axis_y timestamps that match sadeh_results
         onset_idx, offset_idx = detector.apply_rules(
             sleep_scores=self.sadeh_results,
             sleep_start_marker=sleep_start_time,
             sleep_end_marker=sleep_end_time,
-            timestamps=timestamps,
+            timestamps=axis_y_timestamps,
         )
 
-        # Create visual markers
-        if onset_idx is not None:
-            self.create_sleep_onset_marker(self.x_data[onset_idx], detector)
+        # Create visual markers using axis_y timestamps (they're datetime objects)
+        if onset_idx is not None and onset_idx < len(axis_y_timestamps):
+            onset_ts = axis_y_timestamps[onset_idx]
+            # Convert datetime to Unix timestamp for plotting
+            onset_unix = onset_ts.timestamp() if hasattr(onset_ts, "timestamp") else onset_ts  # KEEP: Duck typing plot/marker attributes
+            self.create_sleep_onset_marker(onset_unix, detector)
 
-        if offset_idx is not None:
-            self.create_sleep_offset_marker(self.x_data[offset_idx], detector)
+        if offset_idx is not None and offset_idx < len(axis_y_timestamps):
+            offset_ts = axis_y_timestamps[offset_idx]
+            # Convert datetime to Unix timestamp for plotting
+            offset_unix = offset_ts.timestamp() if hasattr(offset_ts, "timestamp") else offset_ts  # KEEP: Duck typing plot/marker attributes
+            self.create_sleep_offset_marker(offset_unix, detector)
 
     def create_sleep_onset_marker(self, timestamp, detector: SleepPeriodDetector | None = None) -> None:
         """Create sleep onset marker with arrow and axis label."""
@@ -507,8 +506,6 @@ class PlotAlgorithmManager:
         onset_text.setVisible(True)
         self.plotItem.addItem(onset_text)
 
-        if not hasattr(self.parent, "sleep_rule_markers"):
-            self.parent.sleep_rule_markers = []
         self.parent.sleep_rule_markers.extend([arrow, onset_text])
 
     def create_sleep_offset_marker(self, timestamp, detector: SleepPeriodDetector | None = None) -> None:
@@ -549,16 +546,13 @@ class PlotAlgorithmManager:
         offset_text.setVisible(True)
         self.plotItem.addItem(offset_text)
 
-        if not hasattr(self.parent, "sleep_rule_markers"):
-            self.parent.sleep_rule_markers = []
         self.parent.sleep_rule_markers.extend([arrow, offset_text])
 
     def clear_sleep_onset_offset_markers(self) -> None:
         """Clear sleep onset/offset markers from 3/5 rule."""
-        if hasattr(self.parent, "sleep_rule_markers"):
-            for marker in self.parent.sleep_rule_markers:
-                self.plotItem.removeItem(marker)
-            self.parent.sleep_rule_markers.clear()
+        for marker in self.parent.sleep_rule_markers:
+            self.plotItem.removeItem(marker)
+        self.parent.sleep_rule_markers.clear()
 
     # ========== Cache Management ==========
 

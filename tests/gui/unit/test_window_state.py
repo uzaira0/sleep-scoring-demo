@@ -28,34 +28,39 @@ class TestWindowStateManager:
 
     def test_initialization(self, state_manager):
         """Test state manager initializes with correct defaults."""
-        assert state_manager.markers_saved is True
+        # NOTE: markers_saved is now managed by MarkerSaveStateManager, not WindowStateManager
+        # Access via parent._sleep_save_state.is_dirty (inverted - is_dirty means NOT saved)
         assert state_manager.unsaved_changes_exist is False
-        assert isinstance(state_manager._marker_status_cache, dict)
         assert state_manager._metrics_cache is None
-        assert isinstance(state_manager._marker_index_cache, dict)
+        # Note: _marker_status_cache and _marker_index_cache were moved to data_service.cache_service
 
     def test_invalidate_marker_status_cache_specific_file(self, state_manager):
-        """Test cache invalidation for specific file."""
-        # Add cache entry
-        state_manager._marker_status_cache["test_file.csv"] = {"status": "complete"}
-        state_manager._marker_status_cache["other_file.csv"] = {"status": "incomplete"}
+        """Test cache invalidation delegates to data service for specific file."""
+        # Set up mock data_service
+        state_manager.parent.data_service = Mock()
+        state_manager.parent.data_service.invalidate_marker_status_cache = Mock()
+        state_manager.parent.data_service.update_file_table_indicators_only = Mock()
 
         # Invalidate specific file
         state_manager.invalidate_marker_status_cache("test_file.csv")
 
-        assert "test_file.csv" not in state_manager._marker_status_cache
-        assert "other_file.csv" in state_manager._marker_status_cache
+        # Verify delegation
+        state_manager.parent.data_service.invalidate_marker_status_cache.assert_called_once_with("test_file.csv")
+        state_manager.parent.data_service.update_file_table_indicators_only.assert_called_once()
 
     def test_invalidate_marker_status_cache_all_files(self, state_manager):
-        """Test cache invalidation for all files."""
-        # Add cache entries
-        state_manager._marker_status_cache["file1.csv"] = {"status": "complete"}
-        state_manager._marker_status_cache["file2.csv"] = {"status": "incomplete"}
+        """Test cache invalidation delegates to data service for all files."""
+        # Set up mock data_service
+        state_manager.parent.data_service = Mock()
+        state_manager.parent.data_service.invalidate_marker_status_cache = Mock()
+        state_manager.parent.data_service.update_file_table_indicators_only = Mock()
 
         # Invalidate all
         state_manager.invalidate_marker_status_cache(None)
 
-        assert len(state_manager._marker_status_cache) == 0
+        # Verify delegation
+        state_manager.parent.data_service.invalidate_marker_status_cache.assert_called_once_with(None)
+        state_manager.parent.data_service.update_file_table_indicators_only.assert_called_once()
 
     def test_invalidate_metrics_cache(self, state_manager, sample_sleep_metrics):
         """Test metrics cache invalidation."""
@@ -146,3 +151,62 @@ class TestWindowStateManager:
 
         assert period2.marker_index == 2
         assert daily_markers.period_2 == period2
+
+    @patch("sleep_scoring_app.ui.window_state.QMessageBox")
+    def test_clear_all_markers_no_records(self, mock_msgbox, state_manager):
+        """Test clear all markers shows info dialog when no records exist."""
+        # Set up mock db_manager to return empty stats
+        state_manager.parent.db_manager = Mock()
+        state_manager.parent.db_manager.get_database_stats.return_value = {"total_records": 0, "autosave_records": 0}
+
+        # Call clear_all_markers
+        state_manager.clear_all_markers()
+
+        # Should show information dialog
+        mock_msgbox.information.assert_called_once()
+
+    @patch("sleep_scoring_app.ui.window_state.QMessageBox")
+    def test_clear_all_markers_with_records_confirmed(self, mock_msgbox, state_manager):
+        """Test clear all markers proceeds when user confirms."""
+        # Set up mocks
+        state_manager.parent.db_manager = Mock()
+        state_manager.parent.db_manager.get_database_stats.return_value = {"total_records": 5, "autosave_records": 0}
+        state_manager.parent.db_manager.clear_all_markers.return_value = {
+            "total_cleared": 5,
+            "sleep_metrics_cleared": 5,
+            "autosave_metrics_cleared": 0,
+        }
+        state_manager.parent._invalidate_metrics_cache = Mock()
+        state_manager.parent.data_service = Mock()
+        state_manager.parent.update_data_source_status = Mock()
+        state_manager.parent.load_available_files = Mock()
+        state_manager.parent.selected_file = None
+        state_manager.parent.available_dates = []
+
+        # User confirms
+        mock_msgbox.question.return_value = mock_msgbox.StandardButton.Yes
+
+        # Call clear_all_markers
+        state_manager.clear_all_markers()
+
+        # Should show confirmation dialog and then clear
+        mock_msgbox.question.assert_called_once()
+        state_manager.parent.db_manager.clear_all_markers.assert_called_once()
+        mock_msgbox.information.assert_called()  # Success message
+
+    @patch("sleep_scoring_app.ui.window_state.QMessageBox")
+    def test_clear_all_markers_cancelled(self, mock_msgbox, state_manager):
+        """Test clear all markers is cancelled when user declines."""
+        # Set up mocks
+        state_manager.parent.db_manager = Mock()
+        state_manager.parent.db_manager.get_database_stats.return_value = {"total_records": 5, "autosave_records": 0}
+
+        # User cancels
+        mock_msgbox.question.return_value = mock_msgbox.StandardButton.No
+
+        # Call clear_all_markers
+        state_manager.clear_all_markers()
+
+        # Should show confirmation but NOT clear
+        mock_msgbox.question.assert_called_once()
+        state_manager.parent.db_manager.clear_all_markers.assert_not_called()

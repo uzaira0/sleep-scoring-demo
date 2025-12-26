@@ -89,7 +89,7 @@ class PlotStateManager:
             "daily_sleep_markers": getattr(self.parent, "daily_sleep_markers", None),
             "current_marker_being_placed": getattr(self.parent, "current_marker_being_placed", None),
             "selected_marker_set_index": getattr(self.parent, "selected_marker_set_index", 1),
-            "markers_saved": getattr(self.parent, "markers_saved", False),
+            # NOTE: markers_saved is now managed by Redux store, not captured here
             "marker_lines": getattr(self.parent, "marker_lines", {}),
             "marker_labels": getattr(self.parent, "marker_labels", {}),
             "sleep_period_regions": getattr(self.parent, "sleep_period_regions", {}),
@@ -158,9 +158,8 @@ class PlotStateManager:
             self._restore_visual_state(state.get("visual", {}))
             self._restore_interaction_state(state.get("interaction", {}))
 
-            # Trigger UI updates
-            if hasattr(self.parent, "redraw_plot"):
-                self.parent.redraw_plot()
+            # Trigger UI updates (protocol-guaranteed method)
+            self.parent.redraw_plot()
 
             logger.debug("Restored complete plot state")
 
@@ -208,7 +207,7 @@ class PlotStateManager:
         self.parent.daily_sleep_markers = marker_state.get("daily_sleep_markers")
         self.parent.current_marker_being_placed = marker_state.get("current_marker_being_placed")
         self.parent.selected_marker_set_index = marker_state.get("selected_marker_set_index", 1)
-        self.parent.markers_saved = marker_state.get("markers_saved", False)
+        # NOTE: markers_saved is managed by Redux store, not restored here
         self.parent.marker_lines = marker_state.get("marker_lines", {})
         self.parent.marker_labels = marker_state.get("marker_labels", {})
         self.parent.sleep_period_regions = marker_state.get("sleep_period_regions", {})

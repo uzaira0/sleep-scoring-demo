@@ -19,6 +19,8 @@ class SleepAlgorithm(StrEnum):
 
 
 class ActiLifeBatchAutomation:
+    """Automates ActiLife GUI operations."""
+
     def __init__(self, algorithm: SleepAlgorithm = SleepAlgorithm.SADEH) -> None:
         pyautogui.FAILSAFE = True
         pyautogui.PAUSE = 0.25

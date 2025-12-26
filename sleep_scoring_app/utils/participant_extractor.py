@@ -11,6 +11,9 @@ from sleep_scoring_app.core.dataclasses import ParticipantInfo
 
 logger = logging.getLogger(__name__)
 
+# Track if we've already warned about missing patterns (to avoid spam)
+_warned_no_patterns = False
+
 
 def _get_global_config():
     """Get config from ConfigManager if available (lazy import to avoid circular deps)."""
@@ -19,7 +22,8 @@ def _get_global_config():
 
         config_manager = ConfigManager()
         return config_manager.config
-    except Exception:
+    except Exception as e:
+        logger.warning("Failed to load config for participant extraction: %s", e)
         return None
 
 
@@ -49,31 +53,38 @@ def extract_participant_info(input_string: str, config=None) -> ParticipantInfo:
         config = _get_global_config()
 
     # Get configured patterns if available
+    # JUSTIFIED hasattr: Config attributes may be None or missing in older config versions
     id_patterns_from_config = []
-    if config and hasattr(config, "study_participant_id_patterns") and config.study_participant_id_patterns:
+    if config and hasattr(config, "study_participant_id_patterns") and config.study_participant_id_patterns:  # KEEP: Config duck typing
         id_patterns_from_config = config.study_participant_id_patterns
 
     # Get timepoint pattern from config (with fallback to default)
+    # JUSTIFIED hasattr: Config attribute may be None or missing in older config versions
     timepoint_pattern = None
-    if config and hasattr(config, "study_timepoint_pattern") and config.study_timepoint_pattern:
+    if config and hasattr(config, "study_timepoint_pattern") and config.study_timepoint_pattern:  # KEEP: Config duck typing
         timepoint_pattern = config.study_timepoint_pattern
 
     # Get group pattern from config (with fallback to default)
+    # JUSTIFIED hasattr: Config attribute may be None or missing in older config versions
     group_pattern = None
-    if config and hasattr(config, "study_group_pattern") and config.study_group_pattern:
+    if config and hasattr(config, "study_group_pattern") and config.study_group_pattern:  # KEEP: Config duck typing
         group_pattern = config.study_group_pattern
 
-    # Get default values from config valid lists
+    # Get default values from config (use configured defaults, not first item in valid lists)
+    # JUSTIFIED hasattr: Config attributes may be None or missing in older config versions
     default_group = "G1"
     default_timepoint = "T1"
-    if config and hasattr(config, "study_valid_groups") and config.study_valid_groups:
-        default_group = config.study_valid_groups[0]
-    if config and hasattr(config, "study_valid_timepoints") and config.study_valid_timepoints:
-        default_timepoint = config.study_valid_timepoints[0]
+    if config and hasattr(config, "study_default_group") and config.study_default_group:  # KEEP: Config duck typing
+        default_group = config.study_default_group
+    if config and hasattr(config, "study_default_timepoint") and config.study_default_timepoint:  # KEEP: Config duck typing
+        default_timepoint = config.study_default_timepoint
 
     # Try configured patterns - if none configured or none match, return UNKNOWN
     if not id_patterns_from_config:
-        logger.warning("No participant ID patterns configured. Configure patterns in Study Settings.")
+        global _warned_no_patterns
+        if not _warned_no_patterns:
+            _warned_no_patterns = True
+            logger.warning("No participant ID patterns configured. Configure patterns in Study Settings.")
         return ParticipantInfo(
             numerical_id="UNKNOWN",
             timepoint=ParticipantTimepoint.T1,

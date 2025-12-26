@@ -58,34 +58,6 @@ class TestFactoryEnumAlignment:
         assert nonwear.name == "Choi (2011)"
 
 
-class TestEnumMigration:
-    """Tests for legacy value migration in enums."""
-
-    def test_algorithm_type_legacy_migration(self) -> None:
-        """Test that legacy AlgorithmType values migrate correctly."""
-        # Legacy "Sadeh" should migrate to sadeh_1994_actilife
-        migrated = AlgorithmType.migrate_legacy_value("Sadeh")
-        assert migrated == AlgorithmType.SADEH_1994_ACTILIFE
-
-        # Legacy "Manual + Algorithm" should migrate
-        migrated = AlgorithmType.migrate_legacy_value("Manual + Algorithm")
-        assert migrated == AlgorithmType.SADEH_1994_ACTILIFE
-
-        # Non-legacy values should pass through
-        migrated = AlgorithmType.migrate_legacy_value("sadeh_1994_original")
-        assert migrated == AlgorithmType.SADEH_1994_ORIGINAL
-
-    def test_nonwear_algorithm_legacy_migration(self) -> None:
-        """Test that legacy NonwearAlgorithm values migrate correctly."""
-        # Legacy "Choi" should migrate to choi_2011
-        migrated = NonwearAlgorithm.migrate_legacy_value("Choi")
-        assert migrated == NonwearAlgorithm.CHOI_2011
-
-        # Non-legacy values should pass through
-        migrated = NonwearAlgorithm.migrate_legacy_value("choi_2011")
-        assert migrated == NonwearAlgorithm.CHOI_2011
-
-
 class TestSleepScoringPipeline:
     """Integration tests for complete sleep scoring pipeline."""
 

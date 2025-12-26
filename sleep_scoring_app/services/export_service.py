@@ -9,9 +9,10 @@ import hashlib
 import logging
 import os
 import shutil
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
@@ -20,6 +21,7 @@ from sleep_scoring_app.core.constants import (
     AlgorithmType,
     DirectoryName,
     FeatureFlags,
+    NonwearAlgorithm,
     get_backup_filename,
     sanitize_filename_component,
 )
@@ -31,6 +33,31 @@ if TYPE_CHECKING:
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ExportResult:
+    """Result of export operation with accumulated warnings and errors."""
+
+    success: bool
+    files_exported: int = 0
+    files_with_issues: int = 0
+    warnings: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+    def add_warning(self, message: str) -> None:
+        """Add a warning message."""
+        self.warnings.append(message)
+        logger.warning(message)
+
+    def add_error(self, message: str) -> None:
+        """Add an error message."""
+        self.errors.append(message)
+        logger.error(message)
+
+    def has_issues(self) -> bool:
+        """Check if there are any warnings or errors."""
+        return bool(self.warnings or self.errors)
 
 
 class ExportManager:
@@ -58,7 +85,7 @@ class ExportManager:
                 temp_path.unlink()
             raise
 
-    def _sanitize_csv_cell(self, value):
+    def _sanitize_csv_cell(self, value: str | float | None) -> str | int | float | None:
         """Prevent CSV formula injection."""
         if not isinstance(value, str):
             return value
@@ -67,31 +94,6 @@ class ExportManager:
             return "'" + value
 
         return value
-
-    def autosave_sleep_metrics(
-        self,
-        sleep_metrics_list: list[SleepMetrics],
-        algorithm_name: AlgorithmType = AlgorithmType.SADEH_1994_ACTILIFE,
-    ) -> str | None:
-        """Autosave sleep metrics on marker change (temporary storage only, no permanent CSV)."""
-        if not FeatureFlags.ENABLE_AUTOSAVE:
-            return None
-
-        if not sleep_metrics_list:
-            return None
-
-        try:
-            # Save each metric to the autosave table
-            for sleep_metrics in sleep_metrics_list:
-                sleep_metrics.algorithm_type = algorithm_name
-                self.db_manager.save_sleep_metrics(sleep_metrics, is_autosave=True)
-
-            logger.debug("Auto-saved markers on change for %s", sleep_metrics_list[0].filename)
-            return "autosaved"
-
-        except (DatabaseError, ValidationError, OSError) as e:
-            logger.warning("Error autosaving metrics: %s", e)
-            return None
 
     def export_all_sleep_data(self, output_directory: str | None = None) -> str | None:
         """Export all sleep data to CSV with backup creation."""
@@ -242,12 +244,15 @@ class ExportManager:
         include_metadata: bool = True,
         include_config_in_metadata: bool = False,
         export_config_sidecar: bool = False,
-        config_manager: any | None = None,
+        config_manager: Any | None = None,
         export_nonwear_separate: bool = True,
-    ) -> bool:
+    ) -> ExportResult:
         """Perform direct export from UI tab without modal dialog."""
+        result = ExportResult(success=False)
+
         if not sleep_metrics_list:
-            return False
+            result.add_error("No sleep metrics provided for export")
+            return result
 
         try:
             # Create output directory if it doesn't exist
@@ -255,7 +260,20 @@ class ExportManager:
             output_path.mkdir(parents=True, exist_ok=True)
 
             # CRITICAL FIX: Ensure metrics are calculated before export
-            self._ensure_metrics_calculated_for_export(sleep_metrics_list)
+            calculation_warnings = self._ensure_metrics_calculated_for_export(sleep_metrics_list)
+            for warning in calculation_warnings:
+                result.add_warning(warning)
+
+            # Check for missing columns BEFORE export
+            # Get a sample of the data to check available columns
+            if sleep_metrics_list and selected_columns:
+                sample_metric = sleep_metrics_list[0]
+                sample_rows = sample_metric.to_export_dict_list()
+                if sample_rows:
+                    sample_df = pd.DataFrame(sample_rows)
+                    missing_columns = [col for col in selected_columns if col not in sample_df.columns]
+                    if missing_columns:
+                        result.add_warning(f"Selected columns not available in data and will be skipped: {', '.join(missing_columns)}")
 
             # Filter data based on grouping option
             grouped_data = self._group_export_data(sleep_metrics_list, grouping_option)
@@ -296,6 +314,14 @@ class ExportManager:
                     available_columns = [col for col in selected_columns if col in export_df.columns]
                     if available_columns:
                         export_df = export_df[available_columns]
+                    else:
+                        error_msg = (
+                            f"Export for group '{group_name}': None of the selected columns are available. "
+                            f"Selected: {selected_columns}, Available: {list(export_df.columns)}"
+                        )
+                        result.add_error(error_msg)
+                        result.files_with_issues += 1
+                        continue
 
                 # Count totals for metadata
                 total_periods = len(export_data)
@@ -331,37 +357,49 @@ class ExportManager:
                         raise OSError(msg)
 
                     temp_path.replace(filepath)
+                    result.files_exported += 1
 
-                except Exception:
+                except Exception as e:
                     if temp_path.exists():
                         temp_path.unlink()
-                    raise
+                    result.add_error(f"Failed to write file {filename}: {e}")
+                    result.files_with_issues += 1
+                    continue
 
                 logger.debug("Exported %s participants (%s periods) to %s", total_participants, total_periods, filepath)
 
                 # Export config sidecar file if requested
                 if export_config_sidecar and config_manager is not None:
-                    config_sidecar_path = filepath.with_suffix(".config.csv")
-                    config_manager.export_config_csv(config_sidecar_path)
-                    logger.debug("Exported config sidecar to %s", config_sidecar_path)
+                    try:
+                        config_sidecar_path = filepath.with_suffix(".config.csv")
+                        config_manager.export_config_csv(config_sidecar_path)
+                        logger.debug("Exported config sidecar to %s", config_sidecar_path)
+                    except Exception as e:
+                        result.add_warning(f"Failed to export config sidecar for {filename}: {e}")
 
             # Export nonwear markers to separate file if requested
             if export_nonwear_separate:
-                self._export_nonwear_markers_separate(
+                nonwear_warnings, nonwear_errors = self._export_nonwear_markers_separate(
                     sleep_metrics_list,
                     output_path,
                     include_headers,
                     include_metadata,
                 )
+                for warning in nonwear_warnings:
+                    result.add_warning(warning)
+                for error in nonwear_errors:
+                    result.add_error(error)
 
-            return True
+            # Mark as successful if at least some files were exported
+            result.success = result.files_exported > 0
+            return result
 
         except (OSError, PermissionError, ValueError, DatabaseError) as e:
-            logger.warning("Error in direct export: %s", e)
-            return False
+            result.add_error(f"Export failed: {e}")
+            return result
 
-    def _ensure_metrics_calculated_for_export(self, sleep_metrics_list: list[SleepMetrics]) -> None:
-        """Ensure all sleep metrics have calculated values before export."""
+    def _ensure_metrics_calculated_for_export(self, sleep_metrics_list: list[SleepMetrics]) -> list[str]:
+        """Ensure all sleep metrics have calculated values before export. Returns list of warnings."""
         from datetime import datetime, timedelta
 
         import pandas as pd
@@ -370,6 +408,8 @@ class ExportManager:
         from sleep_scoring_app.core.constants import NonwearDataSource
         from sleep_scoring_app.services.data_service import DataManager
         from sleep_scoring_app.services.nonwear_service import NonwearDataService
+
+        warnings = []
 
         # Get service instances
         data_manager = DataManager(database_manager=self.db_manager)
@@ -403,7 +443,9 @@ class ExportManager:
                     )
 
                     if not timestamps or not axis_y_values:
-                        logger.debug("No activity data found for %s", filename)
+                        warning_msg = f"No activity data found for {filename} - metrics may be incomplete"
+                        warnings.append(warning_msg)
+                        logger.debug(warning_msg)
                         activity_data_cache[filename] = ([], [], [])
                         continue
 
@@ -463,7 +505,7 @@ class ExportManager:
                         )
 
                         # Run Choi nonwear detection using DI pattern
-                        choi_algorithm = NonwearAlgorithmFactory.create("choi_2011")
+                        choi_algorithm = NonwearAlgorithmFactory.create(NonwearAlgorithm.CHOI_2011)
                         choi_results = choi_algorithm.detect_mask(vector_magnitude)
                     else:
                         choi_results = [0] * len(sadeh_results)
@@ -495,15 +537,17 @@ class ExportManager:
                                 if nw_period.start_time <= ts_dt <= nw_period.end_time:
                                     nwt_sensor_results[i] = 1
                     except Exception as e:
-                        logger.debug("Could not get NWT sensor data: %s", e)
+                        warning_msg = f"Could not get NWT sensor data for {filename}: {e}"
+                        warnings.append(warning_msg)
+                        logger.debug(warning_msg)
                         nwt_sensor_results = [0] * len(timestamps)
 
-                    # Calculate metrics for this period with REAL algorithm results
-                    period_metrics = data_manager.calculate_sleep_metrics(
-                        sleep_markers=[period.onset_timestamp, period.offset_timestamp],
+                    # Calculate metrics for this period with REAL algorithm results using SleepPeriod directly
+                    period_metrics = data_manager.calculate_sleep_metrics_for_period(
+                        sleep_period=period,
                         sadeh_results=sadeh_results,
                         choi_results=choi_results,  # REAL Choi results
-                        activity_data=axis_y_values,
+                        axis_y_data=axis_y_values,
                         x_data=unix_timestamps,
                         file_path=filename,
                         nwt_sensor_results=nwt_sensor_results,  # REAL NWT sensor data
@@ -511,7 +555,11 @@ class ExportManager:
 
                     if period_metrics:
                         if not isinstance(period_metrics, dict):
-                            logger.warning(f"period_metrics is {type(period_metrics)} instead of dict: {period_metrics}")
+                            warning_msg = (
+                                f"Metrics calculation returned {type(period_metrics)} instead of dict for {filename} period {period.onset_timestamp}"
+                            )
+                            warnings.append(warning_msg)
+                            logger.warning(warning_msg)
                             continue
 
                         # Store calculated metrics for this specific period
@@ -560,10 +608,14 @@ class ExportManager:
             except Exception as e:
                 import traceback
 
-                logger.warning("Error calculating metrics for %s: %s", metrics.filename, e)
+                warning_msg = f"Error calculating metrics for {metrics.filename}: {e}"
+                warnings.append(warning_msg)
+                logger.warning(warning_msg)
                 logger.warning("Full traceback: %s", traceback.format_exc())
                 # Continue with export even if calculation fails for one file
                 continue
+
+        return warnings
 
     def _export_nonwear_markers_separate(
         self,
@@ -571,10 +623,12 @@ class ExportManager:
         output_path: Path,
         include_headers: bool,
         include_metadata: bool,
-    ) -> None:
-        """Export manual nonwear markers to a separate CSV file."""
+    ) -> tuple[list[str], list[str]]:
+        """Export manual nonwear markers to a separate CSV file. Returns (warnings, errors)."""
         from datetime import datetime
 
+        warnings = []
+        errors = []
         nonwear_data = []
 
         for metrics in sleep_metrics_list:
@@ -600,7 +654,7 @@ class ExportManager:
                 participant_id = ""
                 group = ""
                 timepoint = ""
-                if hasattr(metrics, "participant") and metrics.participant:
+                if metrics.participant is not None:  # participant is a dataclass field
                     participant_id = getattr(metrics.participant, "numerical_id", "")
                     group = getattr(metrics.participant, "group_str", "")
                     timepoint = getattr(metrics.participant, "timepoint_str", "")
@@ -628,12 +682,14 @@ class ExportManager:
                     )
 
             except Exception as e:
-                logger.warning("Failed to get nonwear data for %s: %s", metrics.filename, e)
+                warning_msg = f"Failed to get nonwear data for {metrics.filename}: {e}"
+                warnings.append(warning_msg)
+                logger.warning(warning_msg)
                 continue
 
         if not nonwear_data:
             logger.debug("No nonwear markers to export separately")
-            return
+            return warnings, errors
 
         # Create DataFrame and export
         nonwear_df = pd.DataFrame(nonwear_data)
@@ -682,10 +738,115 @@ class ExportManager:
             temp_path.replace(filepath)
             logger.info("Exported %d nonwear periods to %s", len(nonwear_data), filepath)
 
-        except Exception:
+        except Exception as e:
             if temp_path.exists():
                 temp_path.unlink()
-            raise
+            error_msg = f"Failed to write nonwear markers file: {e}"
+            errors.append(error_msg)
+            logger.exception(error_msg)
+
+        return warnings, errors
+
+    def export_sleep_data(
+        self,
+        output_path: Path,
+        column_selection: list[str],
+        study_data: Any,
+    ) -> None:
+        """Export sleep markers and metrics to CSV."""
+        # Get sleep rows from StudyData
+        rows = study_data.export_sleep_rows()
+
+        if not rows:
+            logger.warning("No sleep data to export")
+            return
+
+        # Convert to DataFrame
+        df = pd.DataFrame(rows)
+
+        # Convert timestamps to formatted strings if needed
+        if "onset_timestamp" in df.columns:
+            df["onset_time"] = pd.to_datetime(df["onset_timestamp"], unit="s").dt.strftime("%H:%M")
+            df["onset_datetime"] = pd.to_datetime(df["onset_timestamp"], unit="s").dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        if "offset_timestamp" in df.columns:
+            df["offset_time"] = pd.to_datetime(df["offset_timestamp"], unit="s").dt.strftime("%H:%M")
+            df["offset_datetime"] = pd.to_datetime(df["offset_timestamp"], unit="s").dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        # Filter to selected columns if specified
+        if column_selection:
+            # Map internal names to export column names for filtering
+            available_columns = [col for col in column_selection if col in df.columns]
+            if available_columns:
+                df = df[available_columns]
+
+        # Sanitize string columns
+        for col in df.select_dtypes(include=["object"]).columns:
+            df[col] = df[col].apply(self._sanitize_csv_cell)
+
+        # Write CSV atomically
+        self._atomic_csv_write(df, output_path, index=False)
+        logger.info("Exported %d sleep periods to %s", len(df), output_path)
+
+    def export_nonwear_data(
+        self,
+        output_path: Path,
+        column_selection: list[str],
+        study_data: Any,
+    ) -> None:
+        """Export nonwear markers to separate CSV."""
+        # Get nonwear rows from StudyData
+        rows = study_data.export_nonwear_rows()
+
+        if not rows:
+            logger.warning("No nonwear data to export")
+            return
+
+        # Convert to DataFrame
+        df = pd.DataFrame(rows)
+
+        # Convert timestamps to formatted strings if needed
+        if "start_timestamp" in df.columns:
+            df["start_time"] = pd.to_datetime(df["start_timestamp"], unit="s").dt.strftime("%H:%M")
+            df["start_datetime"] = pd.to_datetime(df["start_timestamp"], unit="s").dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        if "end_timestamp" in df.columns:
+            df["end_time"] = pd.to_datetime(df["end_timestamp"], unit="s").dt.strftime("%H:%M")
+            df["end_datetime"] = pd.to_datetime(df["end_timestamp"], unit="s").dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        # Filter to selected columns if specified
+        if column_selection:
+            available_columns = [col for col in column_selection if col in df.columns]
+            if available_columns:
+                df = df[available_columns]
+
+        # Sanitize string columns
+        for col in df.select_dtypes(include=["object"]).columns:
+            df[col] = df[col].apply(self._sanitize_csv_cell)
+
+        # Write CSV atomically
+        self._atomic_csv_write(df, output_path, index=False)
+        logger.info("Exported %d nonwear periods to %s", len(df), output_path)
+
+    def export_combined(
+        self,
+        output_dir: Path,
+        sleep_columns: list[str],
+        nonwear_columns: list[str],
+        study_data: Any,
+    ) -> tuple[Path, Path]:
+        """Export both sleep and nonwear data to separate files."""
+        from datetime import datetime
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        sleep_path = output_dir / f"sleep_export_{timestamp}.csv"
+        nonwear_path = output_dir / f"nonwear_export_{timestamp}.csv"
+
+        self.export_sleep_data(sleep_path, sleep_columns, study_data)
+        self.export_nonwear_data(nonwear_path, nonwear_columns, study_data)
+
+        return sleep_path, nonwear_path
 
     def _group_export_data(self, sleep_metrics_list: list[SleepMetrics], grouping_option: int) -> dict[str, list[SleepMetrics]]:
         """Group sleep metrics based on grouping option."""
@@ -738,14 +899,15 @@ class ExportManager:
             safe_algorithm_name = sanitize_filename_component(AlgorithmType.SADEH_1994_ACTILIFE)
 
         try:
-            # Save to database - both main table AND extended markers table
+            # Save to database - ATOMICALLY save to both tables in a single transaction
             for metrics in sleep_metrics_list:
                 metrics.algorithm_type = algorithm_name
-                # Save to main sleep_metrics table (legacy + comprehensive data)
-                self.db_manager.save_sleep_metrics(metrics, is_autosave=False)
-                # CRITICAL FIX #1: Also save to sleep_markers_extended table (multi-period support)
-                # This ensures atomicity between the two tables
-                self.db_manager.save_daily_sleep_markers(metrics)
+                # Use atomic save that writes to both sleep_metrics and sleep_markers_extended
+                # in a single transaction for data consistency
+                success = self.db_manager.save_sleep_metrics_atomic(metrics)
+                if not success:
+                    logger.warning("Failed to save metrics for %s on %s", metrics.filename, metrics.analysis_date)
+                    return None
 
             logger.debug("Saved comprehensive sleep metrics to database for %s", sleep_metrics_list[0].filename)
             return "saved"

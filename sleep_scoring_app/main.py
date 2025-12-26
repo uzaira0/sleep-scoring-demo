@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import logging
 import sys
-from pathlib import Path
 
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt
@@ -23,40 +22,8 @@ pg.setConfigOption("background", "w")
 pg.setConfigOption("foreground", "k")
 pg.setConfigOption("antialias", True)
 
+from sleep_scoring_app.app_bootstrap import setup_logging
 from sleep_scoring_app.ui.main_window import SleepScoringMainWindow
-
-
-def _setup_logging() -> Path | None:
-    """
-    Set up logging with proper path handling for app bundles.
-
-    Returns:
-        Path to log file, or None if using default stderr.
-
-    """
-    log_file: Path | None = None
-
-    if getattr(sys, "frozen", False):
-        bundle_dir = Path(sys.executable).parent
-        if sys.platform.startswith("darwin"):
-            log_dir = Path.home() / "Library" / "Logs" / "SleepScoringApp"
-            log_dir.mkdir(parents=True, exist_ok=True)
-            log_file = log_dir / "sleep_scoring_app.log"
-        else:
-            log_file = bundle_dir / "sleep_scoring_app.log"
-
-        logging.basicConfig(
-            level=logging.WARNING,
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            handlers=[logging.FileHandler(log_file), logging.StreamHandler()],
-        )
-    else:
-        logging.basicConfig(
-            level=logging.WARNING,
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        )
-
-    return log_file
 
 
 def create_splash_screen() -> QSplashScreen:
@@ -98,7 +65,7 @@ def main() -> int:
     """
     global _global_splash, _global_app
 
-    log_file = _setup_logging()
+    log_file = setup_logging()
     logger = logging.getLogger(__name__)
     logger.info("Starting Sleep Scoring Application")
     if log_file:

@@ -37,6 +37,9 @@ def _populate_table_for_viewport(table: QTableWidget) -> None:
     """
     Populate table with exactly as many rows as fit in viewport, centered on marker.
 
+    OPTIMIZED: Reuses existing QTableWidgetItem objects instead of creating new ones.
+    Only adds/removes rows when the count changes. Only updates colors when needed.
+
     No scrollbars - calculates visible rows from container height.
     """
     container = table.parent()
@@ -50,7 +53,8 @@ def _populate_table_for_viewport(table: QTableWidget) -> None:
     marker_fg_color = getattr(container, "_marker_fg_color", QColor(0, 0, 0))
 
     if data is None or len(data) == 0:
-        table.setRowCount(0)
+        if table.rowCount() > 0:
+            table.setRowCount(0)
         return
 
     # Use our constant for row height (same as what we set with setRowHeight)
@@ -60,11 +64,15 @@ def _populate_table_for_viewport(table: QTableWidget) -> None:
     container_height = container.height()
     header_height = table.horizontalHeader().height() if table.horizontalHeader() and table.horizontalHeader().isVisible() else 0
     # Account for margins, pop-out button above table, borders, and frame padding
-    # Button height (~25px) + button layout spacing + table frame borders + extra safety margin
-    overhead = TableDimensions.TABLE_MARGINS * 2 + 66
+    # Button height (~25px) + safety margin to prevent row bleeding
+    overhead = TableDimensions.TABLE_MARGINS * 2 + 50
     available_height = container_height - header_height - overhead
 
     visible_row_count = max(1, available_height // row_height)
+
+    # Ensure odd number of rows so marker is always centered
+    if visible_row_count % 2 == 0:
+        visible_row_count -= 1
 
     # Determine data slice centered on marker
     data_len = len(data)
@@ -85,57 +93,78 @@ def _populate_table_for_viewport(table: QTableWidget) -> None:
     # Store start index for click handlers
     container._visible_start_idx = start_idx
 
+    # Check if we can do an incremental update (same row count, items exist)
+    current_row_count = table.rowCount()
+    can_reuse_items = current_row_count == rows_to_show and current_row_count > 0 and table.item(0, 0) is not None
+
+    # Precompute default colors once
+    default_bg = QColor(255, 255, 255)
+    default_fg = QColor(0, 0, 0)
+    non_editable_flags = Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
+
     # Update table
     table.setUpdatesEnabled(False)
     try:
-        table.setRowCount(rows_to_show)
+        # Only change row count if needed (expensive operation)
+        if current_row_count != rows_to_show:
+            table.setRowCount(rows_to_show)
+            can_reuse_items = False  # Must create new items
 
         for table_row in range(rows_to_show):
             data_idx = start_idx + table_row
             row_data = data[data_idx]
 
-            # Create items
-            time_item = QTableWidgetItem(row_data.get("time", "--:--"))
-
+            # Prepare cell values
+            time_text = row_data.get("time", "--:--")
             axis_y_value = row_data.get("axis_y", row_data.get("activity", "--"))
-            axis_y_item = QTableWidgetItem(str(axis_y_value) if axis_y_value != "--" else "--")
-
+            axis_y_text = str(axis_y_value) if axis_y_value != "--" else "--"
             vm_value = row_data.get("vm", "--")
-            vm_item = QTableWidgetItem(str(vm_value) if vm_value != "--" else "--")
-
+            vm_text = str(vm_value) if vm_value != "--" else "--"
             sleep_value = row_data.get("sleep_score")
             sleep_text = "S" if sleep_value == 1 else ("W" if sleep_value == 0 else "--")
-            sadeh_item = QTableWidgetItem(sleep_text)
-
             choi_value = row_data.get("choi")
             choi_text = "Off" if choi_value == 1 else ("On" if choi_value == 0 else "--")
-            choi_item = QTableWidgetItem(choi_text)
-
             nwt_value = row_data.get("nwt_sensor")
             nwt_text = "Off" if nwt_value == 1 else ("On" if nwt_value == 0 else "--")
-            nwt_item = QTableWidgetItem(nwt_text)
 
-            # Set colors
-            if data_idx == marker_row_in_data:
-                bg_color, fg_color = marker_bg_color, marker_fg_color
+            # Determine colors for this row
+            is_marker_row = data_idx == marker_row_in_data
+            bg_color = marker_bg_color if is_marker_row else default_bg
+            fg_color = marker_fg_color if is_marker_row else default_fg
+
+            texts = [time_text, axis_y_text, vm_text, sleep_text, choi_text, nwt_text]
+
+            if can_reuse_items:
+                # FAST PATH: Reuse existing items - just update text and colors
+                for col, text in enumerate(texts):
+                    item = table.item(table_row, col)
+                    if item:
+                        # Only update if changed
+                        if item.text() != text:
+                            item.setText(text)
+                        # Only update colors if this row's marker status might have changed
+                        item.setBackground(bg_color)
+                        item.setForeground(fg_color)
+                    else:
+                        # Item missing, create it
+                        item = QTableWidgetItem(text)
+                        item.setBackground(bg_color)
+                        item.setForeground(fg_color)
+                        item.setFlags(non_editable_flags)
+                        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                        table.setItem(table_row, col, item)
             else:
-                bg_color, fg_color = QColor(255, 255, 255), QColor(0, 0, 0)
+                # SLOW PATH: Create new items (only when row count changes)
+                for col, text in enumerate(texts):
+                    item = QTableWidgetItem(text)
+                    item.setBackground(bg_color)
+                    item.setForeground(fg_color)
+                    item.setFlags(non_editable_flags)
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    table.setItem(table_row, col, item)
 
-            for item in [time_item, axis_y_item, vm_item, sadeh_item, choi_item, nwt_item]:
-                item.setBackground(bg_color)
-                item.setForeground(fg_color)
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-
-            table.setItem(table_row, 0, time_item)
-            table.setItem(table_row, 1, axis_y_item)
-            table.setItem(table_row, 2, vm_item)
-            table.setItem(table_row, 3, sadeh_item)
-            table.setItem(table_row, 4, choi_item)
-            table.setItem(table_row, 5, nwt_item)
-
-            # Force row height
-            table.setRowHeight(table_row, TableDimensions.ROW_HEIGHT)
+                # Set row height only when creating new rows
+                table.setRowHeight(table_row, TableDimensions.ROW_HEIGHT)
     finally:
         table.setUpdatesEnabled(True)
 
@@ -210,8 +239,8 @@ class _TableResizeFilter(QObject):
         super().__init__()
         self._table = table
 
-    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
-        if event.type() in (QEvent.Type.Resize, QEvent.Type.Show):
+    def eventFilter(self, obj: QObject | None, event: QEvent | None) -> bool:  # type: ignore[override]
+        if event is not None and event.type() in (QEvent.Type.Resize, QEvent.Type.Show):
             container = self._table.parent()
             # Only do dynamic rows if enabled
             if container and getattr(container, "_dynamic_rows", True):
@@ -369,7 +398,7 @@ def update_table_sleep_algorithm_header(table_container: QWidget, algorithm_name
         algorithm_name: Display name of the sleep/wake algorithm (e.g., "Sadeh", "Cole-Kripke")
 
     """
-    if not hasattr(table_container, "table_widget"):
+    if not hasattr(table_container, "table_widget"):  # KEEP: Container duck typing
         logger.warning("Table container does not have table_widget attribute")
         return
 
@@ -461,7 +490,7 @@ def get_marker_surrounding_data(plot_widget: ActivityPlotWidget, marker_timestam
     surrounding_data = []
 
     # Get data from plot widget
-    if not hasattr(plot_widget, "timestamps") or not plot_widget.timestamps:
+    if not plot_widget.timestamps:
         logger.debug("No timestamps available in plot widget")
         return surrounding_data
 
@@ -482,7 +511,7 @@ def get_marker_surrounding_data(plot_widget: ActivityPlotWidget, marker_timestam
     sadeh_results = getattr(plot_widget, "main_48h_sadeh_results", getattr(plot_widget, "sadeh_results", []))
 
     # If no Sadeh results available, trigger algorithm calculation
-    if not sadeh_results and hasattr(plot_widget, "plot_algorithms") and callable(plot_widget.plot_algorithms):
+    if not sadeh_results:
         try:
             logger.debug("No Sadeh results available, triggering algorithm calculation")
             plot_widget.plot_algorithms()
@@ -490,10 +519,9 @@ def get_marker_surrounding_data(plot_widget: ActivityPlotWidget, marker_timestam
             sadeh_results = getattr(plot_widget, "main_48h_sadeh_results", getattr(plot_widget, "sadeh_results", []))
         except Exception as e:
             logger.exception("Failed to run algorithms for table helper: %s", e)
-    choi_results = plot_widget.get_choi_results_per_minute() if hasattr(plot_widget, "get_choi_results_per_minute") else []
-    nonwear_sensor_results = (
-        plot_widget.get_nonwear_sensor_results_per_minute() if hasattr(plot_widget, "get_nonwear_sensor_results_per_minute") else []
-    )
+    # PlotWidgetProtocol guarantees these methods exist
+    choi_results = plot_widget.get_choi_results_per_minute()
+    nonwear_sensor_results = plot_widget.get_nonwear_sensor_results_per_minute()
 
     # Get elements around marker
     start_idx = max(0, marker_idx - elements_around_marker)
@@ -505,8 +533,8 @@ def get_marker_surrounding_data(plot_widget: ActivityPlotWidget, marker_timestam
             logger.debug(f"Index {i} exceeds timestamps length {len(plot_widget.timestamps)}, skipping")
             continue
 
-        # Check if axis_y_data exists and has valid index
-        if not hasattr(plot_widget, "axis_y_data") or not plot_widget.axis_y_data:
+        # Check if axis_y_data exists and has valid index (PlotWidgetProtocol guarantees attribute exists)
+        if not plot_widget.axis_y_data:
             logger.debug("No axis_y_data available in plot widget")
             continue
 

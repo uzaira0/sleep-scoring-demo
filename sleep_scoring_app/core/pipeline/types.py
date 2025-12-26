@@ -36,6 +36,10 @@ References:
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 
 class DataSourceType(StrEnum):
@@ -51,9 +55,9 @@ class DataSourceType(StrEnum):
         CSV_EPOCH: CSV file with pre-aggregated epoch counts (60-second Axis1)
 
     Detection Logic:
-        - GT3X files → GT3X_RAW (always raw data)
-        - CSV with AXIS_X, AXIS_Y, AXIS_Z columns → CSV_RAW
-        - CSV with Axis1/Activity column + ~60s intervals → CSV_EPOCH
+        - GT3X files -> GT3X_RAW (always raw data)
+        - CSV with AXIS_X, AXIS_Y, AXIS_Z columns -> CSV_RAW
+        - CSV with Axis1/Activity column + ~60s intervals -> CSV_EPOCH
 
     """
 
@@ -103,23 +107,23 @@ class PipelineType(StrEnum):
     processing steps.
 
     Pipeline Paths:
-        RAW_TO_RAW: Raw data → Raw-data algorithm (NO epoching)
-            - Example: GT3X → Van Hees SIB
-            - Steps: Load → Calibrate → Score
+        RAW_TO_RAW: Raw data -> Raw-data algorithm (NO epoching)
+            - Example: GT3X -> Van Hees SIB
+            - Steps: Load -> Calibrate -> Score
             - Output: Sleep/wake at 60s resolution
 
-        RAW_TO_EPOCH: Raw data → Epoch → Epoch-based algorithm (WITH epoching)
-            - Example: GT3X → 60s epochs → Sadeh
-            - Steps: Load → Calibrate → Epoch → Score
+        RAW_TO_EPOCH: Raw data -> Epoch -> Epoch-based algorithm (WITH epoching)
+            - Example: GT3X -> 60s epochs -> Sadeh
+            - Steps: Load -> Calibrate -> Epoch -> Score
             - Output: Sleep/wake at 60s resolution
 
-        EPOCH_DIRECT: Pre-epoched data → Epoch-based algorithm (DIRECT)
-            - Example: 60s CSV → Sadeh
-            - Steps: Load → Score
+        EPOCH_DIRECT: Pre-epoched data -> Epoch-based algorithm (DIRECT)
+            - Example: 60s CSV -> Sadeh
+            - Steps: Load -> Score
             - Output: Sleep/wake at 60s resolution
 
         INCOMPATIBLE: Blocked combination (RAISES ERROR)
-            - Example: 60s CSV → Van Hees SIB (INVALID)
+            - Example: 60s CSV -> Van Hees SIB (INVALID)
             - Reason: Cannot recover raw data from epoch counts
             - Action: Raise IncompatiblePipelineError
 
@@ -151,3 +155,31 @@ class PipelineType(StrEnum):
     def is_epoch_pipeline(self) -> bool:
         """Check if this pipeline starts with epoch data."""
         return self == PipelineType.EPOCH_DIRECT
+
+
+@runtime_checkable
+class EpochingService(Protocol):
+    """
+    Protocol for epoching raw accelerometer data.
+
+    This protocol abstracts the epoching functionality needed by the
+    pipeline orchestrator, avoiding direct service dependency.
+    """
+
+    def create_epochs(
+        self,
+        data: pd.DataFrame,
+        epoch_seconds: int = 60,
+    ) -> pd.DataFrame:
+        """
+        Create epochs from raw accelerometer data.
+
+        Args:
+            data: DataFrame with raw tri-axial data (AXIS_X, AXIS_Y, AXIS_Z)
+            epoch_seconds: Epoch duration in seconds (default: 60)
+
+        Returns:
+            DataFrame with epoched data at specified resolution
+
+        """
+        ...

@@ -145,6 +145,7 @@ class TestSadehCountScaled:
         assert params["scale_factor"] == 100.0
         assert params["count_cap"] == 300.0
 
+    @pytest.mark.skip(reason="count_scaled algorithms are disabled in factory")
     def test_sadeh_count_scaled_via_factory(self):
         """Test creating Sadeh count-scaled via factory."""
         algorithm = AlgorithmFactory.create("sadeh_1994_count_scaled")
@@ -224,6 +225,7 @@ class TestColeKripkeCountScaled:
         assert params["scale_factor"] == 100.0
         assert params["count_cap"] == 300.0
 
+    @pytest.mark.skip(reason="count_scaled algorithms are disabled in factory")
     def test_cole_kripke_count_scaled_via_factory(self):
         """Test creating Cole-Kripke count-scaled via factory."""
         algorithm = AlgorithmFactory.create("cole_kripke_1992_count_scaled")
@@ -247,6 +249,7 @@ class TestColeKripkeCountScaled:
         assert params["enable_count_scaling"] is True
 
 
+@pytest.mark.skip(reason="count_scaled algorithms are disabled in factory")
 class TestAlgorithmFactoryCountScaled:
     """Test factory registration of count-scaled algorithms."""
 

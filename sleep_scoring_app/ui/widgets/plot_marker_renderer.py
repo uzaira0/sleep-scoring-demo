@@ -8,6 +8,10 @@ Manages all marker rendering operations for the activity plot including:
 - Marker drag handling
 - Adjacent day marker display
 - Marker selection and highlighting
+
+This class now acts as a coordinator, delegating to:
+- MarkerDrawingStrategy: Marker creation and rendering
+- MarkerInteractionHandler: Marker interaction and dragging
 """
 
 from __future__ import annotations
@@ -17,9 +21,9 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 import pyqtgraph as pg
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt
 
-from sleep_scoring_app.core.constants import MarkerCategory, UIColors
+from sleep_scoring_app.core.constants import UIColors
 from sleep_scoring_app.core.dataclasses import (
     DailyNonwearMarkers,
     DailySleepMarkers,
@@ -27,6 +31,8 @@ from sleep_scoring_app.core.dataclasses import (
     MarkerType,
     SleepPeriod,
 )
+from sleep_scoring_app.ui.widgets.marker_drawing_strategy import MarkerDrawingStrategy
+from sleep_scoring_app.ui.widgets.marker_interaction_handler import MarkerInteractionHandler
 
 if TYPE_CHECKING:
     from sleep_scoring_app.ui.widgets.activity_plot import ActivityPlotWidget
@@ -39,8 +45,8 @@ class PlotMarkerRenderer:
     Manages marker rendering for the activity plot widget.
 
     Responsibilities:
-    - Create and render sleep markers (onset/offset lines)
-    - Handle marker drag events
+    - Coordinate marker creation and rendering (delegates to MarkerDrawingStrategy)
+    - Coordinate marker interactions (delegates to MarkerInteractionHandler)
     - Manage marker selection state
     - Update marker visual appearance
     - Display adjacent day markers
@@ -49,6 +55,11 @@ class PlotMarkerRenderer:
     def __init__(self, parent: ActivityPlotWidget) -> None:
         """Initialize the plot marker renderer."""
         self.parent = parent
+
+        # Initialize strategy components
+        self.drawing_strategy = MarkerDrawingStrategy(parent)
+        self.interaction_handler = MarkerInteractionHandler(parent)
+
         logger.info("PlotMarkerRenderer initialized")
 
     # ========== Marker State Access ==========
@@ -88,8 +99,6 @@ class PlotMarkerRenderer:
     @property
     def daily_nonwear_markers(self) -> DailyNonwearMarkers:
         """Get daily nonwear markers from parent."""
-        if not hasattr(self.parent, "_daily_nonwear_markers"):
-            self.parent._daily_nonwear_markers = DailyNonwearMarkers()
         return self.parent._daily_nonwear_markers
 
     @daily_nonwear_markers.setter
@@ -100,8 +109,6 @@ class PlotMarkerRenderer:
     @property
     def nonwear_marker_lines(self) -> list:
         """Get nonwear marker lines from parent."""
-        if not hasattr(self.parent, "_nonwear_marker_lines"):
-            self.parent._nonwear_marker_lines = []
         return self.parent._nonwear_marker_lines
 
     @nonwear_marker_lines.setter
@@ -112,20 +119,20 @@ class PlotMarkerRenderer:
     @property
     def selected_nonwear_marker_index(self) -> int:
         """Get selected nonwear marker index from parent."""
-        if not hasattr(self.parent, "_selected_nonwear_marker_index"):
-            self.parent._selected_nonwear_marker_index = 1
         return self.parent._selected_nonwear_marker_index
 
     @selected_nonwear_marker_index.setter
     def selected_nonwear_marker_index(self, value: int) -> None:
-        """Set selected nonwear marker index on parent."""
-        self.parent._selected_nonwear_marker_index = value
+        """
+        Set selected nonwear marker index on parent.
+
+        Uses property setter to emit nonwear_selection_changed signal for Redux.
+        """
+        self.parent.selected_nonwear_marker_index = value
 
     @property
     def nonwear_markers_visible(self) -> bool:
         """Get nonwear markers visibility from parent."""
-        if not hasattr(self.parent, "_nonwear_markers_visible"):
-            self.parent._nonwear_markers_visible = True
         return self.parent._nonwear_markers_visible
 
     @nonwear_markers_visible.setter
@@ -145,7 +152,7 @@ class PlotMarkerRenderer:
                 return i
         return 1  # Default to 1 if not found
 
-    # ========== Marker Creation ==========
+    # ========== Marker Creation (delegated to MarkerDrawingStrategy) ==========
 
     def create_marker_line(
         self,
@@ -157,7 +164,15 @@ class PlotMarkerRenderer:
         is_selected: bool = False,
     ) -> pg.InfiniteLine:
         """Create a draggable marker line with proper styling and behavior."""
-        line = self._create_marker_line_internal(timestamp, color, label, period, marker_type, is_selected)
+        line = self.drawing_strategy.create_marker_line_no_add(timestamp, color, label, period, marker_type, is_selected)
+
+        # Connect drag events for complete markers
+        if marker_type != "incomplete":
+            line.sigPositionChangeFinished.connect(partial(self._on_marker_drag_finished_wrapper, line))
+            line.sigPositionChanged.connect(partial(self._on_marker_dragged_wrapper, line))
+            line.sigClicked.connect(partial(self._on_marker_clicked_wrapper, line))
+
+        # Add to plot
         self.parent.plotItem.addItem(line)
         return line
 
@@ -171,46 +186,10 @@ class PlotMarkerRenderer:
         is_selected: bool = False,
     ) -> pg.InfiniteLine:
         """Create a draggable marker line without adding to plot (for batch operations)."""
-        return self._create_marker_line_internal(timestamp, color, label, period, marker_type, is_selected)
-
-    def _create_marker_line_internal(
-        self,
-        timestamp: float,
-        color: str,
-        label: str,
-        period: SleepPeriod | None,
-        marker_type: str,
-        is_selected: bool = False,
-    ) -> pg.InfiniteLine:
-        """Internal method to create marker line."""
-        # Use thicker line for selected markers
-        line_width = 5 if is_selected else 3
-
-        line = pg.InfiniteLine(
-            pos=timestamp,
-            angle=90,  # Vertical line
-            pen=pg.mkPen(color, width=line_width, style=pg.QtCore.Qt.PenStyle.SolidLine),
-            movable=(marker_type != "incomplete"),  # Incomplete markers not draggable
-            bounds=[self.parent.data_start_time, self.parent.data_end_time],
-            label=label,
-            labelOpts={
-                "position": 0.5,
-                "color": (255, 255, 255),
-                "fill": pg.mkBrush(color),
-                "border": pg.mkPen(color, width=2),
-                "rotateAxis": (1, 0),  # Rotate text to be vertical
-            },
-        )
-
-        # Set hover color to gray for colorblind accessibility
-        line.setHoverPen(pg.mkPen(UIColors.HOVERED_MARKER, width=line_width + 1, style=pg.QtCore.Qt.PenStyle.SolidLine))
+        line = self.drawing_strategy.create_marker_line_no_add(timestamp, color, label, period, marker_type, is_selected)
 
         # Connect drag events for complete markers
         if marker_type != "incomplete":
-            # Store period and marker type on line for drag handling
-            line.period = period
-            line.marker_type = marker_type
-
             line.sigPositionChangeFinished.connect(partial(self._on_marker_drag_finished_wrapper, line))
             line.sigPositionChanged.connect(partial(self._on_marker_dragged_wrapper, line))
             line.sigClicked.connect(partial(self._on_marker_clicked_wrapper, line))
@@ -346,9 +325,6 @@ class PlotMarkerRenderer:
         if current_marker and current_marker.onset_timestamp:
             self.draw_incomplete_marker(current_marker)
 
-        # Emit signal with new format
-        self.parent.sleep_markers_changed.emit(self.daily_sleep_markers)
-
         # Apply sleep scoring rules for selected marker period
         # BUT skip if we're being called from a context that will apply rules separately
         if not getattr(self.parent, "_skip_auto_apply_rules", False):
@@ -360,12 +336,11 @@ class PlotMarkerRenderer:
         self.update_marker_visual_state()
 
     def clear_sleep_markers(self) -> None:
-        """Clear all sleep markers from the plot."""
+        """Clear all sleep markers from the plot (visual only)."""
         for line in self.marker_lines:
             self.parent.plotItem.removeItem(line)
         self.marker_lines.clear()
         self.daily_sleep_markers = DailySleepMarkers()
-        self.parent.markers_saved = False
         self.parent.current_marker_being_placed = None
 
     # ========== Marker Selection ==========
@@ -404,16 +379,20 @@ class PlotMarkerRenderer:
         # Only update UI if selection actually changed
         if old_selection != self.selected_marker_set_index:
             self.update_marker_visual_state()
-            self.parent.sleep_markers_changed.emit(self.daily_sleep_markers)
+            self.parent.mark_sleep_markers_dirty()  # Mark state as dirty via Redux
 
     def auto_select_marker_set(self) -> None:
         """Automatically select an appropriate marker set when the current one is cleared."""
+        logger.debug("auto_select_marker_set called")
+
         # If the current selection is still valid, keep it
         current_period = self.get_selected_marker_period()
         if current_period is not None:
+            logger.debug(f"Current period is valid (index={self.selected_marker_set_index}), keeping selection")
             return
 
         # Try to select the main sleep period first
+        old_index = self.selected_marker_set_index
         main_sleep = self.daily_sleep_markers.get_main_sleep()
         if main_sleep:
             if main_sleep is self.daily_sleep_markers.period_1:
@@ -434,8 +413,11 @@ class PlotMarkerRenderer:
         elif self.daily_sleep_markers.period_4:
             self.selected_marker_set_index = 4
 
+        logger.debug(f"auto_select_marker_set: {old_index} -> {self.selected_marker_set_index}")
+        logger.debug("NOTE: auto_select_marker_set does NOT emit sleep_markers_changed signal")
+
         # Update sleep scoring rules for the newly selected period
-        self._update_sleep_scoring_rules()
+        self.parent._update_sleep_scoring_rules()
 
     # ========== Marker Visual State ==========
 
@@ -471,7 +453,7 @@ class PlotMarkerRenderer:
     def _apply_marker_visual_state(self, selected_period: SleepPeriod | None) -> None:
         """Apply visual state to all marker lines based on the selected period."""
         for line in self.marker_lines:
-            if hasattr(line, "period") and line.period and hasattr(line, "marker_type"):
+            if hasattr(line, "period") and line.period and hasattr(line, "marker_type"):  # KEEP: Duck typing plot/marker attributes
                 is_selected = line.period is selected_period
 
                 # Get colors based on selection state
@@ -491,7 +473,7 @@ class PlotMarkerRenderer:
                 line.setPen(pg.mkPen(new_color, width=line_width, style=pg.QtCore.Qt.PenStyle.SolidLine))
 
                 # Update flag (label) colors to match
-                if hasattr(line, "label") and line.label:
+                if hasattr(line, "label") and line.label:  # KEEP: Duck typing plot/marker attributes
                     line.label.fill = pg.mkBrush(new_color)
                     line.label.border = pg.mkPen(new_color, width=2)
                     line.label.prepareGeometryChange()
@@ -502,7 +484,7 @@ class PlotMarkerRenderer:
         main_sleep = self.daily_sleep_markers.get_main_sleep()
 
         for line in self.marker_lines:
-            if hasattr(line, "period") and line.period and hasattr(line, "marker_type"):
+            if hasattr(line, "period") and line.period and hasattr(line, "marker_type"):  # KEEP: Duck typing plot/marker attributes
                 is_main_sleep = line.period is main_sleep
 
                 # Update label text
@@ -519,151 +501,42 @@ class PlotMarkerRenderer:
                         new_label = f"Nap {nap_number} Offset"
 
                 # Update label if changed
-                if hasattr(line, "label") and line.label:
-                    current_text = line.label.format if hasattr(line.label, "format") else ""
+                if hasattr(line, "label") and line.label:  # KEEP: Duck typing plot/marker attributes
+                    current_text = line.label.format if hasattr(line.label, "format") else ""  # KEEP: Duck typing plot/marker attributes
                     if current_text != new_label:
                         line.label.format = new_label
                         line.label.update()
 
-    # ========== Drag Event Handlers ==========
+    def update_marker_line_position(self, period: SleepPeriod, marker_type: str, new_position: float) -> None:
+        """
+        Update the position of a specific marker line during drag swap.
+
+        Args:
+            period: The SleepPeriod the line belongs to
+            marker_type: "onset" or "offset"
+            new_position: The new timestamp position for the line
+
+        """
+        for line in self.marker_lines:
+            if hasattr(line, "period") and line.period is period and hasattr(line, "marker_type"):
+                if line.marker_type == marker_type:
+                    line.setPos(new_position)
+                    return
+        logger.warning(f"Could not find marker line for period with marker_type={marker_type}")
+
+    # ========== Drag Event Handlers (delegated to MarkerInteractionHandler) ==========
 
     def _on_marker_drag_finished_wrapper(self, line: pg.InfiniteLine) -> None:
         """Wrapper to handle signal without lambda."""
-        self._on_marker_drag_finished(line)
+        self.interaction_handler.on_marker_drag_finished(line)
 
     def _on_marker_dragged_wrapper(self, line: pg.InfiniteLine) -> None:
         """Wrapper to handle signal without lambda."""
-        self._on_marker_dragged(line)
+        self.interaction_handler.on_marker_dragged(line)
 
     def _on_marker_clicked_wrapper(self, line: pg.InfiniteLine) -> None:
         """Wrapper to handle signal without lambda."""
-        self._on_marker_clicked(line)
-
-    def _on_marker_drag_finished(self, line: pg.InfiniteLine) -> None:
-        """Handle marker drag completion with snapping."""
-        from sleep_scoring_app.core.constants import MarkerCategory
-
-        # Only allow dragging sleep markers when in SLEEP mode
-        if self.parent.get_active_marker_category() != MarkerCategory.SLEEP:
-            # Revert to original position
-            if hasattr(line, "period") and line.period:
-                original_pos = line.period.onset_timestamp if line.marker_type == "onset" else line.period.offset_timestamp
-                line.setPos(original_pos)
-            logger.debug("Reverting sleep marker drag - not in SLEEP mode")
-            return
-
-        new_pos = line.getPos()[0]
-
-        # Snap to nearest minute to avoid fractional seconds in database
-        snapped_pos = round(new_pos / 60) * 60
-        line.setPos(snapped_pos)
-
-        # Update the period with new timestamp
-        if hasattr(line, "period") and line.period:
-            if line.marker_type == "onset":
-                line.period.onset_timestamp = snapped_pos
-            elif line.marker_type == "offset":
-                line.period.offset_timestamp = snapped_pos
-
-            # Validate period is still valid (onset before offset)
-            if line.period.is_complete and line.period.onset_timestamp >= line.period.offset_timestamp:
-                # Invalid order - revert change
-                if line.marker_type == "onset":
-                    line.period.onset_timestamp = line.getPos()[0] + 60
-                elif line.marker_type == "offset":
-                    line.period.offset_timestamp = line.getPos()[0] - 60
-                line.setPos(line.period.onset_timestamp if line.marker_type == "onset" else line.period.offset_timestamp)
-                return
-
-            # Update classifications and check for duration ties
-            self.daily_sleep_markers.update_classifications()
-            if self.daily_sleep_markers.check_duration_tie():
-                self.parent.marker_limit_exceeded.emit("Warning: Multiple periods with identical duration detected")
-
-            # Full redraw after drag completion
-            self.redraw_markers()
-
-            # Reapply sleep scoring rules if this is the selected period
-            if line.period is self.get_selected_marker_period():
-                self.parent.apply_sleep_scoring_rules(line.period)
-
-    def _on_marker_dragged(self, line: pg.InfiniteLine) -> None:
-        """Handle marker drag in progress (real-time feedback)."""
-        from sleep_scoring_app.core.constants import MarkerCategory
-
-        # Only allow dragging sleep markers when in SLEEP mode
-        if self.parent.get_active_marker_category() != MarkerCategory.SLEEP:
-            return
-
-        new_pos = line.getPos()[0]
-
-        if hasattr(line, "period") and line.period:
-            # Auto-select the marker set being dragged
-            if line.period is not self.get_selected_marker_period():
-                self.select_marker_set_by_period(line.period)
-
-            if line.marker_type == "onset":
-                line.period.onset_timestamp = new_pos
-            elif line.marker_type == "offset":
-                line.period.offset_timestamp = new_pos
-
-            # Update classifications
-            self.daily_sleep_markers.update_classifications()
-
-            # Lightweight label updates only during drag
-            self.update_marker_labels_text_only()
-
-            # Update sleep scoring rules
-            if line.period.is_complete:
-                self.parent.apply_sleep_scoring_rules(line.period)
-
-            # Emit signal for UI updates
-            self.parent.sleep_markers_changed.emit(self.daily_sleep_markers)
-
-    def _on_marker_clicked(self, line: pg.InfiniteLine) -> None:
-        """Handle marker click to select the marker set."""
-        logger.debug(f"Marker clicked: {line}")
-
-        from sleep_scoring_app.core.constants import MarkerCategory
-
-        # Only allow interaction with sleep markers when in SLEEP mode
-        if self.parent.get_active_marker_category() != MarkerCategory.SLEEP:
-            logger.debug("Ignoring sleep marker click - not in SLEEP mode")
-            return
-
-        self.parent._marker_click_in_progress = True
-        QTimer.singleShot(150, lambda: setattr(self.parent, "_marker_click_in_progress", False))
-
-        if hasattr(line, "period") and line.period:
-            old_selection = self.selected_marker_set_index
-
-            self.select_marker_set_by_period(line.period)
-
-            # Deselect nonwear markers when sleep marker is selected
-            self._deselect_nonwear_markers()
-
-            # Always update sleep scoring rules when clicking a marker
-            self._update_sleep_scoring_rules()
-
-            if old_selection != self.selected_marker_set_index:
-                self.parent.sleep_markers_changed.emit(self.daily_sleep_markers)
-                self.update_marker_visual_state()
-                self.parent.setFocus()
-
-    def _deselect_nonwear_markers(self) -> None:
-        """Deselect all nonwear markers (make them all unselected visually)."""
-        # Set selected index to 0 (no selection) - this is a special value meaning none selected
-        self.selected_nonwear_marker_index = 0
-        # Update visual state - all markers will appear unselected
-        self._update_nonwear_marker_visual_state_no_auto_select()
-        # Emit signal to notify that nonwear selection was cleared
-        self.parent.nonwear_marker_selected.emit(None)
-
-    def _update_sleep_scoring_rules(self) -> None:
-        """Update sleep scoring rules for the currently selected marker period."""
-        selected_period = self.get_selected_marker_period()
-        if selected_period and selected_period.is_complete:
-            self.parent.apply_sleep_scoring_rules(selected_period)
+        self.interaction_handler.on_marker_clicked(line)
 
     # ========== Adjacent Day Markers ==========
 
@@ -674,9 +547,10 @@ class PlotMarkerRenderer:
         # Clear existing adjacent day markers first
         self.clear_adjacent_day_markers()
 
-        if not hasattr(self.parent, "adjacent_day_marker_lines"):
+        # Initialize lists if not already present (defensive coding for external calls)
+        if not self.parent.adjacent_day_marker_lines:
             self.parent.adjacent_day_marker_lines = []
-        if not hasattr(self.parent, "adjacent_day_marker_labels"):
+        if not self.parent.adjacent_day_marker_labels:
             self.parent.adjacent_day_marker_labels = []
 
         for i, marker_data in enumerate(adjacent_day_markers_data):
@@ -744,12 +618,12 @@ class PlotMarkerRenderer:
 
     def clear_adjacent_day_markers(self) -> None:
         """Clear all adjacent day markers from the plot."""
-        if hasattr(self.parent, "adjacent_day_marker_lines"):
+        if self.parent.adjacent_day_marker_lines:
             for line in self.parent.adjacent_day_marker_lines:
                 self.parent.plotItem.removeItem(line)
             self.parent.adjacent_day_marker_lines.clear()
 
-        if hasattr(self.parent, "adjacent_day_marker_labels"):
+        if self.parent.adjacent_day_marker_labels:
             for label in self.parent.adjacent_day_marker_labels:
                 self.parent.plotItem.removeItem(label)
             self.parent.adjacent_day_marker_labels.clear()
@@ -805,7 +679,16 @@ class PlotMarkerRenderer:
         return removed_count
 
     def load_daily_sleep_markers(self, daily_markers: DailySleepMarkers, markers_saved: bool = True) -> None:
-        """Load existing daily sleep markers into the plot widget."""
+        """
+        Load existing daily sleep markers into the plot widget.
+
+        NOTE: The `markers_saved` parameter is DEPRECATED and ignored. The save state is now managed
+        entirely by the Redux store. The caller should dispatch Actions.markers_loaded()
+        BEFORE calling this method to properly set the save state.
+        """
+        logger.info("=== PlotMarkerRenderer.load_daily_sleep_markers START ===")
+        logger.debug(f"daily_markers complete periods: {len(daily_markers.get_complete_periods()) if daily_markers else 0}")
+
         # Filter out any periods that are outside data bounds
         removed_count = self._filter_out_of_bounds_sleep_markers(daily_markers)
         if removed_count > 0:
@@ -814,21 +697,26 @@ class PlotMarkerRenderer:
 
         self.daily_sleep_markers = daily_markers
         self.parent.current_marker_being_placed = None
-        self.parent.markers_saved = markers_saved
+        # NOTE: Save state is managed by Redux store, not by this method
+
         self.redraw_markers()
+        logger.debug("Called redraw_markers()")
 
         # Auto-select an appropriate marker set when loading
+        logger.debug("Calling auto_select_marker_set()...")
         self.auto_select_marker_set()
+        logger.debug(f"After auto_select_marker_set - markers_saved = {self.parent.markers_saved}")
 
         # Ensure visual state is properly updated
         self.update_marker_visual_state()
 
         # Extract view subset from main Sadeh results before applying rules
-        if hasattr(self.parent, "main_48h_sadeh_results") and self.parent.main_48h_sadeh_results:
+        if self.parent.main_48h_sadeh_results:
             self.parent._extract_view_subset_from_main_results()
 
         # Always update sleep scoring rules after loading markers
-        self._update_sleep_scoring_rules()
+        self.parent._update_sleep_scoring_rules()
+        logger.info(f"=== PlotMarkerRenderer.load_daily_sleep_markers END - markers_saved={self.parent.markers_saved} ===")
 
     def get_daily_sleep_markers(self) -> DailySleepMarkers:
         """Get the current daily sleep markers."""
@@ -852,11 +740,12 @@ class PlotMarkerRenderer:
 
             self.daily_sleep_markers.update_classifications()
             self.redraw_markers()
-            self.parent.sleep_markers_changed.emit(self.daily_sleep_markers)
+            self.parent.mark_sleep_markers_dirty()  # Mark state as dirty via Redux
             return True
 
-        except Exception:
-            logger.exception("Error removing sleep period %d", period_index)
+        except Exception as e:
+            logger.exception("Error removing sleep period %d: %s", period_index, e)
+            self.parent.error_occurred.emit(f"Failed to remove sleep period {period_index}: {e}")
             return False
 
     def clear_selected_marker_set(self) -> None:
@@ -874,8 +763,7 @@ class PlotMarkerRenderer:
                 self.marker_lines.clear()
 
                 self.daily_sleep_markers = DailySleepMarkers()
-                self.parent.markers_saved = False
-                self.parent.sleep_markers_changed.emit(self.daily_sleep_markers)
+                self.parent.mark_sleep_markers_dirty()  # Mark state as dirty via Redux
                 self.parent.clear_sleep_onset_offset_markers()
             return
 
@@ -897,8 +785,7 @@ class PlotMarkerRenderer:
 
         self.daily_sleep_markers.update_classifications()
         self.redraw_markers()
-        self.parent.markers_saved = False
-        self.parent.sleep_markers_changed.emit(self.daily_sleep_markers)
+        self.parent.mark_sleep_markers_dirty()  # Mark state as dirty via Redux
         self.parent.clear_sleep_onset_offset_markers()
         self.auto_select_marker_set()
         self.update_marker_visual_state()
@@ -946,9 +833,8 @@ class PlotMarkerRenderer:
 
         self.daily_sleep_markers.update_classifications()
         self.redraw_markers()
-        self.parent.markers_saved = False
-        self.parent.sleep_markers_changed.emit(self.daily_sleep_markers)
-        self._update_sleep_scoring_rules()
+        self.parent.mark_sleep_markers_dirty()  # Mark state as dirty via Redux
+        self.parent._update_sleep_scoring_rules()
         self.update_marker_visual_state()
 
     # =========================================================================
@@ -965,49 +851,10 @@ class PlotMarkerRenderer:
         is_selected: bool = False,
     ) -> pg.InfiniteLine:
         """Create a dashed marker line for manual nonwear periods."""
-        line = self._create_nonwear_marker_line_internal(timestamp, color, label, period, marker_type, is_selected)
-        self.parent.plotItem.addItem(line)
-        return line
-
-    def _create_nonwear_marker_line_internal(
-        self,
-        timestamp: float,
-        color: str,
-        label: str,
-        period: ManualNonwearPeriod | None,
-        marker_type: str,
-        is_selected: bool = False,
-    ) -> pg.InfiniteLine:
-        """Internal method to create nonwear marker line with dashed style."""
-        # Use thicker line for selected markers
-        line_width = 4 if is_selected else 2
-
-        # Create dashed line to distinguish from sleep markers
-        line = pg.InfiniteLine(
-            pos=timestamp,
-            angle=90,  # Vertical line
-            pen=pg.mkPen(color, width=line_width, style=Qt.PenStyle.DashLine),
-            movable=(marker_type != "incomplete"),
-            bounds=[self.parent.data_start_time, self.parent.data_end_time],
-            label=label,
-            labelOpts={
-                "position": 0.3,  # Position label lower to avoid overlap with sleep markers
-                "color": (255, 255, 255),
-                "fill": pg.mkBrush(color),
-                "border": pg.mkPen(color, width=2),
-                "rotateAxis": (1, 0),
-            },
-        )
-
-        # Set hover color
-        line.setHoverPen(pg.mkPen(UIColors.HOVERED_MARKER, width=line_width + 1, style=Qt.PenStyle.DashLine))
+        line = self.drawing_strategy.create_nonwear_marker_line(timestamp, color, label, period, marker_type, is_selected)
 
         # Connect drag events for complete markers
         if marker_type != "incomplete":
-            line.period = period
-            line.marker_type = marker_type
-            line.marker_category = MarkerCategory.NONWEAR
-
             line.sigPositionChangeFinished.connect(partial(self._on_nonwear_marker_drag_finished_wrapper, line))
             line.sigPositionChanged.connect(partial(self._on_nonwear_marker_dragged_wrapper, line))
             line.sigClicked.connect(partial(self._on_nonwear_marker_clicked_wrapper, line))
@@ -1015,15 +862,19 @@ class PlotMarkerRenderer:
         return line
 
     def _get_nonwear_marker_colors(self, is_selected: bool) -> tuple[str, str]:
-        """Get start and end colors for nonwear markers based on selection state."""
+        """
+        Get color for nonwear markers based on selection state.
+
+        Returns same color for both start and end markers.
+        """
         custom_colors = getattr(self.parent, "custom_colors", {})
         if is_selected:
-            start_color = custom_colors.get("selected_manual_nwt_start", UIColors.SELECTED_MANUAL_NWT_START)
-            end_color = custom_colors.get("selected_manual_nwt_end", UIColors.SELECTED_MANUAL_NWT_END)
+            # Use single color for both start and end when selected
+            color = custom_colors.get("selected_manual_nwt", UIColors.SELECTED_MANUAL_NWT_START)
         else:
-            start_color = custom_colors.get("unselected_manual_nwt_start", UIColors.UNSELECTED_MANUAL_NWT_START)
-            end_color = custom_colors.get("unselected_manual_nwt_end", UIColors.UNSELECTED_MANUAL_NWT_END)
-        return start_color, end_color
+            # Use single color for both start and end when unselected
+            color = custom_colors.get("unselected_manual_nwt", UIColors.UNSELECTED_MANUAL_NWT_START)
+        return color, color
 
     def draw_nonwear_period(self, period: ManualNonwearPeriod, is_selected: bool) -> None:
         """Draw start and end markers for a nonwear period."""
@@ -1102,6 +953,23 @@ class PlotMarkerRenderer:
             logger.debug(f"Nonwear marker selection changed from {old_selection} to {self.selected_nonwear_marker_index}")
             self.update_nonwear_marker_visual_state()
 
+    def update_nonwear_marker_line_position(self, period: ManualNonwearPeriod, marker_type: str, new_position: float) -> None:
+        """
+        Update the position of a specific nonwear marker line during drag swap.
+
+        Args:
+            period: The ManualNonwearPeriod the line belongs to
+            marker_type: "start" or "end"
+            new_position: The new timestamp position for the line
+
+        """
+        for line in self.nonwear_marker_lines:
+            if hasattr(line, "period") and line.period is period and hasattr(line, "marker_type"):
+                if line.marker_type == marker_type:
+                    line.setPos(new_position)
+                    return
+        logger.warning(f"Could not find nonwear marker line for period with marker_type={marker_type}")
+
     def update_nonwear_marker_visual_state(self) -> None:
         """Update the visual state of all nonwear markers to reflect current selection."""
         self._apply_nonwear_marker_visual_state()
@@ -1110,9 +978,31 @@ class PlotMarkerRenderer:
         """
         Update the visual state of all nonwear markers WITHOUT auto-selecting.
 
-        This is the same as update_nonwear_marker_visual_state since nonwear markers
-        don't have auto-selection, but provided for API consistency with sleep markers.
+        Use this when you explicitly want to deselect without triggering auto-selection.
         """
+        self._apply_nonwear_marker_visual_state()
+
+    def auto_select_nonwear_marker(self) -> None:
+        """Automatically select the first available nonwear marker."""
+        logger.debug("auto_select_nonwear_marker called")
+
+        # If the current selection is still valid, keep it
+        current_period = self.get_selected_nonwear_period()
+        if current_period is not None:
+            logger.debug(f"Current nonwear period is valid (index={self.selected_nonwear_marker_index}), keeping selection")
+            return
+
+        # Select the first available period
+        old_index = self.selected_nonwear_marker_index
+        for i in range(1, 11):  # Slots 1-10
+            period = self.daily_nonwear_markers.get_period_by_slot(i)
+            if period is not None:
+                self.selected_nonwear_marker_index = i
+                break
+
+        logger.debug(f"auto_select_nonwear_marker: {old_index} -> {self.selected_nonwear_marker_index}")
+
+        # Update visual state
         self._apply_nonwear_marker_visual_state()
 
     def _apply_nonwear_marker_visual_state(self) -> None:
@@ -1121,7 +1011,7 @@ class PlotMarkerRenderer:
             return
 
         for line in self.nonwear_marker_lines:
-            if hasattr(line, "period") and line.period and hasattr(line, "marker_type"):
+            if hasattr(line, "period") and line.period and hasattr(line, "marker_type"):  # KEEP: Duck typing plot/marker attributes
                 is_selected = line.period.marker_index == self.selected_nonwear_marker_index
 
                 start_color, end_color = self._get_nonwear_marker_colors(is_selected)
@@ -1134,7 +1024,7 @@ class PlotMarkerRenderer:
                 line.setPen(pg.mkPen(new_color, width=line_width, style=Qt.PenStyle.DashLine))
 
                 # Update label colors
-                if hasattr(line, "label") and line.label:
+                if hasattr(line, "label") and line.label:  # KEEP: Duck typing plot/marker attributes
                     line.label.fill = pg.mkBrush(new_color)
                     line.label.border = pg.mkPen(new_color, width=2)
                     line.label.prepareGeometryChange()
@@ -1145,138 +1035,19 @@ class PlotMarkerRenderer:
         self.nonwear_markers_visible = visible
         self.redraw_nonwear_markers()
 
-    # ========== Nonwear Marker Drag Handlers ==========
+    # ========== Nonwear Marker Drag Handlers (delegated to MarkerInteractionHandler) ==========
 
     def _on_nonwear_marker_drag_finished_wrapper(self, line: pg.InfiniteLine) -> None:
         """Wrapper to handle signal without lambda."""
-        self._on_nonwear_marker_drag_finished(line)
+        self.interaction_handler.on_nonwear_marker_drag_finished(line)
 
     def _on_nonwear_marker_dragged_wrapper(self, line: pg.InfiniteLine) -> None:
         """Wrapper to handle signal without lambda."""
-        self._on_nonwear_marker_dragged(line)
+        self.interaction_handler.on_nonwear_marker_dragged(line)
 
     def _on_nonwear_marker_clicked_wrapper(self, line: pg.InfiniteLine) -> None:
         """Wrapper to handle signal without lambda."""
-        self._on_nonwear_marker_clicked(line)
-
-    def _on_nonwear_marker_drag_finished(self, line: pg.InfiniteLine) -> None:
-        """Handle nonwear marker drag completion with snapping."""
-        from sleep_scoring_app.core.constants import MarkerCategory
-
-        # Only allow dragging nonwear markers when in NONWEAR mode
-        if self.parent.get_active_marker_category() != MarkerCategory.NONWEAR:
-            # Revert to original position
-            if hasattr(line, "period") and line.period:
-                original_pos = line.period.start_timestamp if line.marker_type == "start" else line.period.end_timestamp
-                line.setPos(original_pos)
-            logger.debug("Reverting nonwear marker drag - not in NONWEAR mode")
-            return
-
-        new_pos = line.getPos()[0]
-
-        # Snap to nearest minute
-        snapped_pos = round(new_pos / 60) * 60
-        line.setPos(snapped_pos)
-
-        if hasattr(line, "period") and line.period:
-            # Store original values for potential revert
-            original_start = line.period.start_timestamp
-            original_end = line.period.end_timestamp
-
-            if line.marker_type == "start":
-                line.period.start_timestamp = snapped_pos
-            elif line.marker_type == "end":
-                line.period.end_timestamp = snapped_pos
-
-            # Validate period (start before end)
-            if line.period.is_complete and line.period.start_timestamp >= line.period.end_timestamp:
-                # Invalid order - revert
-                line.period.start_timestamp = original_start
-                line.period.end_timestamp = original_end
-                line.setPos(original_start if line.marker_type == "start" else original_end)
-                return
-
-            # Validate no overlap with other periods
-            if line.period.is_complete and self.daily_nonwear_markers.check_overlap(
-                line.period.start_timestamp,
-                line.period.end_timestamp,
-                exclude_slot=line.period.marker_index,
-            ):
-                # Overlap detected - revert and notify user
-                line.period.start_timestamp = original_start
-                line.period.end_timestamp = original_end
-                line.setPos(original_start if line.marker_type == "start" else original_end)
-                self.parent.marker_limit_exceeded.emit("Nonwear periods cannot overlap")
-                return
-
-            # Full redraw after drag completion
-            self.redraw_nonwear_markers()
-
-            # Mark as unsaved
-            if hasattr(self.parent, "_nonwear_markers_saved"):
-                self.parent._nonwear_markers_saved = False
-
-            # Emit signals for UI updates
-            self.parent.nonwear_markers_changed.emit(self.daily_nonwear_markers)
-            self.parent.nonwear_marker_selected.emit(line.period)
-
-    def _on_nonwear_marker_dragged(self, line: pg.InfiniteLine) -> None:
-        """Handle nonwear marker drag in progress."""
-        from sleep_scoring_app.core.constants import MarkerCategory
-
-        # Only allow dragging nonwear markers when in NONWEAR mode
-        if self.parent.get_active_marker_category() != MarkerCategory.NONWEAR:
-            return
-
-        new_pos = line.getPos()[0]
-
-        if hasattr(line, "period") and line.period:
-            # Auto-select the marker being dragged
-            if line.period.marker_index != self.selected_nonwear_marker_index:
-                self.select_nonwear_marker_by_period(line.period)
-                # Also deselect sleep markers when dragging nonwear
-                self._deselect_sleep_markers()
-
-            if line.marker_type == "start":
-                line.period.start_timestamp = new_pos
-            elif line.marker_type == "end":
-                line.period.end_timestamp = new_pos
-
-            # Emit signal to update tables during drag
-            self.parent.nonwear_marker_selected.emit(line.period)
-
-    def _on_nonwear_marker_clicked(self, line: pg.InfiniteLine) -> None:
-        """Handle nonwear marker click to select."""
-        logger.debug(f"Nonwear marker clicked: {line}")
-
-        from sleep_scoring_app.core.constants import MarkerCategory
-
-        # Only allow interaction with nonwear markers when in NONWEAR mode
-        if self.parent.get_active_marker_category() != MarkerCategory.NONWEAR:
-            logger.debug("Ignoring nonwear marker click - not in NONWEAR mode")
-            return
-
-        self.parent._marker_click_in_progress = True
-        QTimer.singleShot(150, lambda: setattr(self.parent, "_marker_click_in_progress", False))
-
-        if hasattr(line, "period") and line.period:
-            self.select_nonwear_marker_by_period(line.period)
-            self.update_nonwear_marker_visual_state()
-
-            # Deselect sleep markers when nonwear marker is selected
-            self._deselect_sleep_markers()
-
-            # Emit signal for table updates with the selected nonwear period
-            self.parent.nonwear_marker_selected.emit(line.period)
-
-            self.parent.setFocus()
-
-    def _deselect_sleep_markers(self) -> None:
-        """Deselect all sleep markers (make them all unselected visually)."""
-        # Set selected index to 0 (no selection) - this is a special value meaning none selected
-        self.selected_marker_set_index = 0
-        # Use the no-auto-select version to prevent re-selection
-        self._update_marker_visual_state_no_auto_select()
+        self.interaction_handler.on_nonwear_marker_clicked(line)
 
     # ========== Nonwear Marker Period Operations ==========
 
@@ -1292,9 +1063,8 @@ class PlotMarkerRenderer:
         # Redraw
         self.redraw_nonwear_markers()
 
-        # Mark as unsaved
-        if hasattr(self.parent, "_nonwear_markers_saved"):
-            self.parent._nonwear_markers_saved = False
+        # Mark as unsaved via Redux store
+        self.parent.mark_nonwear_markers_dirty()
 
         # Auto-select next available
         self._auto_select_next_nonwear_marker()
@@ -1305,7 +1075,7 @@ class PlotMarkerRenderer:
         if complete_periods:
             self.selected_nonwear_marker_index = complete_periods[0].marker_index
         else:
-            self.selected_nonwear_marker_index = 1
+            self.selected_nonwear_marker_index = 0  # 0 = no selection
 
     def adjust_selected_nonwear_marker(self, marker_type: str, seconds_delta: int) -> None:
         """Adjust selected nonwear marker by specified number of seconds."""
@@ -1358,8 +1128,8 @@ class PlotMarkerRenderer:
 
         self.redraw_nonwear_markers()
 
-        if hasattr(self.parent, "_nonwear_markers_saved"):
-            self.parent._nonwear_markers_saved = False
+        # Mark as unsaved via Redux store
+        self.parent.mark_nonwear_markers_dirty()
 
     def _validate_nonwear_period_bounds(self, period: ManualNonwearPeriod | None) -> bool:
         """
@@ -1407,7 +1177,13 @@ class PlotMarkerRenderer:
         return removed_count
 
     def load_daily_nonwear_markers(self, daily_markers: DailyNonwearMarkers, markers_saved: bool = True) -> None:
-        """Load existing daily nonwear markers into the plot widget."""
+        """
+        Load existing daily nonwear markers into the plot widget.
+
+        NOTE: The `markers_saved` parameter is DEPRECATED and ignored. The save state is now managed
+        entirely by the Redux store. The caller should dispatch Actions.markers_loaded()
+        BEFORE calling this method to properly set the save state.
+        """
         # Filter out any periods that are outside data bounds
         removed_count = self._filter_out_of_bounds_nonwear_markers(daily_markers)
         if removed_count > 0:
@@ -1416,7 +1192,7 @@ class PlotMarkerRenderer:
 
         self.daily_nonwear_markers = daily_markers
         self.parent._current_nonwear_marker_being_placed = None
-        self.parent._nonwear_markers_saved = markers_saved
+        # NOTE: Save state is managed by Redux store, not by this method
         self.redraw_nonwear_markers()
 
         # Auto-select first available
@@ -1429,8 +1205,7 @@ class PlotMarkerRenderer:
 
     def cancel_incomplete_nonwear_marker(self) -> None:
         """Cancel the current incomplete nonwear marker placement."""
-        if hasattr(self.parent, "_current_nonwear_marker_being_placed"):
-            if self.parent._current_nonwear_marker_being_placed is not None:
-                logger.debug("Cancelling incomplete nonwear marker placement")
-                self.parent._current_nonwear_marker_being_placed = None
-                self.redraw_nonwear_markers()
+        if self.parent._current_nonwear_marker_being_placed is not None:
+            logger.debug("Cancelling incomplete nonwear marker placement")
+            self.parent._current_nonwear_marker_being_placed = None
+            self.redraw_nonwear_markers()

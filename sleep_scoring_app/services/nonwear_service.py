@@ -243,7 +243,10 @@ class NonwearDataService:
             participant_id = self._extract_participant_id_from_filename(Path(filename))
             logger.info("Extracted participant ID '%s' from filename '%s'", participant_id, filename)
 
-            with self.db_manager._get_connection() as conn:
+            from sleep_scoring_app.data.repositories.base_repository import BaseRepository
+
+            temp_repo = BaseRepository(self.db_manager.db_path, self.db_manager._validate_table_name, self.db_manager._validate_column_name)
+            with temp_repo._get_connection() as conn:
                 # For sensor periods, query by participant_id since that's how the data is stored
                 # For Choi periods, query by filename since they're computed per file
                 if source == NonwearDataSource.NONWEAR_SENSOR:
@@ -323,8 +326,11 @@ class NonwearDataService:
 
     def save_nonwear_periods(self, periods: list[NonwearPeriod], filename: str) -> bool:
         """Save nonwear periods to database."""
+        from sleep_scoring_app.data.repositories.base_repository import BaseRepository
+
+        temp_repo = BaseRepository(self.db_manager.db_path, self.db_manager._validate_table_name, self.db_manager._validate_column_name)
         try:
-            with self.db_manager._get_connection() as conn:
+            with temp_repo._get_connection() as conn:
                 for period in periods:
                     # Determine table based on source
                     table = (

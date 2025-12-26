@@ -26,8 +26,6 @@ References:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from sleep_scoring_app.core.exceptions import AlgorithmError, SleepScoringError
 
 # Import types at runtime for isinstance checks and comparisons

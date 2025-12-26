@@ -33,6 +33,7 @@ import pandas as pd
 
 from sleep_scoring_app.core.constants import ActivityColumn, DatabaseColumn
 from sleep_scoring_app.core.dataclasses import ColumnMapping
+from sleep_scoring_app.core.validation import InputValidator
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -47,6 +48,8 @@ class CSVDataSourceLoader:
     Loads activity data from CSV and Excel files with automatic column detection
     and format validation. Implements DataSourceLoader protocol for DI compatibility.
     """
+
+    SUPPORTED_EXTENSIONS: frozenset[str] = frozenset({".csv", ".xlsx", ".xls"})
 
     def __init__(self, skip_rows: int = 10) -> None:
         """
@@ -90,7 +93,7 @@ class CSVDataSourceLoader:
             Set of file extensions this loader can handle
 
         """
-        return {".csv", ".xlsx", ".xls"}
+        return self.SUPPORTED_EXTENSIONS
 
     def load_file(
         self,
@@ -118,12 +121,11 @@ class CSVDataSourceLoader:
             IOError: If file cannot be read
 
         """
-        from pathlib import Path
-
-        file_path = Path(file_path)
-        if not file_path.exists():
-            msg = f"File not found: {file_path}"
-            raise FileNotFoundError(msg)
+        file_path = InputValidator.validate_file_path(
+            file_path,
+            must_exist=True,
+            allowed_extensions=self.supported_extensions,
+        )
 
         # Use provided skip_rows or fall back to instance default
         skip_rows = skip_rows if skip_rows is not None else self.skip_rows
@@ -177,11 +179,32 @@ class CSVDataSourceLoader:
 
         # Extract metadata
         metadata = self.get_file_metadata(file_path)
+
+        # Infer sample rate from timestamps (if sufficient data)
+        sample_rate = None
+        if len(standardized_df) >= 2:
+            time_diff = (standardized_df[DatabaseColumn.TIMESTAMP].iloc[1] - standardized_df[DatabaseColumn.TIMESTAMP].iloc[0]).total_seconds()
+            if time_diff > 0:
+                sample_rate = 1.0 / time_diff
+
         metadata.update(
             {
+                "loader": "csv",
                 "total_epochs": len(standardized_df),
+                "total_samples": len(standardized_df),  # Same as epochs for pre-aggregated CSV
                 "start_time": standardized_df[DatabaseColumn.TIMESTAMP].iloc[0],
                 "end_time": standardized_df[DatabaseColumn.TIMESTAMP].iloc[-1],
+                "sample_rate": sample_rate,
+                "timezone_offset": None,  # Not available from CSV, could be added to config
+                "serial_number": None,
+                "firmware": None,
+                "autocalibrated": False,
+                "calibration_error_before": None,
+                "calibration_error_after": None,
+                "imputation_applied": False,
+                "imputation_n_gaps": 0,
+                "imputation_samples_added": 0,
+                "imputation_total_gap_sec": 0.0,
             },
         )
 
@@ -485,15 +508,17 @@ class CSVDataSourceLoader:
             FileNotFoundError: If file does not exist
 
         """
-        from pathlib import Path
-
-        file_path = Path(file_path)
-        if not file_path.exists():
-            msg = f"File not found: {file_path}"
-            raise FileNotFoundError(msg)
+        file_path = InputValidator.validate_file_path(
+            file_path,
+            must_exist=True,
+            allowed_extensions=self.supported_extensions,
+        )
 
         return {
+            "loader": "csv",
             "file_size": file_path.stat().st_size,
             "device_type": "actigraph",  # Assume ActiGraph for CSV files
             "epoch_length_seconds": 60,  # Standard 60-second epochs
+            "sample_rate": None,  # Will be inferred from data if available
+            "timezone_offset": None,
         }

@@ -116,6 +116,15 @@ class ViewMode(StrEnum):
     HOURS_48 = "48h"
 
 
+class EditMode(StrEnum):
+    """Marker editing modes for activity plot."""
+
+    IDLE = "idle"
+    PLACING_ONSET = "placing_onset"
+    PLACING_OFFSET = "placing_offset"
+    DRAGGING = "dragging"
+
+
 class ViewHours:
     """View mode hour constants."""
 
@@ -289,8 +298,7 @@ class TooltipText(StrEnum):
     TIME_COLUMN = "Time in HH:MM format"
     ACTIVITY_COLUMN = "Raw activity counts"
     VM_COLUMN = "Vector Magnitude activity counts"
-    SLEEP_SCORE_COLUMN = "Sleep/Wake Algorithm: S=Sleep, W=Wake"  # Generic tooltip for any algorithm
-    SADEH_COLUMN = "Sadeh Algorithm: S=Sleep, W=Wake"  # Legacy - use SLEEP_SCORE_COLUMN
+    SLEEP_SCORE_COLUMN = "Sleep/Wake Algorithm: S=Sleep, W=Wake"
     CHOI_COLUMN = "Choi Algorithm: On=Wearing, Off=Not wearing"
     NWT_SENSOR_COLUMN = "NWT Sensor: Off=Not wearing"
     ACTIVITY_SOURCE_DROPDOWN = "Select which activity data column to display and use for Choi algorithm analysis.\nNote: Sadeh algorithm always uses Axis 1 regardless of this setting."
@@ -494,7 +502,6 @@ class TableColumn(StrEnum):
     ACTIVITY = "Activity"
     VM = "VM"  # Vector Magnitude
     SLEEP_SCORE = "Sleep"  # Generic sleep/wake algorithm column (dynamically named)
-    SADEH = "Sadeh"  # Legacy alias - use SLEEP_SCORE for new code
     CHOI = "Choi"
     NWT_SENSOR = "NWT Sensor"
     IS_MARKER = "is_marker"
@@ -699,12 +706,6 @@ class AlgorithmTooltip(StrEnum):
         "• HDCZA (2018): Heuristic algorithm using z-angle distribution\n\n"
         "COUNT-SCALED variants divide counts by 100 and cap at 300 to\n"
         "correct for higher sensitivity in modern accelerometers."
-    )
-    SLEEP_ALGORITHM_COMBO_LEGACY = (
-        "Select the sleep scoring algorithm to use.\n"
-        "• Epoch-based algorithms (Sadeh, Cole-Kripke): Require 60-second epoch counts\n"
-        "• Raw-data algorithms (van Hees SIB, HDCZA): Require raw tri-axial accelerometer data\n\n"
-        "NOTE: When you load a data file in the Analysis tab, only compatible algorithms will be available."
     )
 
 

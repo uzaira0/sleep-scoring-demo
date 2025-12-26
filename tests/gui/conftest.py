@@ -20,9 +20,13 @@ from sleep_scoring_app.core.constants import MarkerType, ParticipantGroup, Parti
 from sleep_scoring_app.core.dataclasses import DailySleepMarkers, ParticipantInfo, SleepMetrics, SleepPeriod
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def mock_message_box(monkeypatch):
-    """Mock QMessageBox to prevent blocking during tests."""
+    """Mock QMessageBox to prevent blocking during tests.
+
+    NOTE: autouse=True ensures ALL gui tests automatically get mocked dialogs,
+    preventing any blocking dialog boxes during test runs.
+    """
     mock_box = Mock()
     mock_box.exec.return_value = QMessageBox.StandardButton.Yes
     mock_box.information = Mock(return_value=QMessageBox.StandardButton.Ok)
@@ -39,9 +43,13 @@ def mock_message_box(monkeypatch):
     return mock_box
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def mock_file_dialog(monkeypatch):
-    """Mock QFileDialog to prevent blocking during tests."""
+    """Mock QFileDialog to prevent blocking during tests.
+
+    NOTE: autouse=True ensures ALL gui tests automatically get mocked dialogs,
+    preventing any blocking file dialogs during test runs.
+    """
     mock_dialog = Mock()
     mock_dialog.getExistingDirectory = Mock(return_value="/test/directory")
     mock_dialog.getOpenFileName = Mock(return_value=("/test/file.csv", "CSV Files (*.csv)"))

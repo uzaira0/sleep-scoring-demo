@@ -205,14 +205,22 @@ class DataSourceFactory:
         if not ext.startswith("."):
             ext = f".{ext}"
 
-        # Check each loader's supported extensions
+        # Check each loader's supported extensions using class attribute (no instantiation)
         for loader_id, entry in cls._registry.items():
-            loader_instance = entry.loader_class()
-            if ext in loader_instance.supported_extensions:
-                # Create new instance with backend if GT3X
+            loader_class = entry.loader_class
+            # Use class attribute if available, otherwise instantiate (fallback)
+            if hasattr(loader_class, "SUPPORTED_EXTENSIONS"):  # KEEP: Class attribute check
+                supported_extensions = loader_class.SUPPORTED_EXTENSIONS
+            else:
+                # Fallback: instantiate to get extensions
+                loader_instance = loader_class()
+                supported_extensions = loader_instance.supported_extensions
+
+            if ext in supported_extensions:
+                # Create instance with backend if GT3X
                 if loader_id in ("gt3x", "gt3x_rs", "gt3x_pygt3x"):
-                    return entry.loader_class(backend=backend, **kwargs)
-                return entry.loader_class(**kwargs)
+                    return loader_class(backend=backend, **kwargs)
+                return loader_class(**kwargs)
 
         # No matching loader found
         supported = cls.get_supported_extensions()
@@ -291,8 +299,13 @@ class DataSourceFactory:
         """
         extensions = set()
         for entry in cls._registry.values():
-            loader_instance = entry.loader_class()
-            extensions.update(loader_instance.supported_extensions)
+            loader_class = entry.loader_class
+            # Use class attribute if available, otherwise instantiate (fallback)
+            if hasattr(loader_class, "SUPPORTED_EXTENSIONS"):  # KEEP: Class attribute check
+                extensions.update(loader_class.SUPPORTED_EXTENSIONS)
+            else:
+                loader_instance = loader_class()
+                extensions.update(loader_instance.supported_extensions)
         return extensions
 
     @classmethod

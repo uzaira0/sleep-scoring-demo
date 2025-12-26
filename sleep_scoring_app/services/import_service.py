@@ -13,15 +13,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
-from PyQt6.QtCore import QObject, pyqtSignal
 
-from sleep_scoring_app.core.constants import (
-    ActivityColumn,
-    ActivityDataPreference,
-    DatabaseColumn,
-    DatabaseTable,
-    ImportStatus,
-)
+from sleep_scoring_app.core.constants import DatabaseColumn, DatabaseTable, ImportStatus
 from sleep_scoring_app.core.exceptions import (
     DatabaseError,
     ErrorCodes,
@@ -30,6 +23,9 @@ from sleep_scoring_app.core.exceptions import (
 )
 from sleep_scoring_app.core.validation import InputValidator
 from sleep_scoring_app.data.database import DatabaseManager
+from sleep_scoring_app.services.csv_data_transformer import CSVDataTransformer
+from sleep_scoring_app.services.file_format_detector import FileFormatDetector
+from sleep_scoring_app.services.import_progress_tracker import ImportProgress
 from sleep_scoring_app.services.nonwear_service import NonwearDataService
 
 if TYPE_CHECKING:
@@ -42,86 +38,24 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class ImportProgress:
-    """Progress tracking for import operations."""
+class ImportService:
+    """
+    Service for importing CSV files into database with progress tracking.
 
-    def __init__(self, total_files: int = 0, total_records: int = 0) -> None:
-        self.total_files = total_files
-        self.processed_files = 0
-        self.total_records = total_records
-        self.processed_records = 0
-        self.current_file = ""
-        self.errors: list[str] = []
-        self.warnings: list[str] = []
-        self.skipped_files: list[str] = []
-        self.imported_files: list[str] = []
-        self.info_messages: list[str] = []
-
-        # Separate tracking for nonwear data
-        self.total_nonwear_files = 0
-        self.processed_nonwear_files = 0
-        self.current_nonwear_file = ""
-        self.imported_nonwear_files: list[str] = []
-
-    def add_info(self, message: str) -> None:
-        """Add an informational message to the progress."""
-        self.info_messages.append(message)
-
-    @property
-    def file_progress_percent(self) -> float:
-        try:
-            if self.total_files == 0:
-                return 0.0
-            return (self.processed_files / self.total_files) * 100
-        except (TypeError, AttributeError):
-            # Handle mock objects during testing
-            return 0.0
-
-    @property
-    def record_progress_percent(self) -> float:
-        try:
-            if self.total_records == 0:
-                return 0.0
-            return (self.processed_records / self.total_records) * 100
-        except (TypeError, AttributeError):
-            # Handle mock objects during testing
-            return 0.0
-
-    @property
-    def nonwear_progress_percent(self) -> float:
-        try:
-            if self.total_nonwear_files == 0:
-                return 0.0
-            return (self.processed_nonwear_files / self.total_nonwear_files) * 100
-        except (TypeError, AttributeError):
-            # Handle mock objects during testing
-            return 0.0
-
-    def add_error(self, error: str) -> None:
-        self.errors.append(error)
-        logger.error(error)
-
-    def add_warning(self, warning: str) -> None:
-        self.warnings.append(warning)
-        logger.warning(warning)
-
-
-class ImportService(QObject):
-    """Service for importing CSV files into database with progress tracking."""
-
-    # Signals for progress tracking
-    progress_updated = pyqtSignal(object)  # ImportProgress object
-    nonwear_progress_updated = pyqtSignal(object)  # ImportProgress object (for nonwear progress)
-    file_started = pyqtSignal(str)  # filename
-    file_completed = pyqtSignal(str, bool)  # filename, success
-    import_completed = pyqtSignal(object)  # ImportProgress object
+    NOTE: This is a headless service. For Qt signal-based progress tracking,
+    wrap this service with a Qt adapter in the ui/ layer or use the
+    progress_callback parameter in import methods.
+    """
 
     def __init__(self, database_manager: DatabaseManager | None = None) -> None:
-        super().__init__()
         self.db_manager = database_manager or DatabaseManager()
         self.nonwear_service = NonwearDataService(self.db_manager)
         self.batch_size = 1000  # Records per batch for large files
         self.max_file_size = 100 * 1024 * 1024  # 100MB limit
+
+        # Initialize delegate services
+        self.file_format_detector = FileFormatDetector()
+        self.csv_transformer = CSVDataTransformer(max_file_size=self.max_file_size)
 
     def calculate_file_hash(self, file_path: Path) -> str:
         """Calculate SHA256 hash of file for change detection."""
@@ -163,35 +97,28 @@ class ImportService(QObject):
             participant_key = participant_info.participant_key
             current_hash = self.calculate_file_hash(file_path)
 
-            # Check if file exists in registry using PARTICIPANT_KEY
-            with self.db_manager._get_connection() as conn:
-                cursor = conn.execute(
-                    f"""
-                    SELECT {DatabaseColumn.FILE_HASH}, {DatabaseColumn.STATUS}, {DatabaseColumn.FILENAME}
-                    FROM {DatabaseTable.FILE_REGISTRY}
-                    WHERE {DatabaseColumn.PARTICIPANT_KEY} = ?
-                    """,
-                    (participant_key,),
-                )
-                result = cursor.fetchone()
+            # Check if file exists in registry using PARTICIPANT_KEY via repository
+            exists, stored_hash, status, existing_filename = self.db_manager.file_registry.check_file_exists_by_participant_key(participant_key)
 
-                if result is None:
-                    return True, "New participant data"
+            if not exists:
+                return True, "New participant data"
 
-                stored_hash, status, existing_filename = result
+            # If it's a different file for same participant, check if it's newer
+            if existing_filename != file_path.name:
+                logger.info("Found different file for participant %s: %s vs %s", participant_key, existing_filename, file_path.name)
+                return True, "Different file for participant"
 
-                # If it's a different file for same participant, check if it's newer
-                if existing_filename != file_path.name:
-                    logger.info("Found different file for participant %s: %s vs %s", participant_key, existing_filename, file_path.name)
-                    return True, "Different file for participant"
+            if stored_hash != current_hash:
+                return True, "File changed"
 
-                if stored_hash != current_hash:
-                    return True, "File changed"
-                if status == ImportStatus.ERROR:
-                    return True, "Previous import failed"
-                return False, "Already imported"
+            from sleep_scoring_app.core.constants import ImportStatus
 
-        except (DatabaseError, OSError, ValidationError) as e:
+            if status == ImportStatus.ERROR:
+                return True, "Previous import failed"
+
+            return False, "Already imported"
+
+        except (DatabaseError, OSError, ValidationError, Exception) as e:
             logger.warning("Error checking import status for %s: %s", file_path, e)
             return True, "Import check failed"
 
@@ -222,14 +149,18 @@ class ImportService(QObject):
             # Check file size
             file_size = validated_path.stat().st_size
             if file_size > self.max_file_size:
-                error_msg = f"File {filename} too large: {file_size / 1024 / 1024:.1f}MB > {self.max_file_size / 1024 / 1024:.1f}MB"
+                size_mb = file_size / 1024 / 1024
+                limit_mb = self.max_file_size / 1024 / 1024
+                error_msg = (
+                    f"File {filename} exceeds size limit: {size_mb:.1f}MB > {limit_mb:.1f}MB. Please split the file or increase the size limit."
+                )
+                logger.error(error_msg)
                 if progress:
                     progress.add_error(error_msg)
                 return False
 
             if progress:
                 progress.current_file = filename
-                self.file_started.emit(filename)
 
             # Extract participant info
             participant_info = self.extract_participant_info(validated_path)
@@ -237,36 +168,60 @@ class ImportService(QObject):
             # Calculate file hash
             file_hash = self.calculate_file_hash(validated_path)
 
-            # Load and validate CSV
-            df = self._load_and_validate_csv(validated_path, skip_rows)
+            # Load and validate CSV using transformer
+            df = self.csv_transformer.load_csv(validated_path, skip_rows)
             if df is None or df.empty:
-                error_msg = f"Failed to load CSV data from {filename}"
+                error_msg = f"File {filename} is empty or contains no valid data rows. Please check that the file has data after row {skip_rows}."
+                logger.error(error_msg)
                 if progress:
                     progress.add_error(error_msg)
                 return False
 
-            # Find required columns (use custom columns if provided)
-            date_col, time_col, activity_col, extra_cols = self._identify_columns(df, custom_columns)
-            if not all([date_col, activity_col]):  # time_col can be None if datetime is combined
-                error_msg = f"Required columns not found in {filename}"
+            # Find required columns using transformer
+            column_mapping = self.csv_transformer.identify_columns(df, custom_columns)
+            if not column_mapping.is_valid:
+                # Build detailed error message about missing columns
+                missing_cols = []
+                if not column_mapping.date_col:
+                    missing_cols.append("date/datetime column")
+                if not column_mapping.activity_col:
+                    missing_cols.append("activity count column")
+
+                available_cols = ", ".join(list(df.columns)[:10])  # Show first 10 columns
+                if len(df.columns) > 10:
+                    available_cols += f"... ({len(df.columns)} total)"
+
+                error_msg = (
+                    f"File {filename}: Required columns not found. "
+                    f"Missing: {', '.join(missing_cols)}. "
+                    f"Available columns: {available_cols}. "
+                    f"Please check column mappings in Study Settings or use 'Generic CSV' preset to configure custom columns."
+                )
                 logger.error("Column identification failed for %s:", filename)
                 logger.error("  Available columns: %s", list(df.columns))
-                logger.error("  Found date_col: %s", date_col)
-                logger.error("  Found time_col: %s", time_col)
-                logger.error("  Found activity_col: %s", activity_col)
+                logger.error("  Found date_col: %s", column_mapping.date_col)
+                logger.error("  Found time_col: %s", column_mapping.time_col)
+                logger.error("  Found activity_col: %s", column_mapping.activity_col)
                 if progress:
                     progress.add_error(error_msg)
                 return False
 
             # Type guard: ensure required columns are not None after validation
             # Note: time_col can be None if datetime is combined in date_col
-            assert date_col is not None
-            assert activity_col is not None
+            assert column_mapping.date_col is not None
+            assert column_mapping.activity_col is not None
 
-            # Process timestamps
-            timestamps = self._process_timestamps(df, date_col, time_col)
+            # Process timestamps using transformer
+            timestamps = self.csv_transformer.process_timestamps(df, column_mapping.date_col, column_mapping.time_col)
             if timestamps is None:
-                error_msg = f"Failed to process timestamps in {filename}"
+                error_msg = (
+                    f"File {filename}: Failed to parse timestamps. "
+                    f"Date column '{column_mapping.date_col}' "
+                    f"{'and time column ' + repr(column_mapping.time_col) if column_mapping.time_col else ''} "
+                    f"may have invalid date/time format. "
+                    f"Please check that dates are in a standard format (e.g., YYYY-MM-DD, MM/DD/YYYY)."
+                )
+                logger.error(error_msg)
                 if progress:
                     progress.add_error(error_msg)
                 return False
@@ -279,8 +234,8 @@ class ImportService(QObject):
                 validated_path,
                 df,
                 timestamps,
-                activity_col,
-                extra_cols,
+                column_mapping.activity_col,
+                column_mapping.extra_cols,
                 progress,
             )
 
@@ -288,10 +243,7 @@ class ImportService(QObject):
                 if progress:
                     progress.imported_files.append(filename)
                     progress.processed_files += 1
-                self.file_completed.emit(filename, True)
                 logger.info("Successfully imported %s", filename)
-            else:
-                self.file_completed.emit(filename, False)
 
             return success
 
@@ -299,288 +251,8 @@ class ImportService(QObject):
             error_msg = f"Failed to import {file_path}: {e}"
             if progress:
                 progress.add_error(error_msg)
-            self.file_completed.emit(str(file_path), False)
             logger.exception(error_msg)
             return False
-
-    def _load_and_validate_csv(self, file_path: Path, skip_rows: int) -> pd.DataFrame | None:
-        """Load and validate CSV file."""
-        try:
-            file_size = file_path.stat().st_size
-            if file_size > self.max_file_size:
-                logger.error("CSV file too large: %.1f MB > %.1f MB", file_size / 1024 / 1024, self.max_file_size / 1024 / 1024)
-                return None
-
-            df = pd.read_csv(file_path, skiprows=skip_rows)
-
-            if df.empty:
-                return None
-
-            if len(df) > 100000:
-                logger.warning("Large CSV file %s: %s rows", file_path.name, len(df))
-
-            return df
-
-        except pd.errors.EmptyDataError:
-            logger.exception("CSV file %s is empty", file_path.name)
-            return None
-        except pd.errors.ParserError:
-            logger.exception("CSV parsing error in %s", file_path.name)
-            return None
-        except Exception:
-            logger.exception("Error loading CSV %s", file_path.name)
-            return None
-
-    def _identify_columns(
-        self, df: pd.DataFrame, custom_columns: dict[str, str] | None = None
-    ) -> tuple[str | None, str | None, str | None, dict[str, str]]:
-        """
-        Identify required and optional columns in CSV.
-
-        Args:
-            df: DataFrame to identify columns in
-            custom_columns: Optional dict with keys 'date', 'time', 'activity', 'datetime_combined'
-                          If provided and datetime_combined is True, time will be None
-
-        Returns:
-            Tuple of (date_col, time_col, activity_col, extra_cols)
-
-        """
-        # Note: Do NOT strip columns here - we need to preserve the exact column names
-        columns = list(df.columns)
-
-        logger.debug("Available columns (raw): %s", columns)
-        logger.debug("Available columns (repr): %s", [repr(col) for col in columns])
-
-        # Use custom columns if provided
-        if custom_columns:
-            date_col = custom_columns.get("date")
-            time_col = custom_columns.get("time")  # Will be None if datetime_combined
-            activity_col = custom_columns.get("activity")
-            datetime_combined = custom_columns.get("datetime_combined", False)
-
-            # Validate custom columns exist in dataframe
-            if date_col and date_col not in columns:
-                logger.warning("Custom date column '%s' not found in CSV columns", date_col)
-                date_col = None
-            if time_col and time_col not in columns:
-                logger.warning("Custom time column '%s' not found in CSV columns", time_col)
-                time_col = None
-            if activity_col and activity_col not in columns:
-                logger.warning("Custom activity column '%s' not found in CSV columns", activity_col)
-                activity_col = None
-
-            # If datetime is combined, time_col should be None
-            if datetime_combined:
-                time_col = None
-
-            logger.info("Using custom columns: date=%s, time=%s, activity=%s, combined=%s", date_col, time_col, activity_col, datetime_combined)
-
-            # Use custom axis column mappings if provided, otherwise use standard detection
-            extra_cols = {}
-
-            # Get custom axis columns from the custom_columns dict
-            # User specifies which CSV column maps to each axis (Y=vertical, X=lateral, Z=forward)
-            custom_axis_y = custom_columns.get(ActivityDataPreference.AXIS_Y)
-            custom_axis_x = custom_columns.get(ActivityDataPreference.AXIS_X)
-            custom_axis_z = custom_columns.get(ActivityDataPreference.AXIS_Z)
-            custom_vm = custom_columns.get(ActivityDataPreference.VECTOR_MAGNITUDE)
-
-            # Validate and add custom axis columns
-            if custom_axis_y and custom_axis_y in columns:
-                extra_cols[DatabaseColumn.AXIS_Y] = custom_axis_y
-                logger.info("Using custom Y-Axis (vertical) column: %s", custom_axis_y)
-            if custom_axis_x and custom_axis_x in columns:
-                extra_cols[DatabaseColumn.AXIS_X] = custom_axis_x
-                logger.info("Using custom X-Axis (lateral) column: %s", custom_axis_x)
-            if custom_axis_z and custom_axis_z in columns:
-                extra_cols[DatabaseColumn.AXIS_Z] = custom_axis_z
-                logger.info("Using custom Z-Axis (forward) column: %s", custom_axis_z)
-            if custom_vm and custom_vm in columns:
-                extra_cols[DatabaseColumn.VECTOR_MAGNITUDE] = custom_vm
-                logger.info("Using custom Vector Magnitude column: %s", custom_vm)
-
-            # If no custom axis columns provided, fall back to standard detection
-            if not extra_cols:
-                extra_cols = self._find_extra_columns(columns)
-
-            return date_col, time_col, activity_col, extra_cols
-
-        # Find DATE column - try multiple variations
-        # First check for combined datetime column (exact match)
-        date_col = None
-        time_col = None
-        datetime_combined = False
-
-        for col in columns:
-            col_lower = col.lower().strip()
-            if col_lower in ("datetime", "timestamp"):
-                date_col = col
-                datetime_combined = True
-                logger.debug("Found combined datetime column: '%s'", col)
-                break
-
-        # If no combined datetime, look for separate date column
-        if date_col is None:
-            date_patterns = ["date", "datum", "day"]
-            for col in columns:
-                col_lower = col.lower().strip()
-                for pattern in date_patterns:
-                    if pattern in col_lower:
-                        date_col = col
-                        logger.debug("Found date column: '%s' (repr: %r, matched pattern: '%s')", col, col, pattern)
-                        break
-                if date_col:
-                    break
-
-        # Find TIME column - only if not using combined datetime
-        if not datetime_combined:
-            time_patterns = [
-                "time",
-                "tijd",
-                "hour",
-            ]  # Removed the space pattern since we check stripped versions
-            for col in columns:
-                col_lower = col.lower().strip()
-                for pattern in time_patterns:
-                    if pattern in col_lower:
-                        time_col = col
-                        logger.debug("Found time column: '%s' (repr: %r, matched pattern: '%s')", col, col, pattern)
-                        break
-                if time_col:
-                    break
-
-        # Find activity column (prioritize vector magnitude)
-        activity_col = None
-        for col in columns:
-            col_lower = col.lower().strip()
-            if any(
-                keyword in col_lower
-                for keyword in [
-                    ActivityColumn.VECTOR,
-                    ActivityColumn.MAGNITUDE,
-                    ActivityColumn.VM,
-                    ActivityColumn.VECTORMAGNITUDE,
-                ]
-            ):
-                activity_col = col
-                logger.debug("Found activity column: '%s' (repr: %r, vector magnitude)", col, col)
-                break
-
-        # Fallback to other activity columns (only generic patterns, not axis-specific)
-        if activity_col is None:
-            for col in columns:
-                col_lower = col.lower().strip()
-                if any(
-                    keyword in col_lower
-                    for keyword in [
-                        ActivityColumn.ACTIVITY,
-                        ActivityColumn.COUNT,
-                    ]
-                ):
-                    activity_col = col
-                    logger.debug("Found activity column: '%s' (repr: %r, fallback)", col, col)
-                    break
-
-        # Find extra columns (only vector magnitude - axis columns must be user-specified)
-        extra_cols = self._find_extra_columns(columns)
-
-        return date_col, time_col, activity_col, extra_cols
-
-    def _find_extra_columns(self, columns: list[str]) -> dict[str, str]:
-        """
-        Find axis and vector magnitude columns with common naming patterns.
-
-        Auto-detects columns with standard naming conventions:
-        - Y-Axis (vertical): axis_y, axis1, y
-        - X-Axis (lateral): axis_x, axis2, x
-        - Z-Axis (forward): axis_z, axis3, z
-        - Vector Magnitude: vector_magnitude, vm, vector magnitude
-        """
-        extra_cols = {}
-        for col in columns:
-            col_lower = col.lower().strip()
-
-            # Auto-detect Y-Axis (vertical) - ActiGraph Axis1
-            if DatabaseColumn.AXIS_Y not in extra_cols:
-                if col_lower in ("axis_y", "axis1", "y") or col_lower == "axis 1":
-                    extra_cols[DatabaseColumn.AXIS_Y] = col
-
-            # Auto-detect X-Axis (lateral) - ActiGraph Axis2
-            if DatabaseColumn.AXIS_X not in extra_cols:
-                if col_lower in ("axis_x", "axis2", "x") or col_lower == "axis 2":
-                    extra_cols[DatabaseColumn.AXIS_X] = col
-
-            # Auto-detect Z-Axis (forward) - ActiGraph Axis3
-            if DatabaseColumn.AXIS_Z not in extra_cols:
-                if col_lower in ("axis_z", "axis3", "z") or col_lower == "axis 3":
-                    extra_cols[DatabaseColumn.AXIS_Z] = col
-
-            # Auto-detect Vector Magnitude
-            if DatabaseColumn.VECTOR_MAGNITUDE not in extra_cols:
-                if any(keyword in col_lower for keyword in [ActivityColumn.VECTOR, ActivityColumn.MAGNITUDE, "vm", "vectormagnitude"]):
-                    extra_cols[DatabaseColumn.VECTOR_MAGNITUDE] = col
-
-        return extra_cols
-
-    def _process_timestamps(self, df: pd.DataFrame, date_col: str, time_col: str | None) -> list[str] | None:
-        """
-        Process date and time columns into ISO timestamps.
-
-        Args:
-            df: DataFrame containing the data
-            date_col: Column name for date (or combined datetime if time_col is None)
-            time_col: Column name for time, or None if datetime is combined in date_col
-
-        """
-        try:
-            # Verify date column exists
-            if date_col not in df.columns:
-                logger.error("Date column '%s' not found in DataFrame. Available columns: %s", date_col, list(df.columns))
-                return None
-
-            # Handle combined datetime vs separate date/time columns
-            if time_col is None:
-                # Combined datetime in single column
-                datetime_strings = df[date_col].astype(str)
-                logger.debug("Using combined datetime column: %s", date_col)
-            else:
-                # Separate date and time columns
-                if time_col not in df.columns:
-                    logger.error("Time column '%s' not found in DataFrame. Available columns: %s", time_col, list(df.columns))
-                    return None
-                datetime_strings = df[date_col].astype(str) + " " + df[time_col].astype(str)
-
-            # Debug: show sample data
-            logger.debug("Sample datetime strings: %s", datetime_strings.head(3).tolist())
-
-            # Try different datetime parsing methods
-            try:
-                timestamps = pd.to_datetime(datetime_strings)
-            except (ValueError, TypeError, pd.errors.ParserError) as parse_error:
-                logger.warning("Standard datetime parsing failed: %s", parse_error)
-                # Try with different format inference
-                try:
-                    timestamps = pd.to_datetime(datetime_strings, infer_datetime_format=True)
-                except Exception as infer_error:
-                    logger.exception("Inferred datetime parsing also failed: %s", infer_error)
-                    return None
-
-            # Convert to ISO format strings
-            iso_timestamps = [ts.isoformat() for ts in timestamps]
-
-            # Validate intervals (should be roughly 1 minute)
-            if len(iso_timestamps) > 1:
-                first_interval = timestamps.iloc[1] - timestamps.iloc[0]
-                if abs(first_interval.total_seconds() - 60) > 30:  # Allow 30s tolerance
-                    logger.warning("Data intervals may not be exactly 1 minute: %s", first_interval)
-
-            logger.debug("Successfully processed %s timestamps", len(iso_timestamps))
-            return iso_timestamps
-
-        except Exception:
-            logger.exception("Failed to process timestamps")
-            return None
 
     def _import_data_transaction(
         self,
@@ -595,13 +267,19 @@ class ImportService(QObject):
         progress: ImportProgress | None,
     ) -> bool:
         """Import data within a database transaction."""
+        from sleep_scoring_app.data.repositories.base_repository import BaseRepository
+
+        temp_repo = BaseRepository(self.db_manager.db_path, self.db_manager._validate_table_name, self.db_manager._validate_column_name)
         try:
-            with self.db_manager._get_connection() as conn:
+            with temp_repo._get_connection() as conn:
                 # Begin transaction
                 conn.execute("BEGIN TRANSACTION")
 
                 try:
                     # Register file first
+                    # Extract just the date portion (YYYY-MM-DD) from timestamps for date_range fields
+                    date_start = timestamps[0].split("T")[0] if timestamps else None
+                    date_end = timestamps[-1].split("T")[0] if timestamps else None
                     self._register_file(
                         conn,
                         filename,
@@ -609,8 +287,8 @@ class ImportService(QObject):
                         file_hash,
                         file_path,
                         len(df),
-                        timestamps[0] if timestamps else None,
-                        timestamps[-1] if timestamps else None,
+                        date_start,
+                        date_end,
                     )
 
                     # Delete existing data if reimporting
@@ -648,17 +326,56 @@ class ImportService(QObject):
                         )
                         conn.commit()
                         return True
+
+                    # IMP-01 FIX: Update status to FAILED before rollback
+                    # This ensures status is correct even if rollback fails
                     conn.rollback()
+                    self._mark_file_as_failed(filename)
                     return False
 
-                except Exception:
+                except Exception as e:
                     conn.rollback()
-                    logger.exception("Transaction failed for %s", filename)
+                    # IMP-01 FIX: Mark file as failed after rollback
+                    self._mark_file_as_failed(filename)
+                    error_msg = f"Database transaction failed for {filename}: {e}"
+                    logger.exception(error_msg)
+                    if progress:
+                        progress.add_error(error_msg)
                     return False
 
-        except Exception:
-            logger.exception("Database connection failed for %s", filename)
+        except Exception as e:
+            # IMP-01 FIX: Mark file as failed even on connection error
+            self._mark_file_as_failed(filename)
+            error_msg = f"Database connection failed for {filename}: {e}"
+            logger.exception(error_msg)
+            if progress:
+                progress.add_error(error_msg)
             return False
+
+    def _mark_file_as_failed(self, filename: str) -> None:
+        """
+        Mark a file as FAILED in the registry after import failure.
+
+        IMP-01 FIX: This ensures files don't get stuck in IMPORTING status
+        even if rollback fails or connection is lost.
+        """
+        from sleep_scoring_app.data.repositories.base_repository import BaseRepository
+
+        temp_repo = BaseRepository(self.db_manager.db_path, self.db_manager._validate_table_name, self.db_manager._validate_column_name)
+        try:
+            with temp_repo._get_connection() as conn:
+                conn.execute(
+                    f"""
+                    UPDATE {DatabaseTable.FILE_REGISTRY}
+                    SET {DatabaseColumn.STATUS} = ?
+                    WHERE {DatabaseColumn.FILENAME} = ? AND {DatabaseColumn.STATUS} = ?
+                    """,
+                    (ImportStatus.FAILED, filename, ImportStatus.IMPORTING),
+                )
+                conn.commit()
+                logger.info("Marked file '%s' as FAILED after import error", filename)
+        except Exception as e:
+            logger.warning("Could not update file status to FAILED for '%s': %s", filename, e)
 
     def _register_file(
         self,
@@ -756,9 +473,15 @@ class ImportService(QObject):
                     if DatabaseColumn.VECTOR_MAGNITUDE in extra_cols and extra_cols[DatabaseColumn.VECTOR_MAGNITUDE] in df.columns:
                         value = df[extra_cols[DatabaseColumn.VECTOR_MAGNITUDE]].iloc[i]
                         vector_magnitude = float(value) if not pd.isna(value) else None
-                    elif axis_x_value is not None and axis_y_value is not None and axis_z_value is not None:
+
+                    # IMP-03 FIX: If VM column exists but has NaN, fall back to calculation from axes
+                    # This ensures we always try to calculate VM when possible
+                    if vector_magnitude is None and axis_x_value is not None and axis_y_value is not None and axis_z_value is not None:
                         # Calculate vector magnitude from X, Y, Z: sqrt(x^2 + y^2 + z^2)
                         vector_magnitude = math.sqrt(axis_x_value**2 + axis_y_value**2 + axis_z_value**2)
+                        # Log this fallback once per batch (not per row to avoid spam)
+                        if i == start_idx and progress:
+                            progress.add_warning(f"File {filename}: Vector Magnitude column missing or empty, calculated from axis values (X, Y, Z)")
 
                     # Base record with PARTICIPANT_KEY and individual components
                     record = [
@@ -796,7 +519,6 @@ class ImportService(QObject):
                     batch_count += 1
                     if progress:
                         progress.processed_records += len(batch_data)
-                        self.progress_updated.emit(progress)
 
             return True
 
@@ -812,6 +534,7 @@ class ImportService(QObject):
         progress_callback: Callable[[ImportProgress], None] | None = None,
         include_nonwear: bool = False,
         custom_columns: dict[str, str] | None = None,
+        cancellation_check: Callable[[], bool] | None = None,
     ) -> ImportProgress:
         """Import all CSV files from a directory."""
         try:
@@ -846,6 +569,12 @@ class ImportService(QObject):
 
             # Import files
             for csv_file in valid_files:
+                # Check for cancellation before processing each file
+                if cancellation_check and cancellation_check():
+                    logger.info("Import cancelled by user after %d files", progress.processed_files)
+                    progress.add_warning("Import cancelled by user")
+                    break
+
                 try:
                     self.import_csv_file(csv_file, progress, skip_rows, force_reimport, custom_columns)
 
@@ -864,7 +593,6 @@ class ImportService(QObject):
 
             # Complete
             progress.processed_files = len(valid_files)
-            self.import_completed.emit(progress)
 
             logger.info(
                 "Import completed: %s files imported, %s skipped, %s errors",
@@ -887,6 +615,7 @@ class ImportService(QObject):
         force_reimport: bool = False,
         progress_callback: Callable[[ImportProgress], None] | None = None,
         custom_columns: dict[str, str] | None = None,
+        cancellation_check: Callable[[], bool] | None = None,
     ) -> ImportProgress:
         """Import a list of CSV files directly."""
         try:
@@ -916,6 +645,12 @@ class ImportService(QObject):
 
             # Import files
             for csv_file in valid_files:
+                # Check for cancellation before processing each file
+                if cancellation_check and cancellation_check():
+                    logger.info("Import cancelled by user after %d files", progress.processed_files)
+                    progress.add_warning("Import cancelled by user")
+                    break
+
                 try:
                     self.import_csv_file(csv_file, progress, skip_rows, force_reimport, custom_columns)
 
@@ -927,7 +662,6 @@ class ImportService(QObject):
 
             # Complete
             progress.processed_files = len(valid_files)
-            self.import_completed.emit(progress)
 
             logger.info(
                 "Import completed: %s files imported, %s skipped, %s errors",
@@ -946,34 +680,7 @@ class ImportService(QObject):
     def get_import_summary(self) -> dict[str, Any]:
         """Get summary of imported files."""
         try:
-            with self.db_manager._get_connection() as conn:
-                cursor = conn.execute(
-                    f"""
-                    SELECT
-                        COUNT(*) as total_files,
-                        SUM({DatabaseColumn.TOTAL_RECORDS}) as total_records,
-                        COUNT(CASE WHEN {DatabaseColumn.STATUS} = ? THEN 1 END) as imported_files,
-                        COUNT(CASE WHEN {DatabaseColumn.STATUS} = ? THEN 1 END) as error_files
-                    FROM {DatabaseTable.FILE_REGISTRY}
-                """,
-                    (ImportStatus.IMPORTED, ImportStatus.ERROR),
-                )
-
-                result = cursor.fetchone()
-                if result:
-                    return {
-                        "total_files": result[0],
-                        "total_records": result[1] or 0,
-                        "imported_files": result[2],
-                        "error_files": result[3],
-                    }
-                return {
-                    "total_files": 0,
-                    "total_records": 0,
-                    "imported_files": 0,
-                    "error_files": 0,
-                }
-
+            return self.db_manager.file_registry.get_import_summary()
         except Exception:
             logger.exception("Failed to get import summary")
             return {
@@ -998,7 +705,6 @@ class ImportService(QObject):
                 try:
                     if progress:
                         progress.current_nonwear_file = nonwear_file.name
-                        self.nonwear_progress_updated.emit(progress)
 
                     periods = self.nonwear_service.load_nonwear_sensor_periods(nonwear_file)
                     filename = nonwear_file.name
@@ -1008,13 +714,11 @@ class ImportService(QObject):
                         progress.imported_nonwear_files.append(nonwear_file.name)
                         progress.processed_nonwear_files += 1
                         progress.add_info(f"Imported {len(periods)} nonwear sensor periods from {nonwear_file.name}")
-                        self.nonwear_progress_updated.emit(progress)
 
                 except (OSError, PermissionError, pd.errors.ParserError, ValueError) as e:
                     if progress:
                         progress.processed_nonwear_files += 1
                         progress.add_error(f"Failed to import nonwear sensor file {nonwear_file.name}: {e}")
-                        self.nonwear_progress_updated.emit(progress)
 
             logger.info("Nonwear sensor data import completed: %s sensor files", len(nonwear_files))
 
@@ -1034,7 +738,6 @@ class ImportService(QObject):
                 try:
                     if progress:
                         progress.current_nonwear_file = nonwear_file.name
-                        self.nonwear_progress_updated.emit(progress)
 
                     periods = self.nonwear_service.load_nonwear_sensor_periods(nonwear_file)
                     filename = nonwear_file.name
@@ -1044,13 +747,11 @@ class ImportService(QObject):
                         progress.imported_nonwear_files.append(nonwear_file.name)
                         progress.processed_nonwear_files += 1
                         progress.add_info(f"Imported {len(periods)} nonwear sensor periods from {nonwear_file.name}")
-                        self.nonwear_progress_updated.emit(progress)
 
                 except (OSError, PermissionError, pd.errors.ParserError, ValueError) as e:
                     if progress:
                         progress.processed_nonwear_files += 1
                         progress.add_error(f"Failed to import nonwear sensor file {nonwear_file.name}: {e}")
-                        self.nonwear_progress_updated.emit(progress)
 
             logger.info("Nonwear sensor file import completed: %s files", len(file_paths))
 

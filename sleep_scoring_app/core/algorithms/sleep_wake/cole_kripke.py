@@ -47,6 +47,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from sleep_scoring_app.core.constants import AlgorithmType
 from sleep_scoring_app.core.pipeline.types import AlgorithmDataRequirement
 
 from .utils import find_datetime_column, scale_counts, validate_and_collapse_epochs
@@ -94,7 +95,7 @@ def cole_kripke_score(
 
     Args:
         df: DataFrame with datetime column and 'Axis1' activity column
-        use_actilife_scaling: If True (default), use ActiLife's pre-scaling (÷100, cap 300).
+        use_actilife_scaling: If True (default), use ActiLife's pre-scaling (/100, cap 300).
                               If False, use raw activity counts (original paper behavior).
                               Ignored if enable_count_scaling=True.
         enable_count_scaling: Apply custom count scaling for modern accelerometers (default: False)
@@ -109,7 +110,7 @@ def cole_kripke_score(
 
     Validation:
         - Finds datetime/date+time columns automatically
-        - Verifies 1-minute epochs (±1 second tolerance)
+        - Verifies 1-minute epochs (+/-1 second tolerance)
         - Collapses to 1-minute if epochs < 1 minute
         - Raises error if epochs > 1 minute
 
@@ -236,7 +237,7 @@ def score_activity_cole_kripke(
 
     Args:
         activity_data: List or array of Axis1 activity count values
-        use_actilife_scaling: If True (default), use ActiLife's pre-scaling (÷100, cap 300).
+        use_actilife_scaling: If True (default), use ActiLife's pre-scaling (/100, cap 300).
                               If False, use raw activity counts (original paper behavior).
                               Ignored if enable_count_scaling=True.
         enable_count_scaling: Apply custom count scaling for modern accelerometers (default: False)
@@ -414,10 +415,10 @@ class ColeKripkeAlgorithm:
     def identifier(self) -> str:
         """Unique algorithm identifier."""
         if self._variant_name == "count_scaled" or self._enable_count_scaling:
-            return "cole_kripke_1992_count_scaled"
+            return "cole_kripke_1992_count_scaled"  # Disabled variant, no enum defined
         if self._variant_name == "original":
-            return "cole_kripke_1992_original"
-        return "cole_kripke_1992_actilife"
+            return AlgorithmType.COLE_KRIPKE_1992_ORIGINAL
+        return AlgorithmType.COLE_KRIPKE_1992_ACTILIFE
 
     @property
     def requires_axis(self) -> str:

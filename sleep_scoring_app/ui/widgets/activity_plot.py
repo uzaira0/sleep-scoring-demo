@@ -6,22 +6,30 @@ Focuses on display and user interaction, with algorithms handled separately.
 
 import logging
 import traceback
+from collections.abc import Callable
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QKeyEvent
 
-from sleep_scoring_app.core.algorithms import NonwearAlgorithmFactory
-from sleep_scoring_app.core.constants import MarkerCategory, MarkerLimits, NonwearDataSource, UIColors
+from sleep_scoring_app.core.constants import (
+    ActivityDataPreference,
+    MarkerCategory,
+    MarkerLimits,
+    NonwearAlgorithm,
+    NonwearDataSource,
+    UIColors,
+)
 from sleep_scoring_app.core.dataclasses import (
     DailyNonwearMarkers,
     DailySleepMarkers,
     ManualNonwearPeriod,
     SleepPeriod,
 )
+from sleep_scoring_app.ui.widgets.marker_editor import MarkerEditor
 from sleep_scoring_app.ui.widgets.plot_algorithm_manager import PlotAlgorithmManager
 from sleep_scoring_app.ui.widgets.plot_marker_renderer import PlotMarkerRenderer
 from sleep_scoring_app.ui.widgets.plot_overlay_renderer import PlotOverlayRenderer
@@ -29,7 +37,10 @@ from sleep_scoring_app.ui.widgets.plot_state_serializer import PlotStateSerializ
 
 # Configure logging
 logger = logging.getLogger(__name__)
-from sleep_scoring_app.services.nonwear_service import NonwearPeriod
+
+if TYPE_CHECKING:
+    from sleep_scoring_app.services.nonwear_service import NonwearPeriod
+    from sleep_scoring_app.ui.protocols import AppStateInterface
 
 
 class TimeAxisItem(pg.AxisItem):
@@ -53,16 +64,66 @@ class TimeAxisItem(pg.AxisItem):
 class ActivityPlotWidget(pg.PlotWidget):
     """Activity plot widget with restricted pan/zoom and sleep markers."""
 
+    # Marker data change signals (for Redux dispatch via connector)
     sleep_markers_changed = pyqtSignal(DailySleepMarkers)  # Signal for daily sleep markers updates
     nonwear_markers_changed = pyqtSignal(DailyNonwearMarkers)  # Signal for nonwear markers updates
+
+    # Selection change signals (for Redux dispatch via connector)
+    sleep_period_selection_changed = pyqtSignal(int)  # Selected sleep period index changed
+    nonwear_selection_changed = pyqtSignal(int)  # Selected nonwear marker index changed
+
+    # UI feedback signals
     nonwear_marker_selected = pyqtSignal(object)  # Signal when a nonwear marker is selected (ManualNonwearPeriod or None)
     marker_limit_exceeded = pyqtSignal(str)  # Signal when marker limit exceeded
+    error_occurred = pyqtSignal(str)  # Signal when an error occurs that should be shown to user
 
-    def __init__(self, parent=None) -> None:
+    def __init__(
+        self,
+        main_window: "AppStateInterface",
+        parent=None,
+        *,
+        create_nonwear_algorithm: Callable[[str], Any] | None = None,
+        create_sleep_algorithm: Callable[[str, Any], Any] | None = None,
+        create_sleep_period_detector: Callable[[str], Any] | None = None,
+        get_default_sleep_algorithm_id: Callable[[], str] | None = None,
+        get_default_sleep_period_detector_id: Callable[[], str] | None = None,
+        get_choi_activity_column: Callable[[], str] | None = None,
+        get_algorithm_config: Callable[[], Any] | None = None,
+    ) -> None:
+        # Initialize basic attributes BEFORE super() so they exist for early signal/connector calls
+        self._active_marker_category = MarkerCategory.SLEEP  # SLEEP or NONWEAR
+        self.daily_sleep_markers = DailySleepMarkers()
+        self.marker_lines = []
+        self._daily_nonwear_markers = DailyNonwearMarkers()
+        self._nonwear_marker_lines = []
+        self.sleep_rule_markers = []
+        self.adjacent_day_marker_lines = []
+        self.adjacent_day_marker_labels = []
+        self.current_marker_being_placed = None
+        self._current_nonwear_marker_being_placed = None
+        self._marker_click_in_progress = False
+        self._marker_drag_in_progress = False
+
+        # Algorithm/service callbacks (injected by container)
+        self._create_nonwear_algorithm = create_nonwear_algorithm
+        self._create_sleep_algorithm = create_sleep_algorithm
+        self._create_sleep_period_detector = create_sleep_period_detector
+        self._get_default_sleep_algorithm_id = get_default_sleep_algorithm_id
+        self._get_default_sleep_period_detector_id = get_default_sleep_period_detector_id
+        self._get_choi_activity_column = get_choi_activity_column
+        self._get_algorithm_config = get_algorithm_config
+
+        # Initialize basic components needed by other methods early
+        self.marker_renderer = PlotMarkerRenderer(self)
+        self.overlay_renderer = PlotOverlayRenderer(self)
+        self.algorithm_manager = PlotAlgorithmManager(self)
+        self.state_serializer = PlotStateSerializer(self)
+
         # Create with custom time axis
         time_axis = TimeAxisItem(orientation="bottom")
         super().__init__(axisItems={"bottom": time_axis})
-        self.parent_window = parent  # Store reference to parent window
+        self.main_window = main_window
+        self.parent_window = parent  # Store reference to parent widget
 
         # Data boundaries
         self.data_start_time = None
@@ -72,24 +133,20 @@ class ActivityPlotWidget(pg.PlotWidget):
         self.max_vm_value = None  # Store the max vector magnitude value for consistent y-axis
         self.current_view_hours = 24
 
-        # Sleep markers (new extended system)
-        self.daily_sleep_markers = DailySleepMarkers()
-        self.marker_lines = []  # Visual line objects
-        self.markers_saved = False  # Track if markers have been saved permanently
-        self.current_marker_being_placed = None  # Track incomplete marker pairs
-        self.selected_marker_set_index = 1  # Currently selected marker set (1, 2, 3, or 4)
-        self._marker_click_in_progress = False  # Prevent double processing of marker clicks
+        # Selection state (local state, updated by PlotSelectionConnector from Redux)
+        # Widgets are DUMB: they emit signals, connectors dispatch to store
+        self._selected_marker_set_index = 1  # Currently selected sleep period (1-10)
+        self._selected_nonwear_marker_index = 0  # Currently selected nonwear marker (0=none, 1-10)
 
-        # Manual nonwear markers
-        self._daily_nonwear_markers = DailyNonwearMarkers()
-        self._nonwear_marker_lines = []  # Visual line objects for nonwear
-        self._nonwear_markers_saved = False  # Track if nonwear markers have been saved
-        self._current_nonwear_marker_being_placed = None  # Track incomplete nonwear marker
-        self._selected_nonwear_marker_index = 1  # Currently selected nonwear marker (1-10)
+        # Save state (local state, updated by PlotSelectionConnector from Redux)
+        self._sleep_markers_saved = True  # Whether sleep markers are saved
+        self._nonwear_markers_saved_state = True  # Whether nonwear markers are saved
+
+        # Visibility
         self._nonwear_markers_visible = True  # Visibility of nonwear markers
 
-        # Marker mode - determines which type of marker is placed on click
-        self._active_marker_category = MarkerCategory.SLEEP  # SLEEP or NONWEAR
+        # Marker editor FSM
+        self._marker_editor = MarkerEditor()
 
         # File info display
         self.file_info_label = None
@@ -100,6 +157,17 @@ class ActivityPlotWidget(pg.PlotWidget):
         self.main_48h_activity = None
         self.main_48h_sadeh_results = None
         self.main_48h_axis_y_data = None
+        self._cached_48h_vm_data = None
+        self.sadeh_results = None  # Current view Sadeh results
+
+        # Data arrays (initialized to None/empty, populated by set_data_and_restrictions)
+        self.x_data = None
+        self.activity_data = None
+        self.timestamps = None
+        self.activity_plot_item = None
+        self.nonwear_data = None
+        self.nonwear_regions = []  # Visual region objects for nonwear
+        self._algorithm_cache = {}
 
         # Setup plot appearance
         self._setup_plot_appearance()
@@ -107,17 +175,93 @@ class ActivityPlotWidget(pg.PlotWidget):
         # Connect event handlers
         self._setup_event_handlers()
 
-        # Initialize marker renderer (manages all marker operations)
-        self.marker_renderer = PlotMarkerRenderer(self)
+    def create_nonwear_algorithm(self, algorithm_id: str) -> Any:
+        """Create a nonwear algorithm via injected factory."""
+        if not self._create_nonwear_algorithm:
+            msg = "Missing nonwear algorithm factory callback"
+            raise RuntimeError(msg)
+        return self._create_nonwear_algorithm(algorithm_id)
 
-        # Initialize overlay renderer (manages nonwear/Choi overlays)
-        self.overlay_renderer = PlotOverlayRenderer(self)
+    def create_sleep_algorithm(self, algorithm_id: str, config: Any) -> Any:
+        """Create a sleep scoring algorithm via injected factory."""
+        if not self._create_sleep_algorithm:
+            msg = "Missing sleep algorithm factory callback"
+            raise RuntimeError(msg)
+        return self._create_sleep_algorithm(algorithm_id, config)
 
-        # Initialize algorithm manager (manages Sadeh/Choi algorithms and sleep rules)
-        self.algorithm_manager = PlotAlgorithmManager(self)
+    def create_sleep_period_detector(self, detector_id: str) -> Any:
+        """Create a sleep period detector via injected factory."""
+        if not self._create_sleep_period_detector:
+            msg = "Missing sleep period detector factory callback"
+            raise RuntimeError(msg)
+        return self._create_sleep_period_detector(detector_id)
 
-        # Initialize state serializer (manages state capture/restore)
-        self.state_serializer = PlotStateSerializer(self)
+    def get_default_sleep_algorithm_id(self) -> str:
+        """Get default sleep algorithm id via injected callback."""
+        if not self._get_default_sleep_algorithm_id:
+            msg = "Missing default sleep algorithm id callback"
+            raise RuntimeError(msg)
+        return self._get_default_sleep_algorithm_id()
+
+    def get_default_sleep_period_detector_id(self) -> str:
+        """Get default sleep period detector id via injected callback."""
+        if not self._get_default_sleep_period_detector_id:
+            msg = "Missing default sleep period detector id callback"
+            raise RuntimeError(msg)
+        return self._get_default_sleep_period_detector_id()
+
+    def get_choi_activity_column(self) -> str:
+        """Get Choi activity column via injected callback."""
+        if self._get_choi_activity_column:
+            return self._get_choi_activity_column()
+        return ActivityDataPreference.VECTOR_MAGNITUDE
+
+    def get_algorithm_config(self) -> Any:
+        """Get algorithm config via injected callback."""
+        if self._get_algorithm_config:
+            return self._get_algorithm_config()
+        return None
+
+    @property
+    def selected_marker_set_index(self) -> int:
+        """Get the currently selected sleep marker set index (local state)."""
+        return self._selected_marker_set_index
+
+    @selected_marker_set_index.setter
+    def selected_marker_set_index(self, value: int) -> None:
+        """Set selected sleep marker set index. Emits signal for connector to dispatch."""
+        if self._selected_marker_set_index != value:
+            self._selected_marker_set_index = value
+            self.sleep_period_selection_changed.emit(value)
+
+    def set_selected_marker_set_index_from_store(self, value: int) -> None:
+        """Update local state from Redux store (called by connector only)."""
+        self._selected_marker_set_index = value
+
+    @property
+    def selected_nonwear_marker_index(self) -> int:
+        """Get the currently selected nonwear marker index (local state)."""
+        return self._selected_nonwear_marker_index
+
+    @selected_nonwear_marker_index.setter
+    def selected_nonwear_marker_index(self, value: int) -> None:
+        """Set selected nonwear marker index. Emits signal for connector to dispatch."""
+        if self._selected_nonwear_marker_index != value:
+            self._selected_nonwear_marker_index = value
+            self.nonwear_selection_changed.emit(value)
+
+    def set_selected_nonwear_marker_index_from_store(self, value: int) -> None:
+        """Update local state from Redux store (called by connector only)."""
+        self._selected_nonwear_marker_index = value
+
+    @property
+    def nonwear_markers_saved(self) -> bool:
+        """Check if all nonwear markers are saved (local state)."""
+        return self._nonwear_markers_saved_state
+
+    def set_nonwear_markers_saved_from_store(self, saved: bool) -> None:
+        """Update local state from Redux store (called by connector only)."""
+        self._nonwear_markers_saved_state = saved
 
     def _setup_plot_appearance(self) -> None:
         """Configure plot appearance and styling with performance optimizations."""
@@ -147,7 +291,7 @@ class ActivityPlotWidget(pg.PlotWidget):
         # Performance optimizations for pyqtgraph
         # Enable OpenGL for better rendering performance if available
         try:
-            if hasattr(self.plotItem, "setUseOpenGL"):
+            if hasattr(self.plotItem, "setUseOpenGL"):  # KEEP: Optional PyQt feature
                 self.plotItem.setUseOpenGL(True)
         except AttributeError:
             # OpenGL not available, continue with software rendering
@@ -155,11 +299,11 @@ class ActivityPlotWidget(pg.PlotWidget):
 
         # Optimize rendering settings (check availability first)
         try:
-            if hasattr(self.plotItem, "setDownsampling"):
+            if hasattr(self.plotItem, "setDownsampling"):  # KEEP: Optional PyQt feature
                 self.plotItem.setDownsampling(mode="peak")  # Use peak downsampling for better performance
-            if hasattr(self.plotItem, "setClipToView"):
+            if hasattr(self.plotItem, "setClipToView"):  # KEEP: Optional PyQt feature
                 self.plotItem.setClipToView(True)  # Only render visible data
-            if hasattr(self.plotItem, "setAutoDownsample"):
+            if hasattr(self.plotItem, "setAutoDownsample"):  # KEEP: Optional PyQt feature
                 self.plotItem.setAutoDownsample(True)  # Enable automatic downsampling
         except AttributeError:
             # These optimization methods not available in this pyqtgraph version
@@ -167,7 +311,7 @@ class ActivityPlotWidget(pg.PlotWidget):
 
         # Reduce anti-aliasing for better performance (can be re-enabled if needed)
         try:
-            if hasattr(self.plotItem, "setAntialiasing"):
+            if hasattr(self.plotItem, "setAntialiasing"):  # KEEP: Optional PyQt feature
                 self.plotItem.setAntialiasing(False)
         except AttributeError:
             pass
@@ -179,6 +323,56 @@ class ActivityPlotWidget(pg.PlotWidget):
                 background-color: #fafbff;
             }
         """)
+
+    # ========== Save State Properties (local state, updated by connector) ==========
+    # Widgets are DUMB: local state is updated by PlotSelectionConnector from Redux.
+    # mark_*_dirty() methods emit signals, connector dispatches to store.
+
+    @property
+    def markers_saved(self) -> bool:
+        """Check if sleep markers are saved (local state)."""
+        return self._sleep_markers_saved
+
+    def set_sleep_markers_saved_from_store(self, saved: bool) -> None:
+        """Update local state from Redux store (called by connector only)."""
+        self._sleep_markers_saved = saved
+
+    @property
+    def _nonwear_markers_saved(self) -> bool:
+        """Check if nonwear markers are saved (local state)."""
+        return self._nonwear_markers_saved_state
+
+    def mark_sleep_markers_dirty(self) -> None:
+        """
+        Mark sleep markers as dirty. Emits signal for connector to dispatch.
+
+        NOTE: Local state is NOT set here. Redux is the single source of truth.
+        The MarkersConnector will sync Redux state back to widget after dispatch.
+        """
+        self.sleep_markers_changed.emit(self.daily_sleep_markers)
+
+    def mark_nonwear_markers_dirty(self) -> None:
+        """
+        Mark nonwear markers as dirty. Emits signal for connector to dispatch.
+
+        NOTE: Local state is NOT set here. Redux is the single source of truth.
+        The MarkersConnector will sync Redux state back to widget after dispatch.
+        """
+        self.nonwear_markers_changed.emit(self._daily_nonwear_markers)
+
+    def update_cursor_from_editor_mode(self) -> None:
+        """Update the cursor based on the current marker editor mode."""
+        self.setCursor(self._marker_editor.cursor)
+
+    def get_editor_status_text(self) -> str:
+        """
+        Get the status text from the marker editor FSM.
+
+        Returns:
+            Status message string describing the current editing mode
+
+        """
+        return self._marker_editor.status_text
 
     def _setup_event_handlers(self) -> None:
         """Setup event handlers for mouse and keyboard interaction."""
@@ -205,7 +399,7 @@ class ActivityPlotWidget(pg.PlotWidget):
         """Clean up widget resources to prevent memory leaks."""
         try:
             # Stop and cleanup mouse move timer
-            if hasattr(self, "_mouse_move_timer") and self._mouse_move_timer:
+            if self._mouse_move_timer:
                 self._mouse_move_timer.stop()
                 self._mouse_move_timer.timeout.disconnect()
                 self._mouse_move_timer.deleteLater()
@@ -213,14 +407,14 @@ class ActivityPlotWidget(pg.PlotWidget):
 
             # Disconnect signals to prevent reference cycles
             try:
-                if hasattr(self, "vb") and self.vb:
+                if self.vb:
                     self.vb.sigRangeChanged.disconnect()
             except (TypeError, RuntimeError):
                 # Signal already disconnected or object deleted
                 pass
 
             try:
-                if hasattr(self, "plotItem") and self.plotItem:
+                if self.plotItem:
                     scene = self.plotItem.scene()
                     if scene:
                         scene.sigMouseClicked.disconnect()
@@ -235,22 +429,22 @@ class ActivityPlotWidget(pg.PlotWidget):
             self.main_48h_activity = None
             self.main_48h_sadeh_results = None
             self.main_48h_axis_y_data = None
+            self._cached_48h_vm_data = None
             self._last_mouse_pos = None
 
             # Clear marker lines and sleep rule markers
-            if hasattr(self, "marker_lines"):
-                for line in self.marker_lines:
-                    try:
-                        if hasattr(line, "deleteLater"):
-                            line.deleteLater()
-                    except (RuntimeError, AttributeError):
-                        pass
-                self.marker_lines.clear()
+            for line in self.marker_lines:
+                try:
+                    if hasattr(line, "deleteLater"):  # KEEP: Qt cleanup duck typing
+                        line.deleteLater()
+                except (RuntimeError, AttributeError):
+                    pass
+            self.marker_lines.clear()
 
-            if hasattr(self, "sleep_rule_markers"):
+            if self.sleep_rule_markers:
                 for marker in self.sleep_rule_markers:
                     try:
-                        if hasattr(marker, "deleteLater"):
+                        if hasattr(marker, "deleteLater"):  # KEEP: Qt cleanup duck typing
                             marker.deleteLater()
                     except (RuntimeError, AttributeError):
                         pass
@@ -361,6 +555,7 @@ class ActivityPlotWidget(pg.PlotWidget):
             self.main_48h_timestamps = timestamps
             self.main_48h_activity = activity_data
             self.main_48h_axis_y_data = None  # Will be set when needed
+            self._cached_48h_vm_data = None  # Clear VM cache for fresh load
             logger.debug("Stored 48hr main data: %d timestamps", len(timestamps) if timestamps else 0)
 
         # Store column type for later reference
@@ -423,7 +618,7 @@ class ActivityPlotWidget(pg.PlotWidget):
         # Use the provided current_date for plot bounds
         if current_date is not None:
             target_date = current_date
-        elif hasattr(self, "x_data") and len(self.x_data) > 0:
+        elif self.x_data is not None and len(self.x_data) > 0:
             # Fallback to first timestamp if no current_date provided
             target_date = datetime.fromtimestamp(self.x_data[0])
         else:
@@ -450,7 +645,7 @@ class ActivityPlotWidget(pg.PlotWidget):
         end_time = expected_end.timestamp()
 
         # Set Y-axis boundaries based on actual data within view range
-        if hasattr(self, "activity_data") and self.activity_data and hasattr(self, "timestamps"):
+        if self.activity_data and self.timestamps:
             # Find data within the view range
             visible_data = []
             for i, ts in enumerate(self.timestamps):
@@ -478,6 +673,11 @@ class ActivityPlotWidget(pg.PlotWidget):
         # Redraw sleep markers in the new range
         self.redraw_markers()
 
+        # Also refresh sleep scoring rule arrows after view range change
+        selected_period = self.marker_renderer.get_selected_marker_period()
+        if selected_period and selected_period.is_complete:
+            self.apply_sleep_scoring_rules(selected_period)
+
         # Update file info label
         self._update_file_info_label()
 
@@ -485,17 +685,15 @@ class ActivityPlotWidget(pg.PlotWidget):
         """Update data and view without clearing sleep markers - for view mode switching."""
         self.current_view_hours = view_hours
 
-        # Keep the same data - we're always using 48hr data now
-        # Only update if not already set
-        if not hasattr(self, "timestamps") or len(timestamps) != len(self.timestamps):
-            # Convert timestamps to numeric values (optimized for performance)
-            self.timestamps = timestamps
-            # Use vectorized conversion for better performance with large datasets
-            if timestamps:
-                # Convert timestamps to numeric values directly (avoid numpy datetime corruption)
-                self.x_data = np.array([ts.timestamp() for ts in timestamps])
-            else:
-                self.x_data = np.array([])
+        # ALWAYS update timestamps - different dates have different timestamp values
+        # even if they have the same number of data points
+        self.timestamps = timestamps
+        # Invalidate the cached unix timestamps so marker snapping uses correct values
+        self._cached_unix_timestamps = None
+        if timestamps:
+            self.x_data = np.array([ts.timestamp() for ts in timestamps])
+        else:
+            self.x_data = np.array([])
 
         # Calculate expected time boundaries based on view mode (not actual data bounds)
         # This ensures consistent display regardless of data availability
@@ -532,10 +730,14 @@ class ActivityPlotWidget(pg.PlotWidget):
         # Set Y-axis boundaries based on actual data
         self.data_min_y = 0  # Always start at zero
 
-        # In update_data_and_view_only, we DON'T update max_vm_value
-        # because we don't know what type of data is being passed in
-        # Just keep using whatever data_max_y was already set
-        # (This preserves the Y-axis range when switching between VM and axis_y)
+        # Update Y-axis max based on actual data if not already set or if data changed
+        # This ensures the plot displays properly on first load
+        if activity_data is not None and len(activity_data) > 0:
+            current_max = max(activity_data) if hasattr(activity_data, "__iter__") else 100
+            # Only update if we don't have a valid max or if this is significantly different
+            if self.data_max_y <= 100 or current_max > self.data_max_y:
+                self.data_max_y = current_max * 1.5
+                logger.debug(f"Updated data_max_y to {self.data_max_y} based on data max {current_max}")
 
         # Always update the data (could be switching between VM and axis_y)
         self.activity_data = activity_data
@@ -545,11 +747,13 @@ class ActivityPlotWidget(pg.PlotWidget):
         if view_hours == 48:
             self.main_48h_timestamps = timestamps
             self.main_48h_activity = activity_data
+            # Also set axis_y timestamps for algorithm plotting (Sadeh needs this)
+            self.main_48h_axis_y_timestamps = timestamps
         # Don't clear axis_y cache - it's independent of what we're displaying
         logger.debug("Stored 48hr reference data: %d timestamps", len(timestamps) if timestamps else 0)
 
         # Check if we have an existing plot item to update
-        if hasattr(self, "activity_plot_item") and self.activity_plot_item is not None:
+        if self.activity_plot_item is not None:
             # Update existing plot item with new data
             self.activity_plot_item.setData(self.x_data, activity_data)
             logger.debug("Updated existing plot item with new activity data")
@@ -564,7 +768,7 @@ class ActivityPlotWidget(pg.PlotWidget):
             )
 
             # Run algorithms if needed
-            if not hasattr(self, "nonwear_data"):
+            if self.nonwear_data is None:
                 self.plot_algorithms()
 
         # Just update the view range based on the mode
@@ -591,6 +795,12 @@ class ActivityPlotWidget(pg.PlotWidget):
         if self.daily_sleep_markers.get_all_periods():
             self.redraw_markers()
 
+            # CRITICAL FIX: Also refresh sleep scoring rule arrows after view switch
+            # This ensures arrows are visible after switching between 24h/48h views
+            selected_period = self.marker_renderer.get_selected_marker_period()
+            if selected_period and selected_period.is_complete:
+                self.apply_sleep_scoring_rules(selected_period)
+
     def swap_activity_data(self, new_timestamps: list[datetime], new_activity_data: list[float], new_column_type: str) -> None:
         """
         Seamlessly swap activity data without triggering full plot recreation or state loss.
@@ -612,8 +822,12 @@ class ActivityPlotWidget(pg.PlotWidget):
         try:
             # Store current view state to preserve after swap
             current_view_range = self.vb.viewRange()
-            current_x_range = current_view_range[0]
-            current_view_range[1]
+            # Validate viewRange returned a valid structure
+            if not current_view_range or len(current_view_range) < 2:
+                logger.warning("viewRange returned invalid structure, using defaults")
+                current_x_range = [0, 86400]  # Default 24h range
+            else:
+                current_x_range = current_view_range[0] if current_view_range[0] else [0, 86400]
 
             # Convert new timestamps to numeric values for plot compatibility
             if new_timestamps:
@@ -642,7 +856,7 @@ class ActivityPlotWidget(pg.PlotWidget):
             # Just keep using whatever data_max_y was already set
 
             # Check if we have an existing activity plot item to update
-            if hasattr(self, "activity_plot_item") and self.activity_plot_item is not None:
+            if self.activity_plot_item is not None:
                 # Direct data update - this is the key to seamless swapping
                 self.activity_plot_item.setData(new_x_data, new_activity_data)
                 logger.debug("SEAMLESS SWAP: Updated existing plot item data directly")
@@ -671,13 +885,12 @@ class ActivityPlotWidget(pg.PlotWidget):
 
             # Always clear algorithm cache when activity data changes
             # This ensures correct algorithm results for the new activity source
-            if hasattr(self, "_algorithm_cache"):
-                self._algorithm_cache.clear()
-                logger.debug("SEAMLESS SWAP: Cleared algorithm cache for new activity data")
+            self._algorithm_cache.clear()
+            logger.debug("SEAMLESS SWAP: Cleared algorithm cache for new activity data")
 
             # Recalculate algorithms with new data
             # NonwearData system will handle its own updates if active
-            if hasattr(self, "nonwear_data"):
+            if self.nonwear_data is not None:
                 logger.debug("SEAMLESS SWAP: NonwearData system active, will update separately")
             self.plot_algorithms()
 
@@ -697,8 +910,13 @@ class ActivityPlotWidget(pg.PlotWidget):
             return
 
         current_range = self.vb.viewRange()
+        # Validate viewRange returned a valid structure
+        if not current_range or len(current_range) < 2:
+            return  # Can't enforce limits without valid range
         x_range = current_range[0]  # [xmin, xmax]
         y_range = current_range[1]  # [ymin, ymax]
+        if not x_range or len(x_range) < 2 or not y_range or len(y_range) < 2:
+            return  # Invalid range structure
 
         # Calculate allowed boundaries based on display mode
         if self.current_view_hours == 24:
@@ -753,13 +971,25 @@ class ActivityPlotWidget(pg.PlotWidget):
 
         if x_changed or y_changed:
             self.vb.blockSignals(True)
-            self.vb.setRange(xRange=[x_min, x_max], yRange=[y_min, y_max], padding=0)
-            self.vb.blockSignals(False)
+            try:
+                self.vb.setRange(xRange=[x_min, x_max], yRange=[y_min, y_max], padding=0)
+            finally:
+                self.vb.blockSignals(False)
 
-    def keyPressEvent(self, event) -> None:  # Qt naming convention
+    def keyPressEvent(self, ev: QKeyEvent) -> None:  # Qt naming convention
         """Handle keyboard events for marker adjustment and clearing."""
-        key = event.key()
+        key = ev.key()
         logger.debug(f"Key pressed: {key} (C={Qt.Key.Key_C}, Delete={Qt.Key.Key_Delete})")
+
+        # Handle Escape key via FSM
+        if self._marker_editor.on_key_press(key):
+            logger.debug("Escape key handled by MarkerEditor FSM - cancelled current operation")
+            # Cancel any incomplete markers
+            if self._active_marker_category == MarkerCategory.SLEEP:
+                self.cancel_incomplete_marker()
+            elif self._active_marker_category == MarkerCategory.NONWEAR:
+                self.cancel_incomplete_nonwear_marker()
+            return
 
         # Handle clear marker shortcuts and incomplete marker cancellation (C and Delete)
         if key in (Qt.Key.Key_C, Qt.Key.Key_Delete):
@@ -797,9 +1027,9 @@ class ActivityPlotWidget(pg.PlotWidget):
                 elif key == Qt.Key.Key_D:  # Move offset right
                     self.adjust_selected_marker("offset", 60)  # +1 minute
                 else:
-                    super().keyPressEvent(event)
+                    super().keyPressEvent(ev)
             else:
-                super().keyPressEvent(event)
+                super().keyPressEvent(ev)
         elif self._active_marker_category == MarkerCategory.NONWEAR:
             # Handle marker adjustment for currently selected nonwear marker
             selected_period = self.get_selected_nonwear_period()
@@ -813,11 +1043,11 @@ class ActivityPlotWidget(pg.PlotWidget):
                 elif key == Qt.Key.Key_D:  # Move end right
                     self.adjust_selected_nonwear_marker("end", 60)  # +1 minute
                 else:
-                    super().keyPressEvent(event)
+                    super().keyPressEvent(ev)
             else:
-                super().keyPressEvent(event)
+                super().keyPressEvent(ev)
         else:
-            super().keyPressEvent(event)
+            super().keyPressEvent(ev)
 
     def adjust_main_sleep_marker(self, marker_type: str, seconds_delta: int) -> None:
         """Adjust main sleep marker by specified number of seconds."""
@@ -836,7 +1066,9 @@ class ActivityPlotWidget(pg.PlotWidget):
         # Calculate new timestamp
         new_timestamp = current_timestamp + seconds_delta
 
-        # Ensure timestamp is within data bounds
+        # Ensure timestamp is within data bounds (check for None first)
+        if self.data_start_time is None or self.data_end_time is None:
+            return
         if not (self.data_start_time <= new_timestamp <= self.data_end_time):
             return
 
@@ -857,7 +1089,7 @@ class ActivityPlotWidget(pg.PlotWidget):
         # Update classifications and redraw
         self.daily_sleep_markers.update_classifications()
         self.redraw_markers()
-        self.sleep_markers_changed.emit(self.daily_sleep_markers)
+        self.mark_sleep_markers_dirty()  # Mark state as dirty via Redux
 
     def move_marker_to_timestamp(self, marker_type: str, target_timestamp: float, period_slot: int | None = None) -> bool:
         """
@@ -875,7 +1107,10 @@ class ActivityPlotWidget(pg.PlotWidget):
         # Snap to nearest minute
         target_timestamp = round(target_timestamp / 60) * 60
 
-        # Ensure timestamp is within data bounds
+        # Ensure timestamp is within data bounds (check for None first)
+        if self.data_start_time is None or self.data_end_time is None:
+            logger.warning("Cannot move marker - data bounds not yet initialized")
+            return False
         if not (self.data_start_time <= target_timestamp <= self.data_end_time):
             logger.warning(f"Target timestamp {target_timestamp} is outside data bounds [{self.data_start_time}, {self.data_end_time}]")
             return False
@@ -932,7 +1167,7 @@ class ActivityPlotWidget(pg.PlotWidget):
             self.apply_sleep_scoring_rules(period)
 
         # Emit change signal (redraw_markers doesn't always emit this)
-        self.sleep_markers_changed.emit(self.daily_sleep_markers)
+        self.mark_sleep_markers_dirty()  # Mark state as dirty via Redux
 
         logger.info(f"Successfully moved {marker_type} marker to timestamp {target_timestamp}")
         return True
@@ -953,7 +1188,10 @@ class ActivityPlotWidget(pg.PlotWidget):
         # Snap to nearest minute
         target_timestamp = round(target_timestamp / 60) * 60
 
-        # Ensure timestamp is within data bounds
+        # Ensure timestamp is within data bounds (check for None first)
+        if self.data_start_time is None or self.data_end_time is None:
+            logger.warning("Cannot move nonwear marker - data bounds not yet initialized")
+            return False
         if not (self.data_start_time <= target_timestamp <= self.data_end_time):
             logger.warning(f"Target timestamp {target_timestamp} is outside data bounds [{self.data_start_time}, {self.data_end_time}]")
             return False
@@ -999,12 +1237,8 @@ class ActivityPlotWidget(pg.PlotWidget):
         # Redraw nonwear markers
         self.marker_renderer.redraw_nonwear_markers()
 
-        # Mark as unsaved
-        self._nonwear_markers_saved = False
-
-        # Emit change signals
-        self.nonwear_markers_changed.emit(self._daily_nonwear_markers)
-        self.nonwear_marker_selected.emit(period)
+        # Mark as unsaved via Redux store
+        self.mark_nonwear_markers_dirty()
 
         logger.info(f"Successfully moved nonwear {marker_type} marker to timestamp {target_timestamp}")
         return True
@@ -1057,15 +1291,16 @@ class ActivityPlotWidget(pg.PlotWidget):
                         self._remove_period_from_slot(slot)
                         self.marker_limit_exceeded.emit("Cannot determine main sleep: multiple periods with identical duration")
                     else:
-                        self.sleep_markers_changed.emit(self.daily_sleep_markers)
+                        self.mark_sleep_markers_dirty()
 
                 self.current_marker_being_placed = None
 
             self.redraw_markers()
 
-        except Exception:
-            logger.exception("Error adding sleep marker")
+        except Exception as e:
+            logger.exception("Error adding sleep marker: %s", e)
             self.current_marker_being_placed = None
+            self.error_occurred.emit(f"Failed to add sleep marker: {e}")
 
     def _get_next_available_slot(self) -> int | None:
         """Get the next available period slot (1, 2, 3, or 4)."""
@@ -1135,6 +1370,10 @@ class ActivityPlotWidget(pg.PlotWidget):
         """Load existing daily sleep markers into the plot widget."""
         self.marker_renderer.load_daily_sleep_markers(daily_markers, markers_saved)
 
+    def load_daily_nonwear_markers(self, daily_markers: DailyNonwearMarkers, markers_saved: bool = True) -> None:
+        """Load existing daily nonwear markers into the plot widget."""
+        self.marker_renderer.load_daily_nonwear_markers(daily_markers, markers_saved)
+
     def get_daily_sleep_markers(self) -> DailySleepMarkers:
         """Get the current daily sleep markers."""
         return self.marker_renderer.get_daily_sleep_markers()
@@ -1169,7 +1408,7 @@ class ActivityPlotWidget(pg.PlotWidget):
         if not main_sleep or not main_sleep.is_complete:
             return [], []
 
-        if not hasattr(self, "timestamps") or not hasattr(self, "axis_y_data"):
+        if self.timestamps is None or self.axis_y_data is None:
             return [], []
 
         first_marker_ts = main_sleep.onset_timestamp
@@ -1235,57 +1474,75 @@ class ActivityPlotWidget(pg.PlotWidget):
 
         return onset_data, offset_data
 
-    def _find_closest_data_index(self, target_timestamp):
-        """Find the data index closest to the target timestamp using efficient search."""
-        if not hasattr(self, "timestamps") or not self.timestamps:
+    def _find_closest_data_index(self, target_timestamp: float) -> int | None:
+        """Find the data index closest to the target timestamp using binary search."""
+        if self.timestamps is None or not self.timestamps:
+            logger.warning("MARKER DRAG: No timestamps available")
             return None
 
-        # Convert Unix timestamp back to naive datetime in local timezone
-        # (matches how the original timestamps were converted to Unix time)
-        target_dt = datetime.fromtimestamp(target_timestamp)
+        import numpy as np
 
-        # Simple linear search comparing FULL timestamps, not just time-of-day
-        best_idx = None
-        min_diff = float("inf")
+        # 1. Convert our datetime timestamps to unix array for comparison
+        # We cache this array if it's not already there for performance
+        if (
+            not hasattr(self, "_cached_unix_timestamps")
+            or self._cached_unix_timestamps is None
+            or len(self._cached_unix_timestamps) != len(self.timestamps)
+        ):
+            logger.info(f"MARKER DRAG: Rebuilding timestamp cache from {len(self.timestamps)} timestamps")
+            self._cached_unix_timestamps = np.array([ts.timestamp() if hasattr(ts, "timestamp") else ts for ts in self.timestamps])
+            logger.info(f"MARKER DRAG: Cache range: {self._cached_unix_timestamps[0]} to {self._cached_unix_timestamps[-1]}")
 
-        for i, timestamp in enumerate(self.timestamps):
-            # Calculate difference in total seconds between full timestamps
-            time_diff = abs((target_dt - timestamp).total_seconds())
+        # 2. Use binary search
+        idx = np.searchsorted(self._cached_unix_timestamps, target_timestamp)
 
-            if time_diff < min_diff:
-                min_diff = time_diff
-                best_idx = i
+        # 3. Clip to bounds
+        idx = max(0, min(idx, len(self._cached_unix_timestamps) - 1))
 
-            # If we found a very close match (within 30 seconds), stop searching
-            if time_diff < 30:
-                break
+        # 4. Check if the neighbor is actually closer
+        if idx > 0:
+            diff_curr = abs(self._cached_unix_timestamps[idx] - target_timestamp)
+            diff_prev = abs(self._cached_unix_timestamps[idx - 1] - target_timestamp)
+            if diff_prev < diff_curr:
+                idx -= 1
 
-        return best_idx
+        # 5. Validation: Ensure we are within 1 minute tolerance
+        final_diff = abs(self._cached_unix_timestamps[idx] - target_timestamp)
+        if final_diff > 60:
+            logger.warning(
+                f"MARKER DRAG: Target {target_timestamp} outside cache range [{self._cached_unix_timestamps[0]}, {self._cached_unix_timestamps[-1]}] (diff: {final_diff}s)"
+            )
+            return None
+
+        return int(idx)
 
     def get_choi_results_per_minute(self) -> list[int]:
         """Get Choi nonwear periods as per-minute results (1=nonwear, 0=wear)."""
         # Use NonwearData system if available
-        if hasattr(self, "nonwear_data"):
+        if self.nonwear_data is not None:
             return list(self.nonwear_data.choi_mask)
 
         # Fallback: compute on demand if NonwearData system not active
-        if not hasattr(self, "axis_y_data"):
+        if self.axis_y_data is None:
             return []
 
-        # Use NonwearAlgorithmFactory (DI pattern)
-        choi_algorithm = NonwearAlgorithmFactory.create("choi_2011")
-        return choi_algorithm.detect_mask(self.axis_y_data)
+        try:
+            choi_algorithm = self.create_nonwear_algorithm(NonwearAlgorithm.CHOI_2011)
+            return choi_algorithm.detect_mask(self.axis_y_data)
+        except Exception as e:
+            logger.exception("Failed to compute Choi results: %s", e)
+            return []
 
     def get_nonwear_sensor_results_per_minute(self) -> list[int]:
         """Get nonwear sensor periods as per-minute results (1=nonwear, 0=wear)."""
         # Use NonwearData system if available
-        if hasattr(self, "nonwear_data"):
+        if self.nonwear_data is not None:
             return list(self.nonwear_data.sensor_mask)
 
         # Fallback processing if NonwearData system hasn't been used yet
         # This should rarely be used now that we have the unified NonwearData system
         logger.warning("Using fallback sensor data processing - NonwearData system not active")
-        if not hasattr(self, "activity_data"):
+        if self.activity_data is None:
             return []
         return [0] * len(self.activity_data)  # Return all wear periods as fallback
 
@@ -1298,12 +1555,20 @@ class ActivityPlotWidget(pg.PlotWidget):
 
     def _get_axis_y_data_for_sadeh(self) -> list[float]:
         """Get axis_y data specifically for Sadeh algorithm using unified loader."""
-        # Always use parent window's unified loading method
-        if hasattr(self, "parent_window") and self.parent_window and hasattr(self.parent_window, "_get_axis_y_data_for_sadeh"):
-            return self.parent_window._get_axis_y_data_for_sadeh()
+        # PERFORMANCE: Return cached data if BOTH data and timestamps are available
+        # We need both because arrows use timestamps that must align with sadeh_results
+        axis_y_timestamps = getattr(self, "main_48h_axis_y_timestamps", None)
+        if (
+            self.main_48h_axis_y_data is not None
+            and len(self.main_48h_axis_y_data) > 0
+            and axis_y_timestamps is not None
+            and len(axis_y_timestamps) == len(self.main_48h_axis_y_data)
+        ):
+            return self.main_48h_axis_y_data
 
-        logger.warning("Parent window doesn't have unified axis_y loader")
-        return []  # No fallback - must use unified loader
+        # Load from main window's unified loading method
+        # NOTE: MainWindowProtocol guarantees _get_axis_y_data_for_sadeh exists
+        return self.main_window._get_axis_y_data_for_sadeh()
 
     def _extract_view_subset_from_main_results(self) -> None:
         """Extract the current view subset from main 48hr algorithm results."""
@@ -1324,9 +1589,9 @@ class ActivityPlotWidget(pg.PlotWidget):
         try:
             # Get selected file from parent window or self
             selected_file = None
-            if hasattr(self, "parent_window") and self.parent_window and hasattr(self.parent_window, "selected_file"):
+            if self.parent_window:
                 selected_file = self.parent_window.selected_file
-            elif hasattr(self, "selected_file"):
+            elif getattr(self, "selected_file", None):
                 selected_file = self.selected_file
 
             if not selected_file:
@@ -1344,8 +1609,9 @@ class ActivityPlotWidget(pg.PlotWidget):
                 "timepoint": participant_info.timepoint_str,
             }
 
-        except Exception:
+        except Exception as e:
             # Ultimate fallback
+            logger.warning("Failed to extract participant info from filename: %s", e)
             return {
                 "participant_id": "Unknown",
                 "timepoint": "Unknown",
@@ -1371,17 +1637,27 @@ class ActivityPlotWidget(pg.PlotWidget):
         """Remove all sleep markers."""
         self.marker_renderer.clear_sleep_markers()
         self.clear_sleep_onset_offset_markers()
-        self.sleep_markers_changed.emit(self.daily_sleep_markers)
+
+    def clear_nonwear_markers(self) -> None:
+        """Remove all manual nonwear markers."""
+        self.marker_renderer.clear_nonwear_markers()
+        self._daily_nonwear_markers = DailyNonwearMarkers()
 
     def clear_plot(self) -> None:
         """Clear all plot data and markers."""
         # Clear the main plot
         self.plotItem.clear()
 
-        # Clear sleep markers
+        # Clear sleep markers (includes sleep onset/offset rule arrows)
         self.clear_sleep_markers()
 
-        # Clear nonwear visualizations
+        # Clear manual nonwear markers
+        self.clear_nonwear_markers()
+
+        # Clear adjacent day markers
+        self.clear_adjacent_day_markers()
+
+        # Clear nonwear visualizations (overlays)
         self.clear_nonwear_visualizations()
 
         # Reset plot state
@@ -1478,18 +1754,20 @@ class ActivityPlotWidget(pg.PlotWidget):
                 self._daily_nonwear_markers.set_period_by_slot(slot, self._current_nonwear_marker_being_placed)
 
                 # Set this as the currently selected nonwear marker
-                self._selected_nonwear_marker_index = slot
+                # Use property setter to emit nonwear_selection_changed signal
+                self.selected_nonwear_marker_index = slot
 
-                # Emit change signal
-                self.nonwear_markers_changed.emit(self._daily_nonwear_markers)
+                # Emit change signal for markers data
+                self.mark_nonwear_markers_dirty()
 
                 self._current_nonwear_marker_being_placed = None
 
             self.marker_renderer.redraw_nonwear_markers()
 
-        except Exception:
-            logger.exception("Error adding nonwear marker")
+        except Exception as e:
+            logger.exception("Error adding nonwear marker: %s", e)
             self._current_nonwear_marker_being_placed = None
+            self.error_occurred.emit(f"Failed to add nonwear marker: {e}")
 
     def get_selected_nonwear_period(self) -> ManualNonwearPeriod | None:
         """Get the currently selected nonwear period."""
@@ -1498,7 +1776,7 @@ class ActivityPlotWidget(pg.PlotWidget):
     def clear_selected_nonwear_marker(self) -> None:
         """Clear the currently selected nonwear marker."""
         self.marker_renderer.clear_selected_nonwear_marker()
-        self.nonwear_markers_changed.emit(self._daily_nonwear_markers)
+        self.mark_nonwear_markers_dirty()
 
     def cancel_incomplete_nonwear_marker(self) -> None:
         """Cancel the current incomplete nonwear marker placement."""
@@ -1507,11 +1785,7 @@ class ActivityPlotWidget(pg.PlotWidget):
     def adjust_selected_nonwear_marker(self, marker_type: str, seconds_delta: int) -> None:
         """Adjust selected nonwear marker by specified number of seconds."""
         self.marker_renderer.adjust_selected_nonwear_marker(marker_type, seconds_delta)
-        self.nonwear_markers_changed.emit(self._daily_nonwear_markers)
-
-    def load_daily_nonwear_markers(self, daily_markers: DailyNonwearMarkers, markers_saved: bool = True) -> None:
-        """Load existing daily nonwear markers into the plot widget."""
-        self.marker_renderer.load_daily_nonwear_markers(daily_markers, markers_saved)
+        self.mark_nonwear_markers_dirty()
 
     def get_daily_nonwear_markers(self) -> DailyNonwearMarkers:
         """Get the current daily nonwear markers."""
@@ -1529,7 +1803,8 @@ class ActivityPlotWidget(pg.PlotWidget):
         - Clears the marker click-in-progress flag to prevent blocking
         - Cancels any incomplete markers from the previous mode
         """
-        previous_category = self._active_marker_category
+        # Safety check for early calls during initialization
+        previous_category = getattr(self, "_active_marker_category", None)
         self._active_marker_category = category
 
         # Always reset the click-in-progress flag when switching modes
@@ -1678,8 +1953,8 @@ class ActivityPlotWidget(pg.PlotWidget):
             data_pos = self.plotItem.getViewBox().mapSceneToView(mouse_pos)
             clicked_time = data_pos.x()
 
-            # Check if click is within data boundaries
-            if self.data_start_time <= clicked_time <= self.data_end_time:
+            # Check if click is within data boundaries (check for None first)
+            if self.data_start_time is not None and self.data_end_time is not None and self.data_start_time <= clicked_time <= self.data_end_time:
                 # Route to appropriate handler based on active marker category
                 if self._active_marker_category == MarkerCategory.SLEEP:
                     self.add_sleep_marker(clicked_time)
@@ -1705,7 +1980,7 @@ class ActivityPlotWidget(pg.PlotWidget):
 
     def on_mouse_move(self, pos) -> None:
         """Handle mouse movement for tooltips."""
-        if not hasattr(self, "axis_y_data") or not hasattr(self, "x_data"):
+        if self.axis_y_data is None or self.x_data is None:
             return
 
         # Check if mouse is over the plot area
@@ -1714,8 +1989,8 @@ class ActivityPlotWidget(pg.PlotWidget):
             data_pos = self.plotItem.getViewBox().mapSceneToView(pos)
             hover_time = data_pos.x()
 
-            # Check if hover is within data boundaries
-            if self.data_start_time <= hover_time <= self.data_end_time:
+            # Check if hover is within data boundaries (check for None first)
+            if self.data_start_time is not None and self.data_end_time is not None and self.data_start_time <= hover_time <= self.data_end_time:
                 # Find closest data point
                 closest_idx = self._find_closest_data_index(hover_time)
                 if closest_idx is not None and closest_idx < len(self.axis_y_data):
@@ -1727,7 +2002,7 @@ class ActivityPlotWidget(pg.PlotWidget):
                     tooltip_text = f"Time: {time_str}\nActivity: {axis_y_value}"
 
                     # Add sleep scoring info if available
-                    if hasattr(self, "sadeh_results") and closest_idx < len(self.sadeh_results):
+                    if self.sadeh_results and closest_idx < len(self.sadeh_results):
                         sadeh_value = self.sadeh_results[closest_idx]
                         sadeh_state = "Sleep" if sadeh_value == 1 else "Wake"
                         tooltip_text += f"\nSadeh: {sadeh_state}"
@@ -1837,14 +2112,19 @@ class ActivityPlotWidget(pg.PlotWidget):
 
                 # Position in top-left corner of plot area
                 view_range = self.vb.viewRange()
-                x_min = view_range[0][0]
-                y_max = view_range[1][1]
+                # Validate viewRange before accessing
+                if view_range and len(view_range) >= 2 and view_range[0] and view_range[1]:
+                    x_min = view_range[0][0]
+                    y_max = view_range[1][1]
 
-                # Offset slightly from the edges
-                x_offset = (view_range[0][1] - view_range[0][0]) * 0.02  # 2% from left edge
-                y_offset = (view_range[1][1] - view_range[1][0]) * 0.05  # 5% from top edge
+                    # Offset slightly from the edges
+                    x_offset = (view_range[0][1] - view_range[0][0]) * 0.02  # 2% from left edge
+                    y_offset = (view_range[1][1] - view_range[1][0]) * 0.05  # 5% from top edge
 
-                self.file_info_label.setPos(x_min + x_offset, y_max - y_offset)
+                    self.file_info_label.setPos(x_min + x_offset, y_max - y_offset)
+                else:
+                    # Fallback position if viewRange is invalid
+                    self.file_info_label.setPos(0, 0)
                 self.file_info_label.setZValue(15)  # Above all other elements
 
                 # Add to plot

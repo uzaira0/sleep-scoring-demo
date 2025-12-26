@@ -9,21 +9,21 @@ Extracted from DatabaseManager to reduce god-class complexity.
 from __future__ import annotations
 
 import logging
-import sqlite3
 from typing import TYPE_CHECKING
 
 from sleep_scoring_app.core.constants import (
     DatabaseColumn,
     DatabaseTable,
-    FeatureFlags,
     ImportStatus,
 )
+from sleep_scoring_app.data.config import DataConfig
 from sleep_scoring_app.utils.column_registry import (
     DataType,
     column_registry,
 )
 
 if TYPE_CHECKING:
+    import sqlite3
     from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
@@ -61,18 +61,29 @@ class DatabaseSchemaManager:
             DataType.FLOAT: "REAL",
             DataType.BOOLEAN: "INTEGER",  # SQLite doesn't have native boolean
             DataType.DATETIME: "TEXT",  # Store as ISO string
+            DataType.DATE: "TEXT",  # Store as ISO date string (YYYY-MM-DD)
             DataType.JSON: "TEXT",  # Store as JSON string
         }
         return type_mapping.get(data_type, "TEXT")
 
-    def init_all_tables(self, conn: sqlite3.Connection) -> None:
+    def init_all_tables(self, conn: sqlite3.Connection, use_migrations: bool = True) -> None:
         """
         Initialize all database tables and indexes.
 
         Args:
             conn: SQLite connection
+            use_migrations: If True, use migration system. If False, use legacy init (for Migration001)
 
         """
+        if use_migrations:
+            # Use migration system - this is the new standard approach
+            from sleep_scoring_app.data.migrations import MigrationManager
+
+            migration_manager = MigrationManager(self._validate_table_name, self._validate_column_name)
+            migration_manager.migrate_to_latest(conn)
+            return
+
+        # Legacy table creation (only used by Migration001 to avoid circular dependency)
         # Validate table names
         sleep_table = self._validate_table_name(DatabaseTable.SLEEP_METRICS)
         autosave_table = self._validate_table_name(DatabaseTable.AUTOSAVE_METRICS)
@@ -92,21 +103,12 @@ class DatabaseSchemaManager:
         self._create_main_table(conn, sleep_table)
         self._create_indexes(conn, sleep_table)
 
-        # Migrate existing sleep_metrics table to add new columns
-        self._migrate_sleep_metrics_table_columns(conn, sleep_table)
-
         # Create autosave table only if autosave is enabled
-        if FeatureFlags.ENABLE_AUTOSAVE:
+        if DataConfig.ENABLE_AUTOSAVE:
             self._create_autosave_table(conn, autosave_table)
         self._create_raw_activity_table(conn, raw_activity_table)
         self._create_file_registry_table(conn, file_registry_table)
         self._create_raw_activity_indexes(conn, raw_activity_table, file_registry_table)
-
-        # Migrate axis column names from numeric to directional (axis_1/2/3 -> axis_x/y/z)
-        self._migrate_axis_column_names(conn, raw_activity_table)
-
-        # Add missing axis columns (for older databases that don't have them)
-        self._migrate_raw_activity_add_axis_columns(conn, raw_activity_table)
 
         # Create nonwear data tables
         self._create_nonwear_sensor_table(conn, nonwear_sensor_table)
@@ -123,13 +125,9 @@ class DatabaseSchemaManager:
             conn, diary_data_table, diary_file_registry_table, diary_raw_data_table, diary_nap_periods_table, diary_nonwear_periods_table
         )
 
-        # Migrate existing diary tables to add new columns
-        self._migrate_diary_table_columns(conn, diary_data_table)
-
         # Create extended sleep markers tables
         self._create_sleep_markers_extended_table(conn, sleep_markers_extended_table)
         self._create_manual_nwt_markers_table(conn, manual_nwt_markers_table)
-        self._migrate_manual_nwt_markers_table(conn, manual_nwt_markers_table)
         self._create_extended_markers_indexes(conn, sleep_markers_extended_table, manual_nwt_markers_table)
 
     def _create_main_table(self, conn: sqlite3.Connection, table_name: str) -> None:
@@ -309,72 +307,6 @@ class DatabaseSchemaManager:
             CREATE INDEX IF NOT EXISTS idx_file_registry_hash
             ON {file_registry_table}({self._validate_column_name(DatabaseColumn.FILE_HASH)})
         """)
-
-    def _migrate_axis_column_names(self, conn: sqlite3.Connection, table_name: str) -> None:
-        """
-        Migrate axis column names from numeric (axis_1/2/3) to directional (axis_x/y/z).
-
-        This migration handles the rename from the old numeric naming convention
-        to the new directional naming that matches ActiGraph's axis orientation:
-        - axis_1 -> axis_y (vertical, ActiGraph Axis1)
-        - axis_2 -> axis_x (lateral, ActiGraph Axis2)
-        - axis_3 -> axis_z (forward, ActiGraph Axis3)
-        """
-        # Get existing columns
-        cursor = conn.execute(f"PRAGMA table_info({table_name})")
-        existing_columns = {row[1] for row in cursor.fetchall()}
-
-        # Define column renames: old_name -> new_name
-        # Note: axis1 maps to axis_y (vertical), axis2 to axis_x (lateral), axis3 to axis_z (forward)
-        # Handle both naming conventions: axis1/axis2/axis3 and axis_1/axis_2/axis_3
-        column_renames = [
-            ("axis1", self._validate_column_name(DatabaseColumn.AXIS_Y)),
-            ("axis_1", self._validate_column_name(DatabaseColumn.AXIS_Y)),
-            ("axis2", self._validate_column_name(DatabaseColumn.AXIS_X)),
-            ("axis_2", self._validate_column_name(DatabaseColumn.AXIS_X)),
-            ("axis3", self._validate_column_name(DatabaseColumn.AXIS_Z)),
-            ("axis_3", self._validate_column_name(DatabaseColumn.AXIS_Z)),
-        ]
-
-        for old_name, new_name in column_renames:
-            # Only rename if old column exists and new column doesn't
-            if old_name in existing_columns and new_name not in existing_columns:
-                try:
-                    conn.execute(f"ALTER TABLE {table_name} RENAME COLUMN {old_name} TO {new_name}")
-                    logger.info("Renamed column %s to %s in %s", old_name, new_name, table_name)
-                except sqlite3.OperationalError as e:
-                    logger.warning("Failed to rename column %s to %s in %s: %s", old_name, new_name, table_name, e)
-
-    def _migrate_raw_activity_add_axis_columns(self, conn: sqlite3.Connection, table_name: str) -> None:
-        """
-        Add missing axis columns to raw_activity_data table.
-
-        This migration adds axis_x, axis_z, and vector_magnitude columns if they don't exist.
-        This handles databases created before these columns were added to the schema.
-        """
-        # Get existing columns
-        cursor = conn.execute(f"PRAGMA table_info({table_name})")
-        existing_columns = {row[1] for row in cursor.fetchall()}
-
-        # Define columns that should exist
-        required_columns = [
-            (DatabaseColumn.AXIS_X, "REAL"),
-            (DatabaseColumn.AXIS_Z, "REAL"),
-            (DatabaseColumn.VECTOR_MAGNITUDE, "REAL"),
-        ]
-
-        for column_name, column_type in required_columns:
-            validated_column = self._validate_column_name(column_name)
-            if validated_column not in existing_columns:
-                try:
-                    conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {validated_column} {column_type}")
-                    logger.info("Added missing column %s to %s", validated_column, table_name)
-                except sqlite3.OperationalError as e:
-                    if "duplicate column name" in str(e).lower():
-                        # Column already exists, ignore
-                        pass
-                    else:
-                        logger.warning("Failed to add column %s to %s: %s", validated_column, table_name, e)
 
     def _create_nonwear_sensor_table(self, conn: sqlite3.Connection, table_name: str) -> None:
         """Create nonwear sensor periods table (sensor data has no indices, only timestamps)."""
@@ -721,6 +653,7 @@ class DatabaseSchemaManager:
                 {self._validate_column_name(DatabaseColumn.OFFSET_TIMESTAMP)} REAL NOT NULL,
                 {self._validate_column_name(DatabaseColumn.DURATION_MINUTES)} INTEGER,
                 {self._validate_column_name(DatabaseColumn.MARKER_TYPE)} TEXT NOT NULL,
+                {self._validate_column_name(DatabaseColumn.PERIOD_METRICS_JSON)} TEXT,
                 {self._validate_column_name(DatabaseColumn.CREATED_AT)} TEXT DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE({self._validate_column_name(DatabaseColumn.FILENAME)},
                        {self._validate_column_name(DatabaseColumn.ANALYSIS_DATE)},
@@ -730,6 +663,8 @@ class DatabaseSchemaManager:
                     ON DELETE CASCADE
             )
         """)
+        # Migrate existing tables to add period_metrics_json column
+        self._migrate_sleep_markers_extended_table(conn, table_name)
 
     def _create_manual_nwt_markers_table(self, conn: sqlite3.Connection, table_name: str) -> None:
         """Create manual NWT markers table for user-placed nonwear periods."""
@@ -754,220 +689,23 @@ class DatabaseSchemaManager:
             )
         """)
 
-    def _migrate_manual_nwt_markers_table(self, conn: sqlite3.Connection, table_name: str) -> None:
-        """
-        Add missing columns to existing manual_nwt_markers table.
-
-        If the table structure is too different from the expected schema,
-        we drop and recreate it since this is a user-generated markers table
-        that can be rebuilt by the user.
-        """
-        # Get existing columns
-        cursor = conn.execute(f"PRAGMA table_info({table_name})")
-        existing_columns = {row[1] for row in cursor.fetchall()}
-
-        # If table is empty, we can safely drop and recreate it if needed
-        if existing_columns:
-            # Check if critical columns are missing
-            start_ts_col = self._validate_column_name(DatabaseColumn.START_TIMESTAMP)
-            end_ts_col = self._validate_column_name(DatabaseColumn.END_TIMESTAMP)
-            marker_idx_col = self._validate_column_name(DatabaseColumn.MARKER_INDEX)
-
-            missing_critical = []
-            if start_ts_col not in existing_columns:
-                missing_critical.append(start_ts_col)
-            if end_ts_col not in existing_columns:
-                missing_critical.append(end_ts_col)
-            if marker_idx_col not in existing_columns:
-                missing_critical.append(marker_idx_col)
-
-            if missing_critical:
-                # Table structure is incompatible - drop and recreate
-                logger.warning("Manual NWT markers table missing critical columns %s. Dropping and recreating table.", missing_critical)
-                conn.execute(f"DROP TABLE IF EXISTS {table_name}")
-                # Recreate with correct schema
-                self._create_manual_nwt_markers_table(conn, table_name)
-                return
-
-        # Define columns that need to exist (for minor migrations)
-        required_columns = [
-            (DatabaseColumn.DURATION_MINUTES, "INTEGER"),
-            (DatabaseColumn.CREATED_BY, "TEXT"),
-            (DatabaseColumn.CREATED_AT, "TEXT DEFAULT CURRENT_TIMESTAMP"),
-        ]
-
-        # Add missing columns
-        for col_enum, col_type in required_columns:
-            col_name = self._validate_column_name(col_enum)
-            if col_name not in existing_columns:
-                try:
-                    conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}")
-                    logger.info("Added column %s to %s table", col_name, table_name)
-                except sqlite3.OperationalError as e:
-                    # Column might already exist or other issue
-                    logger.debug("Could not add column %s: %s", col_name, e)
-
-    def _migrate_diary_table_columns(self, conn: sqlite3.Connection, table_name: str) -> None:
-        """Add missing columns to existing diary_data tables."""
-        # Get existing columns
-        cursor = conn.execute(f"PRAGMA table_info({table_name})")
-        existing_columns = {row[1] for row in cursor.fetchall()}
-
-        # Define new columns that need to be added
-        new_columns = [
-            (DatabaseColumn.NAP_ONSET_TIME_2, "TEXT"),
-            (DatabaseColumn.NAP_OFFSET_TIME_2, "TEXT"),
-            (DatabaseColumn.NAP_ONSET_TIME_3, "TEXT"),
-            (DatabaseColumn.NAP_OFFSET_TIME_3, "TEXT"),
-            (DatabaseColumn.NONWEAR_REASON_2, "TEXT"),
-            (DatabaseColumn.NONWEAR_START_TIME_2, "TEXT"),
-            (DatabaseColumn.NONWEAR_END_TIME_2, "TEXT"),
-            (DatabaseColumn.NONWEAR_REASON_3, "TEXT"),
-            (DatabaseColumn.NONWEAR_START_TIME_3, "TEXT"),
-            (DatabaseColumn.NONWEAR_END_TIME_3, "TEXT"),
-            # Auto-calculated column flags
-            (DatabaseColumn.BEDTIME_AUTO_CALCULATED, "INTEGER DEFAULT 0"),
-            (DatabaseColumn.WAKE_TIME_AUTO_CALCULATED, "INTEGER DEFAULT 0"),
-            (DatabaseColumn.SLEEP_ONSET_AUTO_CALCULATED, "INTEGER DEFAULT 0"),
-            (DatabaseColumn.SLEEP_OFFSET_AUTO_CALCULATED, "INTEGER DEFAULT 0"),
-            (DatabaseColumn.IN_BED_TIME_AUTO_CALCULATED, "INTEGER DEFAULT 0"),
-        ]
-
-        # Add missing columns
-        for column_name, column_type in new_columns:
-            validated_column = self._validate_column_name(column_name)
-            if validated_column not in existing_columns:
-                try:
-                    conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {validated_column} {column_type}")
-                    logger.info(f"Added column {validated_column} to {table_name}")
-                except sqlite3.OperationalError as e:
-                    if "duplicate column name" in str(e).lower():
-                        # Column already exists, ignore
-                        pass
-                    else:
-                        logger.warning(f"Failed to add column {validated_column} to {table_name}: {e}")
-
-        # Fix data integrity: Update nap_occurred based on presence of nap times
+    def _migrate_sleep_markers_extended_table(self, conn: sqlite3.Connection, table_name: str) -> None:
+        """Add period_metrics_json column to existing sleep_markers_extended tables."""
         try:
-            nap_occurred_col = self._validate_column_name(DatabaseColumn.NAP_OCCURRED)
-            nap_onset_col = self._validate_column_name(DatabaseColumn.NAP_ONSET_TIME)
-            nap_offset_col = self._validate_column_name(DatabaseColumn.NAP_OFFSET_TIME)
-            nap_onset_2_col = self._validate_column_name(DatabaseColumn.NAP_ONSET_TIME_2)
-            nap_offset_2_col = self._validate_column_name(DatabaseColumn.NAP_OFFSET_TIME_2)
-            nap_onset_3_col = self._validate_column_name(DatabaseColumn.NAP_ONSET_TIME_3)
-            nap_offset_3_col = self._validate_column_name(DatabaseColumn.NAP_OFFSET_TIME_3)
+            # Check if column already exists
+            cursor = conn.execute(f"PRAGMA table_info({table_name})")
+            existing_columns = {row[1] for row in cursor.fetchall()}
 
-            cursor = conn.execute(f"""
-                UPDATE {table_name}
-                SET {nap_occurred_col} = 1
-                WHERE {nap_occurred_col} = 0
-                AND ({nap_onset_col} IS NOT NULL OR {nap_offset_col} IS NOT NULL
-                     OR {nap_onset_2_col} IS NOT NULL OR {nap_offset_2_col} IS NOT NULL
-                     OR {nap_onset_3_col} IS NOT NULL OR {nap_offset_3_col} IS NOT NULL)
-            """)
-
-            if cursor.rowcount > 0:
-                logger.info(f"Fixed {cursor.rowcount} nap_occurred values in {table_name}")
-
-        except sqlite3.OperationalError as e:
-            # Column might not exist in older schemas, ignore
-            logger.debug(f"Could not fix nap_occurred values: {e}")
-
-    def _migrate_sleep_metrics_table_columns(self, conn: sqlite3.Connection, table_name: str) -> None:
-        """Add missing columns to existing sleep_metrics tables."""
-        # Get existing columns
-        cursor = conn.execute(f"PRAGMA table_info({table_name})")
-        existing_columns = {row[1] for row in cursor.fetchall()}
-
-        # Define new columns that need to be added
-        new_columns = [
-            (DatabaseColumn.DAILY_SLEEP_MARKERS, "TEXT"),  # JSON column for complete marker structure
-            (DatabaseColumn.NAP_ONSET_TIME_3, "TEXT"),
-            (DatabaseColumn.NAP_OFFSET_TIME_3, "TEXT"),
-            # Generic sleep algorithm columns for DI pattern
-            (DatabaseColumn.SLEEP_ALGORITHM_NAME, "TEXT DEFAULT 'sadeh_1994'"),
-            (DatabaseColumn.SLEEP_ALGORITHM_ONSET, "INTEGER"),
-            (DatabaseColumn.SLEEP_ALGORITHM_OFFSET, "INTEGER"),
-        ]
-
-        # Add missing columns
-        for column_name, column_type in new_columns:
-            validated_column = self._validate_column_name(column_name)
-            if validated_column not in existing_columns:
-                try:
-                    conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {validated_column} {column_type}")
-                    logger.info(f"Added column {validated_column} to {table_name}")
-                except sqlite3.OperationalError as e:
-                    if "duplicate column name" in str(e).lower():
-                        # Column already exists, ignore
-                        pass
-                    else:
-                        logger.warning(f"Failed to add column {validated_column} to {table_name}: {e}")
-
-        # Migrate existing sadeh_onset/sadeh_offset values to generic columns if not already done
-        sleep_algo_name_col = self._validate_column_name(DatabaseColumn.SLEEP_ALGORITHM_NAME)
-        sleep_algo_onset_col = self._validate_column_name(DatabaseColumn.SLEEP_ALGORITHM_ONSET)
-        sleep_algo_offset_col = self._validate_column_name(DatabaseColumn.SLEEP_ALGORITHM_OFFSET)
-        sadeh_onset_col = self._validate_column_name(DatabaseColumn.SADEH_ONSET)
-        sadeh_offset_col = self._validate_column_name(DatabaseColumn.SADEH_OFFSET)
-
-        try:
-            # Copy sadeh_onset to sleep_algorithm_onset where not already set
-            conn.execute(f"""
-                UPDATE {table_name}
-                SET {sleep_algo_onset_col} = {sadeh_onset_col}
-                WHERE {sleep_algo_onset_col} IS NULL AND {sadeh_onset_col} IS NOT NULL
-            """)
-
-            # Copy sadeh_offset to sleep_algorithm_offset where not already set
-            conn.execute(f"""
-                UPDATE {table_name}
-                SET {sleep_algo_offset_col} = {sadeh_offset_col}
-                WHERE {sleep_algo_offset_col} IS NULL AND {sadeh_offset_col} IS NOT NULL
-            """)
-
-            # Set algorithm name to sadeh_1994_actilife for all existing records without algorithm name
-            conn.execute(f"""
-                UPDATE {table_name}
-                SET {sleep_algo_name_col} = 'sadeh_1994_actilife'
-                WHERE {sleep_algo_name_col} IS NULL
-            """)
-
-            # Also update old 'sadeh_1994' to 'sadeh_1994_actilife' for consistency
-            conn.execute(f"""
-                UPDATE {table_name}
-                SET {sleep_algo_name_col} = 'sadeh_1994_actilife'
-                WHERE {sleep_algo_name_col} = 'sadeh_1994'
-            """)
-
-            logger.debug("Migrated existing Sadeh values to generic algorithm columns")
-        except sqlite3.OperationalError as e:
-            logger.debug(f"Could not migrate Sadeh values to generic columns: {e}")
-
-        # Migrate legacy algorithm_type values to new algorithm IDs
-        algorithm_type_col = self._validate_column_name(DatabaseColumn.ALGORITHM_TYPE)
-        try:
-            # Map legacy values to new algorithm IDs
-            legacy_migrations = [
-                ("'Sadeh'", "'sadeh_1994_actilife'"),
-                ("'Manual + Algorithm'", "'sadeh_1994_actilife'"),
-                ("'Manual + Sadeh'", "'sadeh_1994_actilife'"),
-                ("'Cole-Kripke'", "'cole_kripke_1992_actilife'"),
-                ("'Automatic'", "'sadeh_1994_actilife'"),
-                ("'Manual'", "'manual'"),
-                ("'Choi'", "'choi'"),
-            ]
-
-            for old_value, new_value in legacy_migrations:
+            period_metrics_col = self._validate_column_name(DatabaseColumn.PERIOD_METRICS_JSON)
+            if period_metrics_col not in existing_columns:
                 conn.execute(f"""
-                    UPDATE {table_name}
-                    SET {algorithm_type_col} = {new_value}
-                    WHERE {algorithm_type_col} = {old_value}
+                    ALTER TABLE {table_name}
+                    ADD COLUMN {period_metrics_col} TEXT
                 """)
-
-            logger.info("Migrated legacy algorithm_type values to new algorithm IDs")
-        except sqlite3.OperationalError as e:
-            logger.debug(f"Could not migrate legacy algorithm_type values: {e}")
+                logger.info("Added %s column to %s table", period_metrics_col, table_name)
+        except Exception as e:
+            # Log but don't fail - column may already exist or table may be new
+            logger.debug("Migration check for %s: %s", table_name, e)
 
     def _create_extended_markers_indexes(
         self,

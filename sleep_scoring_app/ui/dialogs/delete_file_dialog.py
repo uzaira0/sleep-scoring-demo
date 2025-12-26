@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
 if TYPE_CHECKING:
     from PyQt6.QtWidgets import QWidget
 
-    from sleep_scoring_app.core.dataclasses import ImportedFileInfo
+    from sleep_scoring_app.core.dataclasses import FileInfo
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 class DeleteFileDialog(QDialog):
     """Confirmation dialog for file deletion with warnings."""
 
-    def __init__(self, files: list[ImportedFileInfo], parent: QWidget | None = None) -> None:
+    def __init__(self, files: list[FileInfo], parent: QWidget | None = None) -> None:
         """
         Initialize the delete confirmation dialog.
 
@@ -52,15 +52,16 @@ class DeleteFileDialog(QDialog):
         """Set up the dialog UI."""
         layout = QVBoxLayout(self)
 
+        # Check if any files have metrics
+        files_with_metrics_count = sum(1 for f in self.files if f.has_metrics)
+
         # Warning header
         header_text = f"<b>Delete {len(self.files)} file(s)?</b><br><br>"
         header_text += "This will permanently delete the imported data and cannot be undone."
 
-        # Check if any files have metrics
-        files_with_metrics = [f for f in self.files if f.has_metrics]
-        if files_with_metrics:
+        if files_with_metrics_count > 0:
             header_text += "<br><br>"
-            header_text += f"<span style='color: #e67e22;'><b>Warning:</b> {len(files_with_metrics)} file(s) have associated sleep metrics that will also be deleted.</span>"
+            header_text += f"<span style='color: #e67e22;'><b>Warning:</b> {files_with_metrics_count} file(s) have associated sleep metrics that will also be deleted.</span>"
 
         header_label = QLabel(header_text)
         header_label.setWordWrap(True)
@@ -69,14 +70,7 @@ class DeleteFileDialog(QDialog):
         # Table showing files to be deleted
         file_table = QTableWidget()
         file_table.setColumnCount(4)
-        file_table.setHorizontalHeaderLabels(
-            [
-                "Filename",
-                "Participant ID",
-                "Records",
-                "Has Metrics",
-            ]
-        )
+        file_table.setHorizontalHeaderLabels(["Filename", "Participant ID", "Records", "Has Metrics"])
         file_table.setRowCount(len(self.files))
 
         for row, file_info in enumerate(self.files):
@@ -92,7 +86,7 @@ class DeleteFileDialog(QDialog):
             file_table.setItem(row, 1, participant_item)
 
             # Record count
-            records_item = QTableWidgetItem(str(file_info.record_count))
+            records_item = QTableWidgetItem(str(file_info.total_records))
             records_item.setFlags(records_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             records_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             file_table.setItem(row, 2, records_item)

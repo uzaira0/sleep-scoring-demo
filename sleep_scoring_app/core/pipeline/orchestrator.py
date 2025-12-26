@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     from sleep_scoring_app.core.algorithms.sleep_wake.protocol import SleepScoringAlgorithm
 
 from .exceptions import IncompatiblePipelineError
-from .types import AlgorithmDataRequirement, DataSourceType, PipelineType
+from .types import AlgorithmDataRequirement, DataSourceType, EpochingService, PipelineType
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,9 @@ class PipelineOrchestrator:
         4. INCOMPATIBLE: CSV_EPOCH → Raw-data algorithm (BLOCKED)
 
     Example:
-        >>> orchestrator = PipelineOrchestrator()
+        >>> from services.epoching_service import EpochingService
+        >>> epoching_service = EpochingService()
+        >>> orchestrator = PipelineOrchestrator(epoching_service)
         >>> result = orchestrator.process(
         ...     data_source=DataSourceType.GT3X_RAW,
         ...     file_path="data.gt3x",
@@ -97,6 +99,17 @@ class PipelineOrchestrator:
         ... )
 
     """
+
+    def __init__(self, epoching_service: EpochingService | None = None) -> None:
+        """
+        Initialize pipeline orchestrator.
+
+        Args:
+            epoching_service: Service for epoching raw data. If None, RAW_TO_EPOCH
+                             pipeline will fail. Optional for backwards compatibility.
+
+        """
+        self._epoching_service = epoching_service
 
     def determine_pipeline_type(
         self,
@@ -341,17 +354,18 @@ class PipelineOrchestrator:
         Returns:
             DataFrame with Sleep Score column at 60s resolution
 
+        Raises:
+            RuntimeError: If epoching service was not provided during initialization
+
         """
         logger.debug("Executing RAW_TO_EPOCH pipeline")
 
-        # Import epoching service
-        from sleep_scoring_app.services.epoching_service import EpochingService
-
-        # Create epoching service
-        epoching_service = EpochingService()
+        if self._epoching_service is None:
+            msg = "RAW_TO_EPOCH pipeline requires an epoching service. Pass it to PipelineOrchestrator.__init__()"
+            raise RuntimeError(msg)
 
         # Epoch raw data to 60-second counts
-        epoch_data = epoching_service.create_epochs(data, epoch_seconds=60)
+        epoch_data = self._epoching_service.create_epochs(data, epoch_seconds=60)
 
         logger.debug(f"Epoched raw data: {len(epoch_data)} 60-second epochs")
 

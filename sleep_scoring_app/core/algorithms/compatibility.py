@@ -56,6 +56,7 @@ if TYPE_CHECKING:
 # Import at runtime for implementation
 import logging
 
+from sleep_scoring_app.core.constants import AlgorithmType, SleepPeriodDetectorType
 from sleep_scoring_app.core.pipeline.types import (
     AlgorithmDataRequirement,
     DataSourceType,
@@ -184,8 +185,8 @@ class AlgorithmCompatibilityRegistry:
 
     _registry: ClassVar[dict[str, AlgorithmCompatibilityInfo]] = {
         # === EPOCH-BASED ALGORITHMS ===
-        "sadeh_1994_original": AlgorithmCompatibilityInfo(
-            algorithm_id="sadeh_1994_original",
+        AlgorithmType.SADEH_1994_ORIGINAL: AlgorithmCompatibilityInfo(
+            algorithm_id=AlgorithmType.SADEH_1994_ORIGINAL,
             display_name="Sadeh (1994) Original",
             data_requirement=AlgorithmDataRequirement.EPOCH_DATA,
             category=AlgorithmCategory.EPOCH_BASED,
@@ -194,8 +195,8 @@ class AlgorithmCompatibilityRegistry:
             ),
             description="Original Sadeh algorithm with threshold=0.0",
         ),
-        "sadeh_1994_actilife": AlgorithmCompatibilityInfo(
-            algorithm_id="sadeh_1994_actilife",
+        AlgorithmType.SADEH_1994_ACTILIFE: AlgorithmCompatibilityInfo(
+            algorithm_id=AlgorithmType.SADEH_1994_ACTILIFE,
             display_name="Sadeh (1994) ActiLife",
             data_requirement=AlgorithmDataRequirement.EPOCH_DATA,
             category=AlgorithmCategory.EPOCH_BASED,
@@ -204,6 +205,7 @@ class AlgorithmCompatibilityRegistry:
             ),
             description="ActiLife variant with threshold=-4.0",
         ),
+        # Note: sadeh_1994_count_scaled is disabled in factory, keep for reference
         "sadeh_1994_count_scaled": AlgorithmCompatibilityInfo(
             algorithm_id="sadeh_1994_count_scaled",
             display_name="Sadeh (1994) Count-Scaled",
@@ -215,8 +217,8 @@ class AlgorithmCompatibilityRegistry:
             ),
             description="Count-scaled variant for modern accelerometers",
         ),
-        "cole_kripke_1992_original": AlgorithmCompatibilityInfo(
-            algorithm_id="cole_kripke_1992_original",
+        AlgorithmType.COLE_KRIPKE_1992_ORIGINAL: AlgorithmCompatibilityInfo(
+            algorithm_id=AlgorithmType.COLE_KRIPKE_1992_ORIGINAL,
             display_name="Cole-Kripke (1992) Original",
             data_requirement=AlgorithmDataRequirement.EPOCH_DATA,
             category=AlgorithmCategory.EPOCH_BASED,
@@ -225,8 +227,8 @@ class AlgorithmCompatibilityRegistry:
             ),
             description="Original Cole-Kripke algorithm",
         ),
-        "cole_kripke_1992_actilife": AlgorithmCompatibilityInfo(
-            algorithm_id="cole_kripke_1992_actilife",
+        AlgorithmType.COLE_KRIPKE_1992_ACTILIFE: AlgorithmCompatibilityInfo(
+            algorithm_id=AlgorithmType.COLE_KRIPKE_1992_ACTILIFE,
             display_name="Cole-Kripke (1992) ActiLife",
             data_requirement=AlgorithmDataRequirement.EPOCH_DATA,
             category=AlgorithmCategory.EPOCH_BASED,
@@ -236,6 +238,7 @@ class AlgorithmCompatibilityRegistry:
             ),
             description="ActiLife variant",
         ),
+        # Note: cole_kripke_1992_count_scaled is disabled in factory, keep for reference
         "cole_kripke_1992_count_scaled": AlgorithmCompatibilityInfo(
             algorithm_id="cole_kripke_1992_count_scaled",
             display_name="Cole-Kripke (1992) Count-Scaled",
@@ -248,8 +251,8 @@ class AlgorithmCompatibilityRegistry:
             description="Count-scaled variant for modern accelerometers",
         ),
         # === RAW DATA ALGORITHMS ===
-        "van_hees_2015_sib": AlgorithmCompatibilityInfo(
-            algorithm_id="van_hees_2015_sib",
+        AlgorithmType.VAN_HEES_2015_SIB: AlgorithmCompatibilityInfo(
+            algorithm_id=AlgorithmType.VAN_HEES_2015_SIB,
             display_name="van Hees (2015) SIB",
             data_requirement=AlgorithmDataRequirement.RAW_DATA,
             category=AlgorithmCategory.RAW_DATA,
@@ -261,8 +264,8 @@ class AlgorithmCompatibilityRegistry:
             ),
             description="Sustained Inactivity Bout detection using z-angle from raw data",
         ),
-        "hdcza_2018": AlgorithmCompatibilityInfo(
-            algorithm_id="hdcza_2018",
+        SleepPeriodDetectorType.HDCZA_2018: AlgorithmCompatibilityInfo(
+            algorithm_id=SleepPeriodDetectorType.HDCZA_2018,
             display_name="HDCZA (van Hees 2018)",
             data_requirement=AlgorithmDataRequirement.RAW_DATA,
             category=AlgorithmCategory.RAW_DATA,

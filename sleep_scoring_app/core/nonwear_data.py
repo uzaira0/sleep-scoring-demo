@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from sleep_scoring_app.core.algorithms import NonwearAlgorithmFactory
-from sleep_scoring_app.core.constants import ActivityDataPreference, NonwearDataSource
+from sleep_scoring_app.core.constants import ActivityDataPreference, NonwearAlgorithm, NonwearDataSource
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -124,7 +124,7 @@ class NonwearData:
 
         try:
             # Create Choi algorithm instance using factory
-            choi_algorithm = NonwearAlgorithmFactory.create("choi_2011")
+            choi_algorithm = NonwearAlgorithmFactory.create(NonwearAlgorithm.CHOI_2011)
 
             # Use the detect method to get NonwearPeriod objects directly
             periods = choi_algorithm.detect(
@@ -144,7 +144,7 @@ class NonwearData:
         mask = [0] * len(activity_view.timestamps)
 
         for period in periods:
-            if hasattr(period, "start_index") and hasattr(period, "end_index"):
+            if hasattr(period, "start_index") and hasattr(period, "end_index"):  # KEEP: Duck typing period object
                 start_idx = period.start_index
                 end_idx = period.end_index
                 if start_idx is not None and end_idx is not None:

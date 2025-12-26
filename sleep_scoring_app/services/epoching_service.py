@@ -28,7 +28,7 @@ References:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import ClassVar
 
 import numpy as np
 import pandas as pd
@@ -57,10 +57,10 @@ class EpochingService:
     """
 
     # Required columns for raw data
-    REQUIRED_RAW_COLUMNS = {"timestamp", "AXIS_X", "AXIS_Y", "AXIS_Z"}
+    REQUIRED_RAW_COLUMNS: ClassVar[set[str]] = {"timestamp", "AXIS_X", "AXIS_Y", "AXIS_Z"}
 
     # Alternative timestamp column names
-    TIMESTAMP_ALIASES = {"timestamp", "datetime", "Timestamp", "Date Time"}
+    TIMESTAMP_ALIASES: ClassVar[set[str]] = {"timestamp", "datetime", "Timestamp", "Date Time"}
 
     def create_epochs(
         self,

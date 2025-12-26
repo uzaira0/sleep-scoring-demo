@@ -14,7 +14,14 @@ from typing import TYPE_CHECKING
 from PyQt6.QtWidgets import QMessageBox
 
 if TYPE_CHECKING:
-    from sleep_scoring_app.ui.main_window import SleepScoringMainWindow
+    from sleep_scoring_app.ui.protocols import (
+        AppStateInterface,
+        MainWindowProtocol,
+        MarkerOperationsInterface,
+        NavigationInterface,
+        ServiceContainer,
+    )
+    from sleep_scoring_app.ui.store import UIStore
 
 logger = logging.getLogger(__name__)
 
@@ -30,22 +37,40 @@ class DiaryIntegrationManager:
     - Validate diary data before marker placement
     """
 
-    def __init__(self, parent: SleepScoringMainWindow) -> None:
+    def __init__(
+        self,
+        store: UIStore,
+        navigation: NavigationInterface,
+        marker_ops: MarkerOperationsInterface,
+        services: ServiceContainer,
+        parent: MainWindowProtocol,
+    ) -> None:
         """
         Initialize the diary integration manager.
 
         Args:
-            parent: Reference to main window for diary and marker access
+            store: The UI store
+            navigation: Navigation interface
+            marker_ops: Marker operations interface
+            services: Service container
+            parent: Main window (still needed for some Qt-level access for now)
 
         """
+        self.store = store
+        self.navigation = navigation
+        self.marker_ops = marker_ops
+        self.services = services
+        self.main_window = parent
         self.parent = parent
-        logger.info("DiaryIntegrationManager initialized")
+
+        logger.info("DiaryIntegrationManager initialized with decoupled interfaces")
 
     def load_diary_data_for_file(self) -> None:
         """Load diary data for the currently selected file."""
         try:
-            if hasattr(self.parent, "analysis_tab") and hasattr(self.parent.analysis_tab, "update_diary_display"):
-                self.parent.analysis_tab.update_diary_display()
+            # Use main window reference only for tab access
+            if self.main_window.analysis_tab:
+                self.main_window.analysis_tab.update_diary_display()
         except Exception as e:
             logger.exception(f"Error loading diary data: {e}")
             # Don't raise exception since diary data is optional
@@ -63,17 +88,17 @@ class DiaryIntegrationManager:
             from sleep_scoring_app.core.dataclasses import MarkerType, SleepPeriod
             from sleep_scoring_app.ui.analysis_tab import DiaryTableColumn
 
-            # Check if we have necessary components
-            if not hasattr(self.parent, "plot_widget") or not self.parent.plot_widget:
+            # Check if we have necessary components (protocol-guaranteed attributes)
+            if not self.main_window.plot_widget:
                 logger.warning("Plot widget not available for marker setting")
                 return
 
-            if not hasattr(self.parent, "data_service") or not self.parent.data_service:
+            if not self.services.data_service:
                 logger.warning("Data service not available for diary data")
                 return
 
             # Get the diary entries
-            diary_entries = self.parent.data_service.load_diary_data_for_current_file()
+            diary_entries = self.services.data_service.load_diary_data_for_current_file()
             if not diary_entries or row >= len(diary_entries):
                 logger.warning(f"No diary data available for row {row}")
                 return
@@ -100,13 +125,14 @@ class DiaryIntegrationManager:
                 return
 
             # Check if the diary date matches the current date being viewed
-            if hasattr(self.parent, "available_dates") and self.parent.available_dates and hasattr(self.parent, "current_date_index"):
+            # MainWindowProtocol guarantees available_dates and current_date_index attributes exist
+            if self.parent.available_dates and self.parent.current_date_index is not None:
                 current_date = self.parent.available_dates[self.parent.current_date_index]
                 logger.info(f"Current plot date: {current_date}")
 
                 # Convert current_date to date object for comparison
-                # Handle both date and datetime objects
-                if hasattr(current_date, "date"):
+                # Duck typing: Handle both date and datetime objects (justified - stdlib types)
+                if hasattr(current_date, "date"):  # KEEP: Duck typing date/datetime
                     current_date_only = current_date.date()
                 else:
                     current_date_only = current_date
@@ -133,7 +159,7 @@ class DiaryIntegrationManager:
                             self.parent.current_date_index = date_index
                             self.parent.analysis_tab.date_dropdown.setCurrentIndex(date_index)
                             self.parent.load_current_date()
-                            self.parent.load_saved_markers()
+                            # NOTE: Marker loading handled by MarkerLoadingCoordinator on navigation
                             logger.info(f"Switched to date {diary_date.date()} from diary")
                         except ValueError:
                             logger.warning(f"Date {diary_date.date()} not found in available dates")
@@ -160,13 +186,13 @@ class DiaryIntegrationManager:
 
                 # Check if within data range - but don't reject markers outside range
                 # The diary data might be for a different day than what's currently displayed
-                if hasattr(self.parent.plot_widget, "data_start_time") and hasattr(self.parent.plot_widget, "data_end_time"):
-                    data_start = self.parent.plot_widget.data_start_time
-                    data_end = self.parent.plot_widget.data_end_time
+                # PlotWidgetProtocol guarantees data_start_time and data_end_time attributes exist (may be None)
+                data_start = self.parent.plot_widget.data_start_time
+                data_end = self.parent.plot_widget.data_end_time
 
-                    if not (data_start <= timestamp <= data_end):
-                        logger.warning(f"Time {time_str} is outside current data view range, but allowing placement")
-                        # Still return the timestamp - let the plot widget handle validation
+                if data_start and data_end and not (data_start <= timestamp <= data_end):
+                    logger.warning(f"Time {time_str} is outside current data view range, but allowing placement")
+                    # Still return the timestamp - let the plot widget handle validation
 
                 return timestamp
 
@@ -220,8 +246,9 @@ class DiaryIntegrationManager:
                 is_main_sleep = False
                 marker_description = "nap 1"
 
-                # Check if main sleep exists
-                main_sleep = self.parent.plot_widget.daily_sleep_markers.get_main_sleep()
+                # Check if main sleep exists - use Redux store (SINGLE SOURCE OF TRUTH)
+                markers = self.store.state.current_sleep_markers
+                main_sleep = markers.get_main_sleep() if markers else None
                 if not main_sleep:
                     QMessageBox.warning(
                         self.parent,
@@ -251,8 +278,9 @@ class DiaryIntegrationManager:
                 is_main_sleep = False
                 marker_description = "nap 2"
 
-                # Check if main sleep exists
-                main_sleep = self.parent.plot_widget.daily_sleep_markers.get_main_sleep()
+                # Check if main sleep exists - use Redux store (SINGLE SOURCE OF TRUTH)
+                markers = self.store.state.current_sleep_markers
+                main_sleep = markers.get_main_sleep() if markers else None
                 if not main_sleep:
                     QMessageBox.warning(
                         self.parent,
@@ -282,8 +310,9 @@ class DiaryIntegrationManager:
                 is_main_sleep = False
                 marker_description = "nap 3"
 
-                # Check if main sleep exists
-                main_sleep = self.parent.plot_widget.daily_sleep_markers.get_main_sleep()
+                # Check if main sleep exists - use Redux store (SINGLE SOURCE OF TRUTH)
+                markers = self.store.state.current_sleep_markers
+                main_sleep = markers.get_main_sleep() if markers else None
                 if not main_sleep:
                     QMessageBox.warning(
                         self.parent,
@@ -317,8 +346,16 @@ class DiaryIntegrationManager:
                 QMessageBox.information(self.parent, "No Data", f"No valid {marker_description} time found in this diary entry.")
                 return
 
+            # Get markers from Redux store (SINGLE SOURCE OF TRUTH)
+            from sleep_scoring_app.core.dataclasses_markers import DailySleepMarkers
+            from sleep_scoring_app.ui.store import Actions
+
+            markers = self.store.state.current_sleep_markers
+            if markers is None:
+                markers = DailySleepMarkers()
+
             # Get or create the period in the specified slot
-            period = self.parent.plot_widget.daily_sleep_markers.get_period_by_slot(period_slot)
+            period = markers.get_period_by_slot(period_slot)
 
             if period:
                 # Update existing period
@@ -349,21 +386,24 @@ class DiaryIntegrationManager:
 
                 logger.warning(f"Created SleepPeriod object: marker_type={period.marker_type}, marker_index={period.marker_index}")
 
-                # Assign to slot
+                # Assign to slot in Redux markers (SINGLE SOURCE OF TRUTH)
                 if period_slot == 1:
-                    self.parent.plot_widget.daily_sleep_markers.period_1 = period
+                    markers.period_1 = period
                     logger.info("Assigned to period_1")
                 elif period_slot == 2:
-                    self.parent.plot_widget.daily_sleep_markers.period_2 = period
+                    markers.period_2 = period
                     logger.info("Assigned to period_2")
                 elif period_slot == 3:
-                    self.parent.plot_widget.daily_sleep_markers.period_3 = period
+                    markers.period_3 = period
                     logger.info("Assigned to period_3")
                 elif period_slot == 4:
-                    self.parent.plot_widget.daily_sleep_markers.period_4 = period
+                    markers.period_4 = period
                     logger.info("Assigned to period_4")
 
                 logger.info(f"Created new {marker_description} period in slot {period_slot}")
+
+            # Dispatch to Redux - connector will update widget
+            self.store.dispatch(Actions.sleep_markers_changed(markers))
 
             # Apply sleep scoring rules if complete
             if period and period.is_complete:
@@ -383,23 +423,15 @@ class DiaryIntegrationManager:
                 self.parent.plot_widget.apply_sleep_scoring_rules(period)
                 logger.info(f"Applied sleep scoring rules for {marker_description} period")
 
-                # Also call _update_sleep_scoring_rules to ensure arrows are visible
-                if hasattr(self.parent.plot_widget, "_update_sleep_scoring_rules"):
-                    self.parent.plot_widget._update_sleep_scoring_rules()
-                    logger.info("Called _update_sleep_scoring_rules to ensure arrows are visible")
+                # Update sleep scoring rules to ensure arrows are visible (protocol-guaranteed method)
+                self.parent.plot_widget._update_sleep_scoring_rules()
+                logger.info("Called _update_sleep_scoring_rules to ensure arrows are visible")
             elif period:
                 # Set as current marker being placed if incomplete
                 self.parent.plot_widget.current_marker_being_placed = period
                 logger.info("Set incomplete period as current marker being placed")
                 # Redraw markers for incomplete period
                 self.parent.plot_widget.redraw_markers()
-
-            # DO NOT call update_classifications here - it would override the marker type we just set!
-            # update_classifications() sets marker type based on duration, not user intent
-            # self.parent.plot_widget.daily_sleep_markers.update_classifications()  # REMOVED - this was the bug!
-
-            # Emit signal after all updates
-            self.parent.plot_widget.sleep_markers_changed.emit(self.parent.plot_widget.daily_sleep_markers)
 
             # Auto-save
             self.parent.auto_save_current_markers()
@@ -419,17 +451,17 @@ class DiaryIntegrationManager:
 
         """
         try:
-            # Check if we have necessary components
-            if not hasattr(self.parent, "plot_widget") or not self.parent.plot_widget:
+            # Check if we have necessary components (protocol-guaranteed attributes)
+            if not self.main_window.plot_widget:
                 logger.warning("Plot widget not available for marker setting")
                 return
 
-            if not hasattr(self.parent, "data_service") or not self.parent.data_service:
+            if not self.services.data_service:
                 logger.warning("Data service not available for diary data")
                 return
 
             # Get the diary entries
-            diary_entries = self.parent.data_service.load_diary_data_for_current_file()
+            diary_entries = self.services.data_service.load_diary_data_for_current_file()
             if not diary_entries or row >= len(diary_entries):
                 logger.warning(f"No diary data available for row {row}")
                 return
@@ -476,13 +508,13 @@ class DiaryIntegrationManager:
                     timestamp += 24 * 3600
 
                 # Check if within data range
-                if hasattr(self.parent.plot_widget, "data_start_time") and hasattr(self.parent.plot_widget, "data_end_time"):
-                    data_start = self.parent.plot_widget.data_start_time
-                    data_end = self.parent.plot_widget.data_end_time
+                # PlotWidgetProtocol guarantees data_start_time and data_end_time attributes exist (may be None)
+                data_start = self.parent.plot_widget.data_start_time
+                data_end = self.parent.plot_widget.data_end_time
 
-                    if not (data_start <= timestamp <= data_end):
-                        logger.warning(f"Time {time_str} is outside data range for current view")
-                        return None
+                if data_start and data_end and not (data_start <= timestamp <= data_end):
+                    logger.warning(f"Time {time_str} is outside data range for current view")
+                    return None
 
                 return timestamp
 
@@ -534,10 +566,15 @@ class DiaryIntegrationManager:
                     periods_created.append(("Nap 2", period_info))
 
             if periods_created:
-                # Update classifications after all periods are created
-                self.parent.plot_widget.daily_sleep_markers.update_classifications()
+                # Update classifications after all periods are created - use Redux store
+                from sleep_scoring_app.ui.store import Actions
+
+                markers = self.store.state.current_sleep_markers
+                if markers:
+                    markers.update_classifications()
+                    # Dispatch to Redux - connector will update widget
+                    self.store.dispatch(Actions.sleep_markers_changed(markers))
                 self.parent.plot_widget.redraw_markers()
-                self.parent.plot_widget.sleep_markers_changed.emit(self.parent.plot_widget.daily_sleep_markers)
 
                 # Auto-save
                 self.parent.auto_save_current_markers()

@@ -114,6 +114,7 @@ class DatabaseColumn(StrEnum):
     MARKER_TYPE = "marker_type"
     IS_MAIN_SLEEP = "is_main_sleep"
     CREATED_BY = "created_by"
+    PERIOD_METRICS_JSON = "period_metrics_json"  # JSON blob for period-specific calculated metrics
 
     # Diary-specific columns
     DIARY_DATE = "diary_date"

@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -46,6 +46,7 @@ from sleep_scoring_app.core.algorithms.sleep_wake.z_angle import (
     split_into_noon_to_noon_days,
     validate_raw_accelerometer_data,
 )
+from sleep_scoring_app.core.constants import SleepPeriodDetectorType
 from sleep_scoring_app.core.pipeline.types import AlgorithmDataRequirement
 
 logger = logging.getLogger(__name__)
@@ -159,7 +160,7 @@ class HDCZA:
     @property
     def identifier(self) -> str:
         """Unique algorithm identifier."""
-        return "hdcza_2018"
+        return SleepPeriodDetectorType.HDCZA_2018
 
     @property
     def description(self) -> str:
@@ -344,8 +345,8 @@ class HDCZA:
         threshold = p_value * self._angle_threshold_multiplier
 
         # Apply threshold bounds as per GGIR implementation (HASPT.R lines 112-116)
-        # Minimum: 0.13°, Maximum: 0.50°
-        # These bounds prevent threshold from being too low (when P10≈0) or too high
+        # Minimum: 0.13 deg, Maximum: 0.50 deg
+        # These bounds prevent threshold from being too low (when P10 ~= 0) or too high
         min_threshold = 0.13
         max_threshold = 0.50
         original_threshold = threshold
@@ -355,9 +356,11 @@ class HDCZA:
             threshold = max_threshold
 
         if threshold != original_threshold:
-            logger.debug(f"Day {day_label}: threshold {original_threshold:.4f}° clamped to {threshold:.2f}°")
+            logger.debug(f"Day {day_label}: threshold {original_threshold:.4f} deg clamped to {threshold:.2f} deg")
 
-        logger.debug(f"Day {day_label}: threshold = {threshold:.2f}° (P{self._percentile} = {p_value:.4f}° x {self._angle_threshold_multiplier})")
+        logger.debug(
+            f"Day {day_label}: threshold = {threshold:.2f} deg (P{self._percentile} = {p_value:.4f} deg x {self._angle_threshold_multiplier})"
+        )
 
         # Step 7: Detect blocks where rolling_median < threshold
         below_threshold = day_df["rolling_median"].fillna(999) < threshold

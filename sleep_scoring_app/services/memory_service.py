@@ -20,7 +20,7 @@ import contextlib
 from collections import OrderedDict
 from datetime import datetime, timedelta
 from threading import Lock
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from sleep_scoring_app.core.constants import MemoryConstants
 from sleep_scoring_app.core.exceptions import (
@@ -119,6 +119,29 @@ class BoundedCache[K, T]:
             self.access_times.clear()
             self.memory_usage.clear()
 
+    def invalidate(self, key: K) -> None:
+        """Remove a specific item from the cache."""
+        with self.lock:
+            if key in self.cache:
+                del self.cache[key]
+                self.access_times.pop(key, None)
+                self.memory_usage.pop(key, None)
+
+    def remove(self, key: K, default: T | None = None) -> T | None:
+        """Remove and return an item from the cache."""
+        with self.lock:
+            if key in self.cache:
+                value = self.cache.pop(key)
+                self.access_times.pop(key, None)
+                self.memory_usage.pop(key, None)
+                return value
+            return default
+
+    def __len__(self) -> int:
+        """Return the number of items in the cache."""
+        with self.lock:
+            return len(self.cache)
+
     def get_stats(self) -> dict[str, Any]:
         """Get cache statistics."""
         with self.lock:
@@ -137,6 +160,10 @@ class BoundedCache[K, T]:
         except (TypeError, AttributeError, ZeroDivisionError):
             # Handle mock objects or invalid values during testing
             return 0.0
+
+    def cleanup(self) -> int:
+        """Perform cleanup by removing old entries. Alias for cleanup_old_entries."""
+        return self.cleanup_old_entries()
 
     def cleanup_old_entries(self, max_age_hours: int = MemoryConstants.DEFAULT_MAX_AGE_HOURS) -> int:
         """Remove entries older than specified age."""
@@ -160,7 +187,7 @@ class BoundedCache[K, T]:
         with self.lock:
             return key in self.cache
 
-    def keys(self):
+    def keys(self) -> list[K]:
         """Return cache keys."""
         with self.lock:
             return list(self.cache.keys())
@@ -417,16 +444,16 @@ def estimate_object_size_mb(obj: Any) -> int:
         size_bytes = sys.getsizeof(obj)
 
         # For containers, estimate contents
-        if hasattr(obj, "__len__"):
+        if hasattr(obj, "__len__"):  # KEEP: Duck typing for size estimation
             size_bytes += len(obj) * 100  # Rough estimate
 
         # For pandas objects
-        if hasattr(obj, "memory_usage"):
+        if hasattr(obj, "memory_usage"):  # KEEP: Duck typing pandas DataFrame
             with contextlib.suppress(Exception):
                 size_bytes = obj.memory_usage(deep=True).sum()
 
         # For numpy arrays
-        if hasattr(obj, "nbytes"):
+        if hasattr(obj, "nbytes"):  # KEEP: Duck typing numpy array
             size_bytes = obj.nbytes
 
         return max(1, size_bytes // (1024 * 1024))
@@ -457,6 +484,6 @@ def get_memory_stats() -> dict[str, Any]:
         "resources": resource_stats,
         "gc_stats": {
             "counts": gc.get_count(),
-            "stats": gc.get_stats() if hasattr(gc, "get_stats") else None,
+            "stats": gc.get_stats() if hasattr(gc, "get_stats") else None,  # KEEP: Optional gc feature
         },
     }
