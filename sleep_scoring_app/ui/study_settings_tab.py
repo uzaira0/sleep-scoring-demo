@@ -46,7 +46,6 @@ from sleep_scoring_app.core.constants import (
     StudyDataParadigm,
 )
 from sleep_scoring_app.services.algorithm_service import get_algorithm_service
-from sleep_scoring_app.services.pattern_validation_service import PatternValidationService
 from sleep_scoring_app.ui.builders import (
     AlgorithmSectionBuilder,
     DataParadigmSectionBuilder,
@@ -144,7 +143,6 @@ class StudySettingsTab(QWidget):
         self.pattern_builder = PatternSectionBuilder(services.config_manager)
         self.valid_values_builder = ValidValuesSectionBuilder(services.config_manager, DragDropListWidget)
         self.algorithm_builder = AlgorithmSectionBuilder(services.config_manager)
-        self.validation_service = PatternValidationService()
 
         self.setup_ui()
         self._connect_signals()

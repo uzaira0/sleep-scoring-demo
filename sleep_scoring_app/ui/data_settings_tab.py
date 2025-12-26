@@ -15,7 +15,7 @@ import random
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFontMetrics
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -75,7 +75,6 @@ class DataSettingsTab(QWidget):
 
         # Purely UI state
         self.import_worker = None
-        self.progress_timer = QTimer()
         self.selected_diary_files: list[Path] = []
 
         self.setup_ui()

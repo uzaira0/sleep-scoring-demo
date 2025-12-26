@@ -12,7 +12,6 @@ __all__ = [
     "CSVDataTransformer",
     "CacheService",
     "DataSourceConfigProtocol",
-    "DataSourceConfigService",
     "DiaryServiceProtocol",
     "ExportServiceProtocol",
     "FileDiscoveryProtocol",
@@ -47,10 +46,6 @@ def __getattr__(name: str):
         from sleep_scoring_app.services.csv_data_transformer import CSVDataTransformer
 
         return CSVDataTransformer
-    if name == "DataSourceConfigService":
-        from sleep_scoring_app.services.data_source_config_service import DataSourceConfigService
-
-        return DataSourceConfigService
     if name == "FileFormatDetector":
         from sleep_scoring_app.services.file_format_detector import FileFormatDetector
 

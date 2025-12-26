@@ -185,20 +185,6 @@ class MarkerService:
 
     # ==================== Classification ====================
 
-    def classify_periods(self, markers: DailySleepMarkers) -> None:
-        """
-        Classify sleep periods by type (main sleep, nap, etc.).
-
-        This is a convenience wrapper for markers.update_classifications()
-        maintained for backward compatibility.
-
-        Args:
-            markers: Daily sleep markers to classify
-
-        """
-        markers.update_classifications()
-        logger.debug("Updated marker classifications")
-
     def update_classifications(self, daily_markers: DailySleepMarkers) -> None:
         """Update all marker classifications based on current durations."""
         daily_markers.update_classifications()

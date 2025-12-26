@@ -1421,18 +1421,6 @@ class StudySettingsConnector:
         self._unsubscribe()
 
 
-class QSettingsPersistenceConnector:
-    """Syncs store state to QSettings for persistence across sessions."""
-
-    def __init__(self, store: UIStore, main_window: MainWindowProtocol) -> None:
-        """Initialize connector (stub for now - QSettings persistence handled elsewhere)."""
-        pass
-
-    def disconnect(self) -> None:
-        """Cleanup (stub)."""
-        pass
-
-
 class ConfigPersistenceConnector:
     """
     Syncs store state to the application configuration file.
@@ -1969,7 +1957,6 @@ class StoreConnectorManager:
             TimeFieldConnector(self.store, self.main_window),
             StudySettingsConnector(self.store, self.main_window),
             CacheConnector(self.store, self.main_window),
-            QSettingsPersistenceConnector(self.store, self.main_window),
             ConfigPersistenceConnector(self.store, self.main_window),
             WindowGeometryConnector(self.store, self.main_window),
         ]

@@ -71,7 +71,6 @@ class UIState:
 
     # === Algorithm State ===
     current_algorithm: str = AlgorithmType.SADEH_1994_ACTILIFE
-    selected_marker_index: int = 1  # Which marker set is selected (1-4)
 
     # === View Mode State ===
     view_mode_hours: int = 48  # 24 or 48
@@ -141,7 +140,6 @@ class ActionType(StrEnum):
 
     # Algorithm state
     ALGORITHM_CHANGED = auto()
-    MARKER_INDEX_CHANGED = auto()
 
     # === Application Mode ===
     VIEW_MODE_CHANGED = "view_mode_changed"
@@ -246,14 +244,6 @@ class Actions:
         return Action(
             type=ActionType.FILES_LOADED,
             payload={"files": files},
-        )
-
-    @staticmethod
-    def marker_index_changed(marker_index: int) -> Action:
-        """Create action for when selected marker index changes."""
-        return Action(
-            type=ActionType.MARKER_INDEX_CHANGED,
-            payload={"marker_index": marker_index},
         )
 
     @staticmethod
@@ -457,13 +447,6 @@ def ui_reducer(state: UIState, action: Action) -> UIState:
             return replace(
                 state,
                 current_algorithm=payload.get("algorithm", state.current_algorithm),
-            )
-
-        case ActionType.MARKER_INDEX_CHANGED:
-            payload = action.payload or {}
-            return replace(
-                state,
-                selected_marker_index=payload.get("marker_index", 1),
             )
 
         case ActionType.VIEW_MODE_CHANGED:
@@ -677,11 +660,6 @@ class Selectors:
     def current_algorithm(state: UIState) -> str:
         """Get currently selected algorithm."""
         return state.current_algorithm
-
-    @staticmethod
-    def selected_marker_index(state: UIState) -> int:
-        """Get selected marker index (1-4)."""
-        return state.selected_marker_index
 
     # === View Mode ===
 
