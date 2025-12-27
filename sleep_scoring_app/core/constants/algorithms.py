@@ -307,3 +307,20 @@ class SelectionState(StrEnum):
 
     SELECTED = "selected"
     UNSELECTED = "unselected"
+
+
+class AlgorithmOutputColumn(StrEnum):
+    """
+    Output column names added by algorithms to DataFrames.
+
+    Use these constants instead of hardcoded strings when referencing
+    algorithm output columns in DataFrames.
+    """
+
+    # Sleep scoring algorithm outputs
+    SADEH_SCORE = "Sadeh Score"  # Sadeh algorithm output (1=sleep, 0=wake)
+    SLEEP_SCORE = "Sleep Score"  # Cole-Kripke, Van Hees, HDCZA output (1=sleep, 0=wake)
+
+    # Nonwear detection algorithm outputs
+    CHOI_NONWEAR = "Choi Nonwear"  # Choi algorithm output (1=nonwear, 0=wear)
+    VAN_HEES_NONWEAR = "Van Hees Nonwear"  # Van Hees 2023 nonwear output

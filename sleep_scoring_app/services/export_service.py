@@ -95,6 +95,63 @@ class ExportManager:
 
         return value
 
+    def _validate_export_path(self, output_directory: str) -> tuple[bool, str]:
+        """
+        Validate that the export path is writable.
+
+        Returns:
+            Tuple of (is_valid, error_message)
+
+        """
+        try:
+            path = Path(output_directory)
+
+            # Check for network paths on Windows
+            path_str = str(path)
+            if path_str.startswith("\\\\"):
+                # UNC path - check if the server/share exists
+                parts = path_str.split("\\")
+                if len(parts) >= 4:
+                    server_share = "\\\\".join(["", "", parts[2], parts[3]])
+                    if not Path(server_share).exists():
+                        return False, f"Network path not accessible: {server_share}"
+
+            # Check for unmapped drive letters on Windows
+            if len(path_str) >= 2 and path_str[1] == ":":
+                drive_letter = path_str[0].upper()
+                drive_root = f"{drive_letter}:\\"
+                # Check if the drive root exists (more reliable than just drive letter)
+                if not Path(drive_root).exists():
+                    return False, f"Drive not accessible: {drive_letter}:"
+                # Also verify we can actually access the drive
+                try:
+                    list(Path(drive_root).iterdir())
+                except (PermissionError, OSError):
+                    return False, f"Drive not accessible: {drive_letter}:"
+
+            # Check if parent exists and is writable for new paths
+            if not path.exists():
+                parent = path.parent
+                # Walk up to find existing ancestor
+                while not parent.exists() and parent != parent.parent:
+                    parent = parent.parent
+
+                if not parent.exists():
+                    return False, "Cannot create directory: parent path does not exist"
+
+                # Try to check write permission on existing parent
+                try:
+                    test_file = parent / f".write_test_{os.getpid()}"
+                    test_file.touch()
+                    test_file.unlink()
+                except (PermissionError, OSError):
+                    return False, f"No write permission in {parent}"
+
+            return True, ""
+
+        except Exception as e:
+            return False, f"Path validation error: {e}"
+
     def export_all_sleep_data(self, output_directory: str | None = None) -> str | None:
         """Export all sleep data to CSV with backup creation."""
         try:
@@ -114,6 +171,12 @@ class ExportManager:
             # Set output directory
             if not output_directory:
                 output_directory = str(Path.cwd() / DirectoryName.SLEEP_DATA_EXPORTS)
+
+            # Validate the export path before attempting to create it
+            is_valid, error_msg = self._validate_export_path(output_directory)
+            if not is_valid:
+                logger.warning("Export path validation failed: %s", error_msg)
+                return f"Error: {error_msg}"
 
             # Ensure output directory exists
             os.makedirs(output_directory, mode=0o755, exist_ok=True)

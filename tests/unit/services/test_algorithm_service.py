@@ -32,13 +32,13 @@ class TestAlgorithmService:
             "cole_kripke_1992": "Cole-Kripke 1992",
         }
         factory.get_default_algorithm_id.return_value = "sadeh_1994_actilife"
-        factory.create.return_value = MagicMock(
-            name="Sadeh 1994",
-            identifier="sadeh_1994_actilife",
-            description="Sadeh algorithm",
-            epoch_length=60,
-            requires_raw_data=False,
-        )
+        mock_algo = MagicMock()
+        mock_algo.name = "Sadeh 1994"
+        mock_algo.identifier = "sadeh_1994_actilife"
+        mock_algo.description = "Sadeh algorithm"
+        mock_algo.epoch_length = 60
+        mock_algo.requires_raw_data = False
+        factory.create.return_value = mock_algo
         return factory
 
     @pytest.fixture
@@ -51,7 +51,10 @@ class TestAlgorithmService:
         }
         factory.get_algorithms_for_paradigm.return_value = {"choi_2011": "Choi 2011"}
         factory.get_default_algorithm_id.return_value = "choi_2011"
-        factory.create.return_value = MagicMock(name="Choi 2011", identifier="choi_2011")
+        mock_algo = MagicMock()
+        mock_algo.name = "Choi 2011"
+        mock_algo.identifier = "choi_2011"
+        factory.create.return_value = mock_algo
         return factory
 
     @pytest.fixture
@@ -64,7 +67,10 @@ class TestAlgorithmService:
         }
         factory.get_detectors_for_paradigm.return_value = {"consecutive_onset3s_offset5s": "Consecutive (3S/5S)"}
         factory.get_default_detector_id.return_value = "consecutive_onset3s_offset5s"
-        factory.create.return_value = MagicMock(name="Consecutive (3S/5S)", identifier="consecutive_onset3s_offset5s")
+        mock_detector = MagicMock()
+        mock_detector.name = "Consecutive (3S/5S)"
+        mock_detector.identifier = "consecutive_onset3s_offset5s"
+        factory.create.return_value = mock_detector
         return factory
 
     # === Lazy Loading Tests ===
@@ -73,37 +79,43 @@ class TestAlgorithmService:
         """Test lazy loading of sleep/wake factory."""
         assert service._sleep_wake_factory is None
 
-        with patch("sleep_scoring_app.services.algorithm_service.AlgorithmFactory") as mock_factory:
-            factory = service._get_sleep_wake_factory()
-            assert factory is mock_factory
-            assert service._sleep_wake_factory is mock_factory
+        # Call the actual method - lazy loading imports the real factory
+        factory = service._get_sleep_wake_factory()
+        from sleep_scoring_app.core.algorithms.sleep_wake.factory import AlgorithmFactory
+
+        assert factory is AlgorithmFactory
+        assert service._sleep_wake_factory is AlgorithmFactory
 
     def test_lazy_load_nonwear_factory(self, service):
         """Test lazy loading of nonwear factory."""
         assert service._nonwear_factory is None
 
-        with patch("sleep_scoring_app.services.algorithm_service.NonwearAlgorithmFactory") as mock_factory:
-            factory = service._get_nonwear_factory()
-            assert factory is mock_factory
-            assert service._nonwear_factory is mock_factory
+        # Call the actual method - lazy loading imports the real factory
+        factory = service._get_nonwear_factory()
+        from sleep_scoring_app.core.algorithms.nonwear.factory import NonwearAlgorithmFactory
+
+        assert factory is NonwearAlgorithmFactory
+        assert service._nonwear_factory is NonwearAlgorithmFactory
 
     def test_lazy_load_sleep_period_factory(self, service):
         """Test lazy loading of sleep period factory."""
         assert service._sleep_period_factory is None
 
-        with patch("sleep_scoring_app.services.algorithm_service.SleepPeriodDetectorFactory") as mock_factory:
-            factory = service._get_sleep_period_factory()
-            assert factory is mock_factory
-            assert service._sleep_period_factory is mock_factory
+        # Call the actual method - lazy loading imports the real factory
+        factory = service._get_sleep_period_factory()
+        from sleep_scoring_app.core.algorithms.sleep_period.factory import SleepPeriodDetectorFactory
+
+        assert factory is SleepPeriodDetectorFactory
+        assert service._sleep_period_factory is SleepPeriodDetectorFactory
 
     def test_lazy_load_caching(self, service):
         """Test that factory instances are cached after first load."""
-        with patch("sleep_scoring_app.services.algorithm_service.AlgorithmFactory") as mock_factory:
-            factory1 = service._get_sleep_wake_factory()
-            factory2 = service._get_sleep_wake_factory()
-            assert factory1 is factory2
-            # Factory should only be imported once
-            assert service._sleep_wake_factory is mock_factory
+        # First call loads the factory
+        factory1 = service._get_sleep_wake_factory()
+        factory2 = service._get_sleep_wake_factory()
+        assert factory1 is factory2
+        # Factory should only be loaded once
+        assert service._sleep_wake_factory is factory1
 
     # === Sleep/Wake Algorithm Tests ===
 

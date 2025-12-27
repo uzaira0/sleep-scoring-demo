@@ -290,11 +290,20 @@ class SleepScoringMainWindow(QMainWindow):
 
     @selected_file.setter
     def selected_file(self, value: str | None) -> None:
-        """Update selected file in Redux store."""
+        """
+        Update selected file in Redux store.
+
+        CRITICAL: Always stores just the filename, not the full path.
+        The database uses filename as the key, so current_file MUST be filename-only.
+        """
+        from pathlib import Path
+
         from sleep_scoring_app.ui.store import Actions
 
-        if value != self.store.state.current_file:
-            self.store.dispatch(Actions.file_selected(value))
+        # Always extract just the filename - database uses filename as key
+        filename = Path(value).name if value else None
+        if filename != self.store.state.current_file:
+            self.store.dispatch(Actions.file_selected(filename))
 
     @property
     def available_files(self) -> list[dict]:
@@ -644,7 +653,7 @@ class SleepScoringMainWindow(QMainWindow):
                     # Map choi_column string to ActivityDataPreference enum
                     choi_pref = ActivityDataPreference(choi_column) if choi_column else ActivityDataPreference.VECTOR_MAGNITUDE
                     result = self.data_service.load_activity_data_only(
-                        filename=self.selected_file,
+                        filename=Path(self.selected_file).name if self.selected_file else "",
                         target_date=target_date,
                         activity_column=choi_pref,
                         hours=48,
@@ -663,15 +672,17 @@ class SleepScoringMainWindow(QMainWindow):
                     logger.warning("No target date available, using display data for Choi")
 
             # Create activity view with the correct Choi data
+            # Use just the filename (not full path) for database queries
+            current_filename = Path(self.selected_file).name if self.selected_file else ""
             activity_view = ActivityDataView.create(
                 timestamps=choi_timestamps,
                 counts=choi_counts,
-                filename=self.selected_file,
+                filename=current_filename,
             )
 
             # Load sensor periods from database
             raw_sensor_periods = self.nonwear_service.get_nonwear_periods_for_file(
-                filename=self.selected_file,
+                filename=current_filename,
                 source=NonwearDataSource.NONWEAR_SENSOR,
             )
 
@@ -712,8 +723,9 @@ class SleepScoringMainWindow(QMainWindow):
 
     def _get_axis_y_data_for_sadeh(self) -> list[float]:
         """Get axis_y data specifically for Sadeh algorithm using UNIFIED loading method."""
-        # Get current filename and date from Redux-backed properties
-        current_filename = self.selected_file
+        # Get current filename from store state (which stores just the filename, not full path)
+        # CRITICAL: The database uses filename (not full path) as the key
+        current_filename = self.store.state.current_file
         current_date = self.available_dates[self.current_date_index] if self.available_dates and self.current_date_index != -1 else None
 
         logger.info(f"MAIN WINDOW: Loading axis_y for Sadeh | File: {current_filename} | Date: {current_date}")
@@ -1607,7 +1619,51 @@ class SleepScoringMainWindow(QMainWindow):
 
     def set_manual_sleep_times(self) -> None:
         """Set sleep markers manually based on time input with loop prevention and validation."""
-        self.time_manager.set_manual_sleep_times()
+        # Get current date from store
+        state = self.store.state
+        if not state.available_dates or state.current_date_index < 0:
+            logger.warning("No date selected, cannot set manual times")
+            return
+
+        current_date_str = state.available_dates[state.current_date_index]
+
+        # Parse the date string
+        try:
+            base_date = datetime.strptime(current_date_str, "%Y-%m-%d").date()
+        except ValueError:
+            logger.exception(f"Could not parse date: {current_date_str}")
+            return
+
+        # Get times from input fields
+        onset_text = self.onset_time_input.text().strip()
+        offset_text = self.offset_time_input.text().strip()
+
+        if not onset_text or not offset_text:
+            logger.debug("Both onset and offset times required")
+            return
+
+        # Parse times to timestamps
+        onset_timestamp = self._parse_time_to_timestamp(onset_text, base_date)
+        if onset_timestamp is None:
+            logger.warning(f"Invalid onset time format: {onset_text}")
+            self._restore_field_from_marker("onset")
+            return
+
+        # For offset, if time is earlier than onset, assume next day
+        offset_timestamp = self._parse_time_to_timestamp(offset_text, base_date)
+        if offset_timestamp is None:
+            logger.warning(f"Invalid offset time format: {offset_text}")
+            self._restore_field_from_marker("offset")
+            return
+
+        # Handle overnight sleep (offset before onset means next day)
+        if offset_timestamp <= onset_timestamp:
+            next_day = base_date + timedelta(days=1)
+            offset_timestamp = self._parse_time_to_timestamp(offset_text, next_day)
+
+        # Update the sleep period
+        self._update_selected_sleep_period(onset_timestamp, offset_timestamp)
+        logger.info(f"Manual sleep times set: {onset_text} - {offset_text}")
 
     def _parse_time_to_timestamp(self, time_text: str, base_date: datetime | date) -> float | None:
         """Parse time text (HH:MM) to timestamp, handling validation."""

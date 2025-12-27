@@ -249,3 +249,35 @@ uv run python -m sleep_scoring_app.data.migration_cli migrate
 
 - **ALWAYS** use numbered migrations in `migrations_registry.py`
 - **NEVER** use `_migrate_*` or `_add_column_if_not_exists`
+
+---
+
+## Known Issues / Technical Debt
+
+### 1. Silent Failures Need Better Logging (HIGH PRIORITY)
+
+**Problem:** Database queries and data loading can fail silently, returning empty results without warning the user.
+
+**Example:** The store's `current_file` was set to full path instead of filename. Database queries returned 0 rows (filename mismatch), algorithms received empty data, and the UI showed nothing - with NO user-visible error.
+
+**Affected areas needing logging improvements:**
+
+| Location | Current Behavior | Should Be |
+|----------|------------------|-----------|
+| `data_loading_service.py:510` | DEBUG log on DB failure | WARNING + user feedback |
+| `plot_algorithm_manager.py:300-320` | Logs error, returns `[]` | Show user why scoring failed |
+| Database queries returning 0 rows | No logging | WARNING when unexpected |
+| `selected_file` setter path conversion | No logging | DEBUG showing conversion |
+
+**Rule:** Any data loading that returns empty/None when data was expected should log at WARNING level with context about what was requested and why it failed.
+
+### 2. Path vs Filename Convention
+
+**CRITICAL:** Database uses **filename only** as the key (e.g., `DEMO-001.csv`), never full paths.
+
+- `store.state.current_file` → filename only
+- `FileInfo.filename` → filename only
+- `FileInfo.source_path` → full path (for file operations only)
+- All database queries → use filename only
+
+**Fixed in:** `main_window.py:291-305` - setter now extracts filename from any path passed to it.

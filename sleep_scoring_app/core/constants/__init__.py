@@ -23,6 +23,7 @@ You can import directly from the submodules for more specific imports:
 
 # Algorithm constants
 from .algorithms import (
+    AlgorithmOutputColumn,
     AlgorithmParams,
     AlgorithmResult,
     AlgorithmType,
@@ -124,6 +125,7 @@ __all__ = [
     # UI constants (DEPRECATED - import from sleep_scoring_app.ui.constants instead)
     "AlgorithmHelpText",
     # Algorithm constants
+    "AlgorithmOutputColumn",
     "AlgorithmParams",
     "AlgorithmResult",
     "AlgorithmTooltip",
