@@ -17,6 +17,7 @@ from sleep_scoring_app.core.constants import ActivityDataPreference, FileSourceT
 from sleep_scoring_app.core.dataclasses import FileInfo
 from sleep_scoring_app.core.exceptions import DatabaseError, DataLoadingError, ErrorCodes, ValidationError
 from sleep_scoring_app.core.validation import InputValidator
+from sleep_scoring_app.utils.date_range import get_range_for_view_mode
 
 if TYPE_CHECKING:
     from sleep_scoring_app.data.database import DatabaseManager
@@ -318,15 +319,10 @@ class DataLoadingService:
             else:
                 target_datetime = target_date
 
-            # Calculate time range
-            if hours == 24:
-                # 24h: noon to noon (12:00 PM current day to 12:00 PM next day)
-                start_time = target_datetime.replace(hour=12, minute=0, second=0, microsecond=0)
-                end_time = start_time + timedelta(hours=24)
-            else:
-                # 48h: midnight to midnight + 48h
-                start_time = target_datetime.replace(hour=0, minute=0, second=0, microsecond=0)
-                end_time = start_time + timedelta(hours=48)
+            # Calculate time range using centralized utility
+            date_range = get_range_for_view_mode(target_datetime, hours)
+            start_time = date_range.start
+            end_time = date_range.end
 
             # Load from database with specified activity column
             timestamps, activities = self.db_manager.load_raw_activity_data(filename, start_time, end_time, activity_column=activity_column)
@@ -391,14 +387,10 @@ class DataLoadingService:
             else:
                 target_datetime = target_date
 
-            if hours == 24:
-                # 24h: noon to noon (12:00 PM current day to 12:00 PM next day)
-                start_time = target_datetime.replace(hour=12, minute=0, second=0)
-                end_time = start_time + timedelta(hours=24)
-            else:
-                # 48h: midnight to midnight + 48h
-                start_time = target_datetime.replace(hour=0, minute=0, second=0)
-                end_time = start_time + timedelta(hours=48)
+            # Calculate time range using centralized utility
+            date_range = get_range_for_view_mode(target_datetime, hours)
+            start_time = date_range.start
+            end_time = date_range.end
 
             # Filter data to time range
             filtered_timestamps = []
@@ -486,14 +478,10 @@ class DataLoadingService:
         else:
             target_datetime = target_date
 
-        if hours == 48:
-            # 48hr ALWAYS uses midnight to midnight+48 for consistency
-            start_time = target_datetime.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_time = start_time + timedelta(hours=48)
-        else:
-            # 24hr uses noon to noon
-            start_time = target_datetime.replace(hour=12, minute=0, second=0, microsecond=0)
-            end_time = start_time + timedelta(hours=24)
+        # Calculate time range using centralized utility
+        date_range = get_range_for_view_mode(target_datetime, hours)
+        start_time = date_range.start
+        end_time = date_range.end
 
         # Always load axis_y data specifically
         try:

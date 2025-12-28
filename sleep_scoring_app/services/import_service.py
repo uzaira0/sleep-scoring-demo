@@ -212,7 +212,9 @@ class ImportService:
             assert column_mapping.activity_col is not None
 
             # Process timestamps using transformer
-            timestamps = self.csv_transformer.process_timestamps(df, column_mapping.date_col, column_mapping.time_col)
+            timestamps, detected_epoch_seconds = self.csv_transformer.process_timestamps(
+                df, column_mapping.date_col, column_mapping.time_col
+            )
             if timestamps is None:
                 error_msg = (
                     f"File {filename}: Failed to parse timestamps. "
@@ -225,6 +227,16 @@ class ImportService:
                 if progress:
                     progress.add_error(error_msg)
                 return False
+
+            # Warn if epoch length is not 60 seconds (standard for sleep scoring algorithms)
+            if detected_epoch_seconds is not None and detected_epoch_seconds != 60:
+                warning_msg = (
+                    f"File {filename}: Detected {detected_epoch_seconds}-second epochs. "
+                    f"Sleep scoring algorithms (Sadeh, Cole-Kripke) require 60-second epochs for accurate results."
+                )
+                logger.warning(warning_msg)
+                if progress:
+                    progress.add_warning(warning_msg)
 
             # Import data using transaction
             success = self._import_data_transaction(

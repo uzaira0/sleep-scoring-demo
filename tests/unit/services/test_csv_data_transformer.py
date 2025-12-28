@@ -260,16 +260,17 @@ class TestProcessTimestamps(TestCSVDataTransformer):
     def test_process_separate_date_time(self, transformer: CSVDataTransformer, sample_csv: Path) -> None:
         """Should combine separate date and time columns."""
         df = transformer.load_csv(sample_csv, skip_rows=0)
-        timestamps = transformer.process_timestamps(df, "Date", "Time")
+        timestamps, epoch_seconds = transformer.process_timestamps(df, "Date", "Time")
 
         assert timestamps is not None
         assert len(timestamps) == 3
         assert "2024-01-01T12:00:00" in timestamps[0]
+        assert epoch_seconds == 60  # Sample data has 1-minute intervals
 
     def test_process_combined_datetime(self, transformer: CSVDataTransformer, combined_datetime_csv: Path) -> None:
         """Should process combined datetime column."""
         df = transformer.load_csv(combined_datetime_csv, skip_rows=0)
-        timestamps = transformer.process_timestamps(df, "DateTime", None)
+        timestamps, epoch_seconds = transformer.process_timestamps(df, "DateTime", None)
 
         assert timestamps is not None
         assert len(timestamps) == 2
@@ -277,21 +278,23 @@ class TestProcessTimestamps(TestCSVDataTransformer):
     def test_process_missing_date_column(self, transformer: CSVDataTransformer, sample_csv: Path) -> None:
         """Should return None if date column doesn't exist."""
         df = transformer.load_csv(sample_csv, skip_rows=0)
-        timestamps = transformer.process_timestamps(df, "NonexistentDate", "Time")
+        timestamps, epoch_seconds = transformer.process_timestamps(df, "NonexistentDate", "Time")
         assert timestamps is None
+        assert epoch_seconds is None
 
     def test_process_missing_time_column(self, transformer: CSVDataTransformer, sample_csv: Path) -> None:
         """Should return None if time column doesn't exist."""
         df = transformer.load_csv(sample_csv, skip_rows=0)
-        timestamps = transformer.process_timestamps(df, "Date", "NonexistentTime")
+        timestamps, epoch_seconds = transformer.process_timestamps(df, "Date", "NonexistentTime")
         assert timestamps is None
+        assert epoch_seconds is None
 
     def test_process_various_date_formats(self, tmp_path: Path, transformer: CSVDataTransformer) -> None:
         """Should handle various date formats."""
         csv_path = tmp_path / "dates.csv"
         csv_path.write_text("Date,Activity\n01/15/2024,100\n01/16/2024,150\n")
         df = transformer.load_csv(csv_path, skip_rows=0)
-        timestamps = transformer.process_timestamps(df, "Date", None)
+        timestamps, epoch_seconds = transformer.process_timestamps(df, "Date", None)
 
         assert timestamps is not None
         assert len(timestamps) == 2

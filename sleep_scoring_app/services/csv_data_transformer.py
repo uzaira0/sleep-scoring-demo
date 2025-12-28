@@ -280,7 +280,9 @@ class CSVDataTransformer:
 
         return extra_cols
 
-    def process_timestamps(self, df: pd.DataFrame, date_col: str, time_col: str | None) -> list[str] | None:
+    def process_timestamps(
+        self, df: pd.DataFrame, date_col: str, time_col: str | None
+    ) -> tuple[list[str] | None, int | None]:
         """
         Process date and time columns into ISO timestamps.
 
@@ -290,14 +292,15 @@ class CSVDataTransformer:
             time_col: Column name for time, or None if datetime is combined in date_col
 
         Returns:
-            List of ISO format timestamp strings or None if processing fails
+            Tuple of (List of ISO format timestamp strings, detected epoch length in seconds)
+            Returns (None, None) if processing fails
 
         """
         try:
             # Verify date column exists
             if date_col not in df.columns:
                 logger.error("Date column '%s' not found in DataFrame. Available columns: %s", date_col, list(df.columns))
-                return None
+                return None, None
 
             # Handle combined datetime vs separate date/time columns
             if time_col is None:
@@ -308,7 +311,7 @@ class CSVDataTransformer:
                 # Separate date and time columns
                 if time_col not in df.columns:
                     logger.error("Time column '%s' not found in DataFrame. Available columns: %s", time_col, list(df.columns))
-                    return None
+                    return None, None
                 datetime_strings = df[date_col].astype(str) + " " + df[time_col].astype(str)
 
             # Debug: show sample data
@@ -324,23 +327,29 @@ class CSVDataTransformer:
                     timestamps = pd.to_datetime(datetime_strings, infer_datetime_format=True)
                 except Exception as infer_error:
                     logger.exception("Inferred datetime parsing also failed: %s", infer_error)
-                    return None
+                    return None, None
 
             # Convert to ISO format strings
             iso_timestamps = [ts.isoformat() for ts in timestamps]
 
-            # Validate intervals (should be roughly 1 minute)
+            # Detect epoch length from data intervals
+            detected_epoch_seconds: int | None = None
             if len(iso_timestamps) > 1:
                 first_interval = timestamps.iloc[1] - timestamps.iloc[0]
-                if abs(first_interval.total_seconds() - 60) > 30:  # Allow 30s tolerance
-                    logger.warning("Data intervals may not be exactly 1 minute: %s", first_interval)
+                detected_epoch_seconds = int(round(first_interval.total_seconds()))
+                if detected_epoch_seconds != 60:
+                    logger.warning(
+                        "Data epoch length is %d seconds (expected 60s). "
+                        "Some algorithms require 60-second epochs.",
+                        detected_epoch_seconds,
+                    )
 
-            logger.debug("Successfully processed %s timestamps", len(iso_timestamps))
-            return iso_timestamps
+            logger.debug("Successfully processed %s timestamps (epoch length: %ss)", len(iso_timestamps), detected_epoch_seconds)
+            return iso_timestamps, detected_epoch_seconds
 
         except Exception:
             logger.exception("Failed to process timestamps")
-            return None
+            return None, None
 
     def transform_activity_data(self, df: pd.DataFrame, activity_col: str) -> list[float]:
         """

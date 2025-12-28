@@ -34,6 +34,7 @@ from sleep_scoring_app.ui.widgets.plot_algorithm_manager import PlotAlgorithmMan
 from sleep_scoring_app.ui.widgets.plot_marker_renderer import PlotMarkerRenderer
 from sleep_scoring_app.ui.widgets.plot_overlay_renderer import PlotOverlayRenderer
 from sleep_scoring_app.ui.widgets.plot_state_serializer import PlotStateSerializer
+from sleep_scoring_app.utils.date_range import get_range_for_view_mode
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -506,20 +507,10 @@ class ActivityPlotWidget(pg.PlotWidget):
             # If no data and no current_date, use current date
             target_date = datetime.now()
 
-        # Convert date to datetime if needed
-        if isinstance(target_date, date) and not isinstance(target_date, datetime):
-            target_datetime = datetime.combine(target_date, datetime.min.time())
-        else:
-            target_datetime = target_date
-
-        if view_hours == 24:
-            # 24h: noon to noon next day
-            expected_start = target_datetime.replace(hour=12, minute=0, second=0, microsecond=0)
-            expected_end = expected_start + timedelta(days=1)
-        else:
-            # 48h: midnight to midnight + 48h
-            expected_start = target_datetime.replace(hour=0, minute=0, second=0, microsecond=0)
-            expected_end = expected_start + timedelta(hours=48)
+        # Calculate date range using centralized utility
+        date_range = get_range_for_view_mode(target_date, view_hours)
+        expected_start = date_range.start
+        expected_end = date_range.end
 
         # Set data boundaries to expected full range (not actual data range)
         self.data_start_time = expected_start.timestamp()
@@ -625,20 +616,10 @@ class ActivityPlotWidget(pg.PlotWidget):
             # If no data and no current_date, use current date
             target_date = datetime.now()
 
-        # Convert date to datetime if needed
-        if isinstance(target_date, date) and not isinstance(target_date, datetime):
-            target_datetime = datetime.combine(target_date, datetime.min.time())
-        else:
-            target_datetime = target_date
-
-        if view_hours == 24:
-            # 24h: noon to noon next day
-            expected_start = target_datetime.replace(hour=12, minute=0, second=0, microsecond=0)
-            expected_end = expected_start + timedelta(days=1)
-        else:
-            # 48h: midnight to midnight + 48h
-            expected_start = target_datetime.replace(hour=0, minute=0, second=0, microsecond=0)
-            expected_end = expected_start + timedelta(hours=48)
+        # Calculate date range using centralized utility
+        date_range = get_range_for_view_mode(target_date, view_hours)
+        expected_start = date_range.start
+        expected_end = date_range.end
 
         # Just update the view range, not the data
         start_time = expected_start.timestamp()
@@ -708,20 +689,10 @@ class ActivityPlotWidget(pg.PlotWidget):
             # If no data and no current_date, use current date
             target_date = datetime.now()
 
-        # Convert date to datetime if needed
-        if isinstance(target_date, date) and not isinstance(target_date, datetime):
-            target_datetime = datetime.combine(target_date, datetime.min.time())
-        else:
-            target_datetime = target_date
-
-        if view_hours == 24:
-            # 24h: noon to noon next day
-            expected_start = target_datetime.replace(hour=12, minute=0, second=0, microsecond=0)
-            expected_end = expected_start + timedelta(days=1)
-        else:
-            # 48h: midnight to midnight + 48h
-            expected_start = target_datetime.replace(hour=0, minute=0, second=0, microsecond=0)
-            expected_end = expected_start + timedelta(hours=48)
+        # Calculate date range using centralized utility
+        date_range = get_range_for_view_mode(target_date, view_hours)
+        expected_start = date_range.start
+        expected_end = date_range.end
 
         # Set data boundaries to expected full range
         self.data_start_time = expected_start.timestamp()
@@ -733,7 +704,7 @@ class ActivityPlotWidget(pg.PlotWidget):
         # Update Y-axis max based on actual data if not already set or if data changed
         # This ensures the plot displays properly on first load
         if activity_data is not None and len(activity_data) > 0:
-            current_max = max(activity_data) if hasattr(activity_data, "__iter__") else 100
+            current_max = max(activity_data) if hasattr(activity_data, "__iter__") else 100  # KEEP: Duck typing for iterable
             # Only update if we don't have a valid max or if this is significantly different
             if self.data_max_y <= 100 or current_max > self.data_max_y:
                 self.data_max_y = current_max * 1.5
@@ -1485,12 +1456,12 @@ class ActivityPlotWidget(pg.PlotWidget):
         # 1. Convert our datetime timestamps to unix array for comparison
         # We cache this array if it's not already there for performance
         if (
-            not hasattr(self, "_cached_unix_timestamps")
+            not hasattr(self, "_cached_unix_timestamps")  # KEEP: Cache existence check
             or self._cached_unix_timestamps is None
             or len(self._cached_unix_timestamps) != len(self.timestamps)
         ):
             logger.info(f"MARKER DRAG: Rebuilding timestamp cache from {len(self.timestamps)} timestamps")
-            self._cached_unix_timestamps = np.array([ts.timestamp() if hasattr(ts, "timestamp") else ts for ts in self.timestamps])
+            self._cached_unix_timestamps = np.array([ts.timestamp() if hasattr(ts, "timestamp") else ts for ts in self.timestamps])  # KEEP: Duck typing for datetime
             logger.info(f"MARKER DRAG: Cache range: {self._cached_unix_timestamps[0]} to {self._cached_unix_timestamps[-1]}")
 
         # 2. Use binary search

@@ -220,16 +220,22 @@ class DiaryIntegrationManager:
                 if onset_time and onset_time != "--:--":
                     onset_ts = convert_time_to_timestamp(onset_time)
 
-                    # Check if onset is in early morning hours (midnight to 6 AM) - likely next day
-                    # Parse the hour from the onset time
-                    try:
-                        onset_hour = int(onset_time.split(":")[0])
-                        # If onset is between midnight and 6 AM, it's likely the next day
-                        if 0 <= onset_hour < 6:
-                            onset_ts = convert_time_to_timestamp(onset_time, is_overnight=True)
-                            logger.info(f"Adjusted onset to next day for early morning time: {onset_time}")
-                    except (ValueError, IndexError):
-                        pass  # Keep original timestamp if parsing fails
+                    # Check if auto-adjustment for early morning is enabled in config
+                    auto_adjust_enabled = False
+                    if self.services.config_manager and self.services.config_manager.config:
+                        auto_adjust_enabled = self.services.config_manager.config.diary_auto_adjust_early_morning
+
+                    if auto_adjust_enabled:
+                        # Check if onset is in early morning hours (midnight to 6 AM) - likely next day
+                        # Parse the hour from the onset time
+                        try:
+                            onset_hour = int(onset_time.split(":")[0])
+                            # If onset is between midnight and 6 AM, it's likely the next day
+                            if 0 <= onset_hour < 6:
+                                onset_ts = convert_time_to_timestamp(onset_time, is_overnight=True)
+                                logger.info(f"Auto-adjusted onset to next day for early morning time: {onset_time}")
+                        except (ValueError, IndexError):
+                            pass  # Keep original timestamp if parsing fails
 
                     logger.info(f"Setting main sleep onset from diary: {onset_time}")
 

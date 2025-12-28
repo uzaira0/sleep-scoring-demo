@@ -6,13 +6,16 @@ Handles participant info extraction, time filtering, and database queries.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
-from typing import TYPE_CHECKING
+from datetime import timedelta
+from typing import TYPE_CHECKING, Any
 
-from sleep_scoring_app.core.dataclasses import ParticipantInfo
 from sleep_scoring_app.core.exceptions import DatabaseError, ValidationError
+from sleep_scoring_app.utils.date_range import get_24h_range
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
+    from sleep_scoring_app.core.dataclasses import ParticipantInfo
     from sleep_scoring_app.data.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
@@ -27,17 +30,10 @@ class DataQueryService:
 
     def filter_to_24h_view(self, timestamps_48h, activity_data_48h, target_date) -> tuple[list[datetime], list[float]]:
         """Filter 48h dataset to 24h noon-to-noon view."""
-        from datetime import date
-
-        # Convert date to datetime if needed
-        if isinstance(target_date, date) and not isinstance(target_date, datetime):
-            target_datetime = datetime.combine(target_date, datetime.min.time())
-        else:
-            target_datetime = target_date
-
-        # 24h: noon to noon (12:00 PM current day to 12:00 PM next day)
-        start_time = target_datetime.replace(hour=12, minute=0, second=0)
-        end_time = start_time + timedelta(hours=24)
+        # Get date range using centralized utility
+        date_range = get_24h_range(target_date)
+        start_time = date_range.start
+        end_time = date_range.end
 
         filtered_timestamps = []
         filtered_activity = []

@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from sleep_scoring_app.utils.config import ConfigManager
 
 from sleep_scoring_app.core.constants import ActivityDataPreference, MarkerCategory
+from sleep_scoring_app.utils.date_range import get_24h_range, get_48h_range
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +156,7 @@ class SeamlessSourceSwitcher:
 
         try:
             # Capture view range (zoom and pan state)
-            if hasattr(self.plot_widget, "vb") and self.plot_widget.vb:
+            if hasattr(self.plot_widget, "vb") and self.plot_widget.vb:  # KEEP: pyqtgraph ViewBox duck typing
                 view_range = self.plot_widget.vb.viewRange()
                 state["view_range"] = {"x_range": view_range[0], "y_range": view_range[1]}
 
@@ -203,21 +204,18 @@ class SeamlessSourceSwitcher:
                 return False
 
             from datetime import date as date_type
-            from datetime import datetime, timedelta
 
             date_str = state.available_dates[state.current_date_index]
             current_date = date_type.fromisoformat(date_str)
             current_view_mode = state.view_mode_hours
             filename = state.current_file
 
-            # Calculate 48h time range (midnight to midnight + 48h)
-            target_datetime = datetime.combine(current_date, datetime.min.time())
-            start_time_48h = target_datetime.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_time_48h = start_time_48h + timedelta(hours=48)
+            # Calculate 48h time range using centralized utility
+            date_range_48h = get_48h_range(current_date)
 
             # Load 48h main data
             timestamps_48h, activity_data_48h = self.data_service.load_raw_activity_data(
-                filename, start_time_48h, end_time_48h, activity_column=activity_column
+                filename, date_range_48h.start, date_range_48h.end, activity_column=activity_column
             )
 
             if not timestamps_48h or not activity_data_48h:
@@ -225,14 +223,13 @@ class SeamlessSourceSwitcher:
 
             # Filter to current view mode
             if current_view_mode == 24:
-                # 24h: noon to noon (12:00 PM current day to 12:00 PM next day)
-                start_time_24h = target_datetime.replace(hour=12, minute=0, second=0)
-                end_time_24h = start_time_24h + timedelta(hours=24)
+                # 24h: noon to noon using centralized utility
+                date_range_24h = get_24h_range(current_date)
 
                 timestamps = []
                 activity_data = []
                 for i, ts in enumerate(timestamps_48h):
-                    if start_time_24h <= ts <= end_time_24h and i < len(activity_data_48h):
+                    if date_range_24h.start <= ts <= date_range_24h.end and i < len(activity_data_48h):
                         timestamps.append(ts)
                         activity_data.append(activity_data_48h[i])
             else:
@@ -263,15 +260,15 @@ class SeamlessSourceSwitcher:
 
     def _restore_complete_plot_state(self, state: dict) -> None:
         """Restore complete plot state including view range, zoom, and sleep markers."""
-        if hasattr(self.plot_widget, "_update_sleep_scoring_rules"):
-            self.plot_widget._update_sleep_scoring_rules()
+        # PlotWidgetProtocol guarantees _update_sleep_scoring_rules exists
+        self.plot_widget._update_sleep_scoring_rules()
 
         if not state:
             return
 
         try:
             # Restore view range
-            if "view_range" in state and hasattr(self.plot_widget, "vb") and self.plot_widget.vb:
+            if "view_range" in state and hasattr(self.plot_widget, "vb") and self.plot_widget.vb:  # KEEP: pyqtgraph ViewBox duck typing
                 view_range = state["view_range"]
                 self.plot_widget.vb.setRange(xRange=view_range["x_range"], yRange=view_range["y_range"], padding=0)
 

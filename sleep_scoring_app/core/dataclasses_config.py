@@ -174,6 +174,9 @@ class AppConfig:
     auto_populate_nap_markers: bool = True
     auto_save_markers: bool = True  # Auto-save markers when navigating away
 
+    # Diary Integration Settings
+    diary_auto_adjust_early_morning: bool = False  # If True, auto-adjust times 00:00-06:00 to next day (OFF by default)
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON storage (only directory paths)."""
         return {
