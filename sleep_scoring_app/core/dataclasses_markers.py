@@ -3,16 +3,21 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from sleep_scoring_app.core.constants import (
+    AlgorithmType,
     DatabaseColumn,
+    ExportColumn,
     MarkerLimits,
     MarkerType,
     NonwearDataSource,
 )
+
+if TYPE_CHECKING:
+    from sleep_scoring_app.core.dataclasses import ParticipantInfo
 
 
 @dataclass
@@ -472,10 +477,170 @@ class DailyNonwearMarkers:
         )
 
 
+@dataclass
+class SleepMetrics:
+    """
+    Complete sleep metrics for a single analysis date.
+
+    Contains all calculated sleep quality metrics, algorithm outputs,
+    and participant/file metadata. Used for database storage and export.
+    """
+
+    # Use string annotation to avoid circular import
+    participant: ParticipantInfo
+    filename: str
+    analysis_date: str
+    algorithm_type: AlgorithmType = AlgorithmType.SADEH_1994_ACTILIFE
+    daily_sleep_markers: DailySleepMarkers = field(default_factory=DailySleepMarkers)
+
+    # Time strings for display
+    onset_time: str = ""
+    offset_time: str = ""
+
+    # Core sleep metrics
+    total_sleep_time: int | None = None
+    sleep_efficiency: float | None = None
+    total_minutes_in_bed: int | None = None
+    waso: int | None = None
+    awakenings: int | None = None
+    average_awakening_length: float | None = None
+
+    # Activity metrics
+    total_activity: int | None = None
+    movement_index: float | None = None
+    fragmentation_index: float | None = None
+    sleep_fragmentation_index: float | None = None
+
+    # Algorithm values at markers
+    sadeh_onset: int | None = None
+    sadeh_offset: int | None = None
+
+    # Nonwear overlap
+    overlapping_nonwear_minutes_algorithm: int | None = None
+    overlapping_nonwear_minutes_sensor: int | None = None
+
+    # Additional algorithm metadata (for batch scoring)
+    sleep_algorithm_name: str | None = None
+    sleep_period_detector_id: str | None = None
+
+    # Timestamps
+    created_at: str = ""
+    updated_at: str = ""
+
+    # Dynamic fields for period-level metrics (populated by repository)
+    _dynamic_fields: dict[str, Any] = field(default_factory=dict, repr=False)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for database storage."""
+        return {
+            "participant": self.participant.numerical_id if self.participant else None,
+            "participant_group": self.participant.group_str if self.participant else None,
+            "participant_timepoint": self.participant.timepoint_str if self.participant else None,
+            "filename": self.filename,
+            "analysis_date": self.analysis_date,
+            "algorithm_type": self.algorithm_type.value if self.algorithm_type else None,
+            "daily_sleep_markers": self.daily_sleep_markers.to_dict() if self.daily_sleep_markers else None,
+            "onset_time": self.onset_time,
+            "offset_time": self.offset_time,
+            "total_sleep_time": self.total_sleep_time,
+            "sleep_efficiency": self.sleep_efficiency,
+            "total_minutes_in_bed": self.total_minutes_in_bed,
+            "waso": self.waso,
+            "awakenings": self.awakenings,
+            "average_awakening_length": self.average_awakening_length,
+            "total_activity": self.total_activity,
+            "movement_index": self.movement_index,
+            "fragmentation_index": self.fragmentation_index,
+            "sleep_fragmentation_index": self.sleep_fragmentation_index,
+            "sadeh_onset": self.sadeh_onset,
+            "sadeh_offset": self.sadeh_offset,
+            "overlapping_nonwear_minutes_algorithm": self.overlapping_nonwear_minutes_algorithm,
+            "overlapping_nonwear_minutes_sensor": self.overlapping_nonwear_minutes_sensor,
+            "sleep_algorithm_name": self.sleep_algorithm_name,
+            "sleep_period_detector_id": self.sleep_period_detector_id,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            **self._dynamic_fields,
+        }
+
+    def to_export_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for CSV/JSON export with display-friendly keys."""
+        return {
+            ExportColumn.NUMERICAL_PARTICIPANT_ID: self.participant.numerical_id if self.participant else None,
+            ExportColumn.PARTICIPANT_GROUP: self.participant.group_str if self.participant else None,
+            ExportColumn.PARTICIPANT_TIMEPOINT: self.participant.timepoint_str if self.participant else None,
+            "filename": self.filename,
+            ExportColumn.ONSET_DATE: self.analysis_date,
+            ExportColumn.SLEEP_ALGORITHM: self.algorithm_type.value if self.algorithm_type else None,
+            ExportColumn.ONSET_TIME: self.onset_time,
+            ExportColumn.OFFSET_TIME: self.offset_time,
+            ExportColumn.TOTAL_SLEEP_TIME: self.total_sleep_time,
+            ExportColumn.EFFICIENCY: self.sleep_efficiency,
+            ExportColumn.TOTAL_MINUTES_IN_BED: self.total_minutes_in_bed,
+            ExportColumn.WASO: self.waso,
+            ExportColumn.NUMBER_OF_AWAKENINGS: self.awakenings,
+            ExportColumn.AVERAGE_AWAKENING_LENGTH: self.average_awakening_length,
+            ExportColumn.TOTAL_COUNTS: self.total_activity,
+            ExportColumn.MOVEMENT_INDEX: self.movement_index,
+            ExportColumn.FRAGMENTATION_INDEX: self.fragmentation_index,
+            ExportColumn.SLEEP_FRAGMENTATION_INDEX: self.sleep_fragmentation_index,
+            ExportColumn.SADEH_ONSET: self.sadeh_onset,
+            ExportColumn.SADEH_OFFSET: self.sadeh_offset,
+            ExportColumn.OVERLAPPING_NONWEAR_MINUTES_ALGORITHM: self.overlapping_nonwear_minutes_algorithm,
+            ExportColumn.OVERLAPPING_NONWEAR_MINUTES_SENSOR: self.overlapping_nonwear_minutes_sensor,
+            ExportColumn.SAVED_AT: self.updated_at,
+            **self._dynamic_fields,
+        }
+
+    def to_export_dict_list(self) -> list[dict[str, Any]]:
+        """Convert to list of export dictionaries, one per complete sleep period."""
+        complete_periods = self.daily_sleep_markers.get_complete_periods()
+
+        if not complete_periods:
+            # Return single row with empty period data if no complete periods
+            return [self.to_export_dict()]
+
+        # One row per complete period
+        rows = []
+        for i, period in enumerate(complete_periods, 1):
+            row = self.to_export_dict()
+            row[ExportColumn.MARKER_INDEX] = period.marker_index
+            row[ExportColumn.MARKER_TYPE] = period.marker_type.value if period.marker_type else None
+
+            # Override onset/offset with period-specific values
+            if period.onset_timestamp is not None:
+                onset_dt = datetime.fromtimestamp(period.onset_timestamp)
+                row[ExportColumn.ONSET_TIME] = onset_dt.strftime("%H:%M")
+                row[ExportColumn.ONSET_DATE] = onset_dt.strftime("%Y-%m-%d")
+
+            if period.offset_timestamp is not None:
+                offset_dt = datetime.fromtimestamp(period.offset_timestamp)
+                row[ExportColumn.OFFSET_TIME] = offset_dt.strftime("%H:%M")
+                row[ExportColumn.OFFSET_DATE] = offset_dt.strftime("%Y-%m-%d")
+
+            # Get period-specific metrics if available
+            period_key = f"period_{i}_metrics"
+            if period_key in self._dynamic_fields:
+                row.update(self._dynamic_fields[period_key])
+
+            rows.append(row)
+
+        return rows
+
+    def set_dynamic_field(self, key: str, value: Any) -> None:
+        """Set a dynamic field value."""
+        self._dynamic_fields[key] = value
+
+    def get_dynamic_field(self, key: str, default: Any = None) -> Any:
+        """Get a dynamic field value."""
+        return self._dynamic_fields.get(key, default)
+
+
 __all__ = [
     "DailyNonwearMarkers",
     "DailySleepMarkers",
     "ManualNonwearPeriod",
     "NonwearPeriod",
+    "SleepMetrics",
     "SleepPeriod",
 ]

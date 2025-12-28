@@ -708,8 +708,8 @@ class WindowStateManager:
                 self.invalidate_metrics_cache()
                 if self.services.data_service:
                     self.services.data_service.invalidate_marker_status_cache()
-                if hasattr(self.main_window, "update_data_source_status"):
-                    self.main_window.update_data_source_status()
+                # MainWindowProtocol guarantees update_data_source_status exists
+                self.main_window.update_data_source_status()
 
                 # Show success message
                 total_cleared = result.get("total_cleared", 0)

@@ -270,7 +270,7 @@ class TestProcessTimestamps(TestCSVDataTransformer):
     def test_process_combined_datetime(self, transformer: CSVDataTransformer, combined_datetime_csv: Path) -> None:
         """Should process combined datetime column."""
         df = transformer.load_csv(combined_datetime_csv, skip_rows=0)
-        timestamps, epoch_seconds = transformer.process_timestamps(df, "DateTime", None)
+        timestamps, _epoch_seconds = transformer.process_timestamps(df, "DateTime", None)
 
         assert timestamps is not None
         assert len(timestamps) == 2
@@ -294,7 +294,7 @@ class TestProcessTimestamps(TestCSVDataTransformer):
         csv_path = tmp_path / "dates.csv"
         csv_path.write_text("Date,Activity\n01/15/2024,100\n01/16/2024,150\n")
         df = transformer.load_csv(csv_path, skip_rows=0)
-        timestamps, epoch_seconds = transformer.process_timestamps(df, "Date", None)
+        timestamps, _epoch_seconds = transformer.process_timestamps(df, "Date", None)
 
         assert timestamps is not None
         assert len(timestamps) == 2

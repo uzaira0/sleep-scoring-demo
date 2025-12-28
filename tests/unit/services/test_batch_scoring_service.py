@@ -139,9 +139,9 @@ class TestAutoScoreActivityEpochFiles:
         )
 
         assert len(results) == 3
-        # Check that custom algorithm was passed to process function
+        # Check that custom algorithm was passed to process function (4th positional arg, index 3)
         for call in mock_process.call_args_list:
-            assert call[1]["sleep_algorithm"] == custom_algorithm
+            assert call[0][3] == custom_algorithm
 
 
 class TestDiscoverActivityFiles:
@@ -456,11 +456,17 @@ class TestApplySleepRules:
             }
         )
 
-        with patch("sleep_scoring_app.services.batch_scoring_service.SleepPeriodDetectorFactory"):
+        # Create a proper mock detector that returns valid indices
+        mock_detector = MagicMock()
+        mock_detector.apply_rules.return_value = (10, 90)  # Return valid onset/offset indices
+
+        with patch("sleep_scoring_app.services.batch_scoring_service.SleepPeriodDetectorFactory") as mock_factory:
+            mock_factory.create.return_value = mock_detector
             daily_markers = _apply_sleep_rules(activity_df, None, None)
 
-        # Should process with default markers
+        # Should process with detected markers
         assert daily_markers is not None
+        assert daily_markers.period_1 is not None
 
 
 class TestCalculateMetrics:

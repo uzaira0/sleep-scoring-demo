@@ -342,7 +342,7 @@ class SleepScoringMainWindow(QMainWindow):
         # Normalize to YYYY-MM-DD strings for consistent Redux storage
         date_strs = []
         for d in value:
-            if hasattr(d, "strftime"):
+            if hasattr(d, "strftime"):  # KEEP: Duck typing for date/datetime objects
                 date_strs.append(d.strftime("%Y-%m-%d"))
             else:
                 date_strs.append(str(d)[:10])  # Fallback for ISO strings
@@ -588,8 +588,8 @@ class SleepScoringMainWindow(QMainWindow):
 
                     current_date = date.fromisoformat(date_str)
                     weekday_str = current_date.strftime("%A")
-                    if hasattr(self.analysis_tab, "weekday_label"):
-                        self.analysis_tab.weekday_label.setText(f"Day: {weekday_str}")
+                    # AnalysisTab always creates weekday_label in _create_navigation_controls()
+                    self.analysis_tab.weekday_label.setText(f"Day: {weekday_str}")
 
                 # UPDATE THE PLOT with loaded data
                 # Use len() checks for numpy array compatibility (truthiness is ambiguous)
@@ -832,7 +832,8 @@ class SleepScoringMainWindow(QMainWindow):
         logger.info("MAIN WINDOW: on_file_selected_from_table COMPLETE")
 
         # 6. Update activity source dropdown (enable it now that data is loaded)
-        if hasattr(self, "analysis_tab") and self.analysis_tab:
+        # analysis_tab is always created in _init_tabs() before this method is called
+        if self.analysis_tab:
             self.analysis_tab.update_activity_source_dropdown()
 
         # 4. Update session
@@ -875,14 +876,11 @@ class SleepScoringMainWindow(QMainWindow):
         logger.info(f"markers_dirty: {markers_dirty}")
 
         # Check for incomplete sleep marker being placed
-        has_incomplete_sleep_marker = (
-            hasattr(self.plot_widget, "current_marker_being_placed") and self.plot_widget.current_marker_being_placed is not None
-        )
+        # PlotWidgetProtocol guarantees these attributes exist
+        has_incomplete_sleep_marker = self.plot_widget.current_marker_being_placed is not None
 
         # Check for incomplete nonwear marker being placed
-        has_incomplete_nonwear_marker = (
-            hasattr(self.plot_widget, "_current_nonwear_marker_being_placed") and self.plot_widget._current_nonwear_marker_being_placed is not None
-        )
+        has_incomplete_nonwear_marker = self.plot_widget._current_nonwear_marker_being_placed is not None
 
         # Warn about incomplete markers separately (they will be lost)
         if has_incomplete_sleep_marker or has_incomplete_nonwear_marker:
@@ -1449,7 +1447,8 @@ class SleepScoringMainWindow(QMainWindow):
 
         """
         try:
-            if not hasattr(self.plot_widget, "timestamps") or not self.plot_widget.timestamps:
+            # PlotWidgetProtocol guarantees timestamps exists
+            if not self.plot_widget.timestamps:
                 return None
 
             # Parse the time string
@@ -1700,9 +1699,8 @@ class SleepScoringMainWindow(QMainWindow):
 
     def _restore_field_from_marker(self, field_type: str) -> None:
         """Restore field value from current marker."""
-        selected_period = (
-            self.plot_widget.get_selected_marker_period() if hasattr(self.plot_widget, "get_selected_marker_period") else None
-        )  # KEEP: Plot widget duck typing
+        # PlotWidgetProtocol guarantees get_selected_marker_period exists
+        selected_period = self.plot_widget.get_selected_marker_period()
         if not selected_period:
             return
 
@@ -1727,9 +1725,8 @@ class SleepScoringMainWindow(QMainWindow):
             return
 
         # Get the currently selected period from widget (widget owns selection state)
-        selected_period = (
-            self.plot_widget.get_selected_marker_period() if hasattr(self.plot_widget, "get_selected_marker_period") else None
-        )  # KEEP: Plot widget duck typing for selection state
+        # PlotWidgetProtocol guarantees get_selected_marker_period exists
+        selected_period = self.plot_widget.get_selected_marker_period()
 
         if selected_period:
             # Update existing selected period

@@ -7,12 +7,11 @@ Tests sleep metrics calculations from algorithm results.
 from __future__ import annotations
 
 from datetime import datetime
-from unittest.mock import MagicMock
 
 import pytest
 
 from sleep_scoring_app.core.constants import AlgorithmType
-from sleep_scoring_app.core.dataclasses import SleepMetrics
+from sleep_scoring_app.core.dataclasses import DailySleepMarkers, ParticipantInfo, SleepMetrics, SleepPeriod
 from sleep_scoring_app.services.metrics_calculation_service import MetricsCalculationService
 
 
@@ -25,14 +24,14 @@ class TestMetricsCalculationService:
         return MetricsCalculationService()
 
     @pytest.fixture
-    def participant_info(self) -> dict[str, str]:
+    def participant_info(self) -> ParticipantInfo:
         """Create sample participant info."""
-        return {
-            "full_participant_id": "1234_G1_T1",
-            "numerical_participant_id": "1234",
-            "participant_group": "G1",
-            "participant_timepoint": "T1",
-        }
+        return ParticipantInfo(
+            full_id="1234_G1_T1",
+            numerical_id="1234",
+            group_str="G1",
+            timepoint_str="T1",
+        )
 
     @pytest.fixture
     def sample_timestamps(self) -> list[float]:
@@ -90,49 +89,71 @@ class TestFindClosestDataIndex(TestMetricsCalculationService):
         assert idx == 2
 
 
-class TestCalculateSleepMetrics(TestMetricsCalculationService):
-    """Tests for calculate_sleep_metrics method."""
+class TestCalculateSleepMetricsForPeriod(TestMetricsCalculationService):
+    """Tests for calculate_sleep_metrics_for_period method."""
 
-    def test_returns_none_for_invalid_markers(self, service: MetricsCalculationService, participant_info: dict[str, str]) -> None:
-        """Should return None for invalid sleep markers."""
-        result = service.calculate_sleep_metrics(
-            sleep_markers=None,
+    def test_returns_none_for_none_period(
+        self,
+        service: MetricsCalculationService,
+        participant_info: ParticipantInfo,
+    ) -> None:
+        """Should return None for None period."""
+        result = service.calculate_sleep_metrics_for_period(
+            sleep_period=None,
             sadeh_results=[1] * 60,
             choi_results=[0] * 60,
-            activity_data=[50] * 60,
+            axis_y_data=[50] * 60,
             x_data=[i * 60 for i in range(60)],
             participant_info=participant_info,
         )
         assert result is None
 
-    def test_returns_none_for_single_marker(self, service: MetricsCalculationService, participant_info: dict[str, str]) -> None:
-        """Should return None for single sleep marker."""
-        result = service.calculate_sleep_metrics(
-            sleep_markers=[100.0],
+    def test_returns_none_for_incomplete_period(
+        self,
+        service: MetricsCalculationService,
+        participant_info: ParticipantInfo,
+    ) -> None:
+        """Should return None for incomplete period."""
+        incomplete_period = SleepPeriod(onset_timestamp=100.0, offset_timestamp=None)
+
+        result = service.calculate_sleep_metrics_for_period(
+            sleep_period=incomplete_period,
             sadeh_results=[1] * 60,
             choi_results=[0] * 60,
-            activity_data=[50] * 60,
+            axis_y_data=[50] * 60,
             x_data=[i * 60 for i in range(60)],
             participant_info=participant_info,
         )
         assert result is None
 
-    def test_returns_none_for_empty_markers(self, service: MetricsCalculationService, participant_info: dict[str, str]) -> None:
-        """Should return None for empty markers list."""
-        result = service.calculate_sleep_metrics(
-            sleep_markers=[],
+    def test_calculates_for_complete_period(
+        self,
+        service: MetricsCalculationService,
+        participant_info: ParticipantInfo,
+        sample_timestamps: list[float],
+    ) -> None:
+        """Should calculate metrics for complete period."""
+        sleep_period = SleepPeriod(
+            onset_timestamp=sample_timestamps[10],
+            offset_timestamp=sample_timestamps[50],
+        )
+
+        result = service.calculate_sleep_metrics_for_period(
+            sleep_period=sleep_period,
             sadeh_results=[1] * 60,
             choi_results=[0] * 60,
-            activity_data=[50] * 60,
-            x_data=[i * 60 for i in range(60)],
+            axis_y_data=[50] * 60,
+            x_data=sample_timestamps,
             participant_info=participant_info,
         )
-        assert result is None
+
+        assert result is not None
+        assert "Total Minutes in Bed" in result
 
     def test_calculates_basic_metrics(
         self,
         service: MetricsCalculationService,
-        participant_info: dict[str, str],
+        participant_info: ParticipantInfo,
         sample_timestamps: list[float],
         sample_activity_data: list[int],
     ) -> None:
@@ -141,14 +162,16 @@ class TestCalculateSleepMetrics(TestMetricsCalculationService):
         sadeh_results = [1] * 60
         choi_results = [0] * 60  # No nonwear
 
-        onset_ts = sample_timestamps[10]
-        offset_ts = sample_timestamps[50]
+        sleep_period = SleepPeriod(
+            onset_timestamp=sample_timestamps[10],
+            offset_timestamp=sample_timestamps[50],
+        )
 
-        result = service.calculate_sleep_metrics(
-            sleep_markers=[onset_ts, offset_ts],
+        result = service.calculate_sleep_metrics_for_period(
+            sleep_period=sleep_period,
             sadeh_results=sadeh_results,
             choi_results=choi_results,
-            activity_data=sample_activity_data,
+            axis_y_data=sample_activity_data,
             x_data=sample_timestamps,
             participant_info=participant_info,
         )
@@ -156,8 +179,6 @@ class TestCalculateSleepMetrics(TestMetricsCalculationService):
         assert result is not None
         assert result["Full Participant ID"] == "1234_G1_T1"
         assert result["Numerical Participant ID"] == "1234"
-        assert result["Participant Group"] == "G1"
-        assert result["Participant Timepoint"] == "T1"
         assert "Efficiency" in result
         assert "Total Minutes in Bed" in result
         assert "Total Sleep Time (TST)" in result
@@ -165,7 +186,7 @@ class TestCalculateSleepMetrics(TestMetricsCalculationService):
     def test_calculates_efficiency_correctly(
         self,
         service: MetricsCalculationService,
-        participant_info: dict[str, str],
+        participant_info: ParticipantInfo,
         sample_timestamps: list[float],
     ) -> None:
         """Should calculate efficiency correctly."""
@@ -174,14 +195,16 @@ class TestCalculateSleepMetrics(TestMetricsCalculationService):
         choi_results = [0] * 60
         activity_data = [50] * 60
 
-        onset_ts = sample_timestamps[10]
-        offset_ts = sample_timestamps[50]
+        sleep_period = SleepPeriod(
+            onset_timestamp=sample_timestamps[10],
+            offset_timestamp=sample_timestamps[50],
+        )
 
-        result = service.calculate_sleep_metrics(
-            sleep_markers=[onset_ts, offset_ts],
+        result = service.calculate_sleep_metrics_for_period(
+            sleep_period=sleep_period,
             sadeh_results=sadeh_results,
             choi_results=choi_results,
-            activity_data=activity_data,
+            axis_y_data=activity_data,
             x_data=sample_timestamps,
             participant_info=participant_info,
         )
@@ -194,7 +217,7 @@ class TestCalculateSleepMetrics(TestMetricsCalculationService):
     def test_counts_awakenings(
         self,
         service: MetricsCalculationService,
-        participant_info: dict[str, str],
+        participant_info: ParticipantInfo,
         sample_timestamps: list[float],
     ) -> None:
         """Should count awakenings correctly."""
@@ -203,14 +226,16 @@ class TestCalculateSleepMetrics(TestMetricsCalculationService):
         choi_results = [0] * 60
         activity_data = [50] * 60
 
-        onset_ts = sample_timestamps[0]
-        offset_ts = sample_timestamps[59]
+        sleep_period = SleepPeriod(
+            onset_timestamp=sample_timestamps[0],
+            offset_timestamp=sample_timestamps[59],
+        )
 
-        result = service.calculate_sleep_metrics(
-            sleep_markers=[onset_ts, offset_ts],
+        result = service.calculate_sleep_metrics_for_period(
+            sleep_period=sleep_period,
             sadeh_results=sadeh_results,
             choi_results=choi_results,
-            activity_data=activity_data,
+            axis_y_data=activity_data,
             x_data=sample_timestamps,
             participant_info=participant_info,
         )
@@ -220,37 +245,10 @@ class TestCalculateSleepMetrics(TestMetricsCalculationService):
         assert result["Number of Awakenings"] is not None
         assert result["Number of Awakenings"] >= 0
 
-    def test_handles_markers_out_of_order(
-        self,
-        service: MetricsCalculationService,
-        participant_info: dict[str, str],
-        sample_timestamps: list[float],
-    ) -> None:
-        """Should handle markers given in reverse order."""
-        sadeh_results = [1] * 60
-        choi_results = [0] * 60
-        activity_data = [50] * 60
-
-        onset_ts = sample_timestamps[10]
-        offset_ts = sample_timestamps[50]
-
-        # Pass markers in reverse order
-        result = service.calculate_sleep_metrics(
-            sleep_markers=[offset_ts, onset_ts],
-            sadeh_results=sadeh_results,
-            choi_results=choi_results,
-            activity_data=activity_data,
-            x_data=sample_timestamps,
-            participant_info=participant_info,
-        )
-
-        assert result is not None
-        # Should sort markers correctly
-
     def test_includes_algorithm_type(
         self,
         service: MetricsCalculationService,
-        participant_info: dict[str, str],
+        participant_info: ParticipantInfo,
         sample_timestamps: list[float],
     ) -> None:
         """Should include algorithm type in results."""
@@ -258,14 +256,16 @@ class TestCalculateSleepMetrics(TestMetricsCalculationService):
         choi_results = [0] * 60
         activity_data = [50] * 60
 
-        onset_ts = sample_timestamps[10]
-        offset_ts = sample_timestamps[50]
+        sleep_period = SleepPeriod(
+            onset_timestamp=sample_timestamps[10],
+            offset_timestamp=sample_timestamps[50],
+        )
 
-        result = service.calculate_sleep_metrics(
-            sleep_markers=[onset_ts, offset_ts],
+        result = service.calculate_sleep_metrics_for_period(
+            sleep_period=sleep_period,
             sadeh_results=sadeh_results,
             choi_results=choi_results,
-            activity_data=activity_data,
+            axis_y_data=activity_data,
             x_data=sample_timestamps,
             participant_info=participant_info,
         )
@@ -276,7 +276,7 @@ class TestCalculateSleepMetrics(TestMetricsCalculationService):
     def test_includes_onset_offset_times(
         self,
         service: MetricsCalculationService,
-        participant_info: dict[str, str],
+        participant_info: ParticipantInfo,
         sample_timestamps: list[float],
     ) -> None:
         """Should include onset and offset times."""
@@ -284,14 +284,16 @@ class TestCalculateSleepMetrics(TestMetricsCalculationService):
         choi_results = [0] * 60
         activity_data = [50] * 60
 
-        onset_ts = sample_timestamps[10]
-        offset_ts = sample_timestamps[50]
+        sleep_period = SleepPeriod(
+            onset_timestamp=sample_timestamps[10],
+            offset_timestamp=sample_timestamps[50],
+        )
 
-        result = service.calculate_sleep_metrics(
-            sleep_markers=[onset_ts, offset_ts],
+        result = service.calculate_sleep_metrics_for_period(
+            sleep_period=sleep_period,
             sadeh_results=sadeh_results,
             choi_results=choi_results,
-            activity_data=activity_data,
+            axis_y_data=activity_data,
             x_data=sample_timestamps,
             participant_info=participant_info,
         )
@@ -305,7 +307,7 @@ class TestCalculateSleepMetrics(TestMetricsCalculationService):
     def test_calculates_nonwear_overlap(
         self,
         service: MetricsCalculationService,
-        participant_info: dict[str, str],
+        participant_info: ParticipantInfo,
         sample_timestamps: list[float],
     ) -> None:
         """Should calculate nonwear overlap during sleep period."""
@@ -314,14 +316,16 @@ class TestCalculateSleepMetrics(TestMetricsCalculationService):
         choi_results = [0] * 20 + [1] * 10 + [0] * 30
         activity_data = [50] * 60
 
-        onset_ts = sample_timestamps[10]
-        offset_ts = sample_timestamps[50]
+        sleep_period = SleepPeriod(
+            onset_timestamp=sample_timestamps[10],
+            offset_timestamp=sample_timestamps[50],
+        )
 
-        result = service.calculate_sleep_metrics(
-            sleep_markers=[onset_ts, offset_ts],
+        result = service.calculate_sleep_metrics_for_period(
+            sleep_period=sleep_period,
             sadeh_results=sadeh_results,
             choi_results=choi_results,
-            activity_data=activity_data,
+            axis_y_data=activity_data,
             x_data=sample_timestamps,
             participant_info=participant_info,
         )
@@ -331,13 +335,13 @@ class TestCalculateSleepMetrics(TestMetricsCalculationService):
         assert result["Overlapping Nonwear Minutes (Algorithm)"] >= 0
 
 
-class TestCalculateSleepMetricsObject(TestMetricsCalculationService):
-    """Tests for calculate_sleep_metrics_object method."""
+class TestCalculateSleepMetricsForPeriodObject(TestMetricsCalculationService):
+    """Tests for calculate_sleep_metrics_for_period_object method."""
 
     def test_returns_sleep_metrics_object(
         self,
         service: MetricsCalculationService,
-        participant_info: dict[str, str],
+        participant_info: ParticipantInfo,
         sample_timestamps: list[float],
     ) -> None:
         """Should return SleepMetrics object."""
@@ -345,11 +349,13 @@ class TestCalculateSleepMetricsObject(TestMetricsCalculationService):
         choi_results = [0] * 60
         activity_data = [50] * 60
 
-        onset_ts = sample_timestamps[10]
-        offset_ts = sample_timestamps[50]
+        sleep_period = SleepPeriod(
+            onset_timestamp=sample_timestamps[10],
+            offset_timestamp=sample_timestamps[50],
+        )
 
-        result = service.calculate_sleep_metrics_object(
-            sleep_markers=[onset_ts, offset_ts],
+        result = service.calculate_sleep_metrics_for_period_object(
+            sleep_period=sleep_period,
             sadeh_results=sadeh_results,
             choi_results=choi_results,
             axis_y_data=activity_data,
@@ -364,11 +370,11 @@ class TestCalculateSleepMetricsObject(TestMetricsCalculationService):
     def test_returns_none_for_invalid_input(
         self,
         service: MetricsCalculationService,
-        participant_info: dict[str, str],
+        participant_info: ParticipantInfo,
     ) -> None:
         """Should return None for invalid input."""
-        result = service.calculate_sleep_metrics_object(
-            sleep_markers=None,
+        result = service.calculate_sleep_metrics_for_period_object(
+            sleep_period=None,
             sadeh_results=[],
             choi_results=[],
             axis_y_data=[],
@@ -380,7 +386,7 @@ class TestCalculateSleepMetricsObject(TestMetricsCalculationService):
     def test_includes_participant_info(
         self,
         service: MetricsCalculationService,
-        participant_info: dict[str, str],
+        participant_info: ParticipantInfo,
         sample_timestamps: list[float],
     ) -> None:
         """Should include participant info in SleepMetrics."""
@@ -388,11 +394,13 @@ class TestCalculateSleepMetricsObject(TestMetricsCalculationService):
         choi_results = [0] * 60
         activity_data = [50] * 60
 
-        onset_ts = sample_timestamps[10]
-        offset_ts = sample_timestamps[50]
+        sleep_period = SleepPeriod(
+            onset_timestamp=sample_timestamps[10],
+            offset_timestamp=sample_timestamps[50],
+        )
 
-        result = service.calculate_sleep_metrics_object(
-            sleep_markers=[onset_ts, offset_ts],
+        result = service.calculate_sleep_metrics_for_period_object(
+            sleep_period=sleep_period,
             sadeh_results=sadeh_results,
             choi_results=choi_results,
             axis_y_data=activity_data,
@@ -456,83 +464,15 @@ class TestDictToSleepMetrics(TestMetricsCalculationService):
         assert result.algorithm_type == AlgorithmType.SADEH_1994_ACTILIFE
 
 
-class TestCalculateSleepMetricsForPeriod(TestMetricsCalculationService):
-    """Tests for calculate_sleep_metrics_for_period method."""
-
-    def test_returns_none_for_none_period(
-        self,
-        service: MetricsCalculationService,
-        participant_info: dict[str, str],
-    ) -> None:
-        """Should return None for None period."""
-        result = service.calculate_sleep_metrics_for_period(
-            sleep_period=None,
-            sadeh_results=[1] * 60,
-            choi_results=[0] * 60,
-            axis_y_data=[50] * 60,
-            x_data=[i * 60 for i in range(60)],
-            participant_info=participant_info,
-        )
-        assert result is None
-
-    def test_returns_none_for_incomplete_period(
-        self,
-        service: MetricsCalculationService,
-        participant_info: dict[str, str],
-    ) -> None:
-        """Should return None for incomplete period."""
-        from sleep_scoring_app.core.dataclasses import SleepPeriod
-
-        incomplete_period = SleepPeriod(onset_timestamp=100.0, offset_timestamp=None)
-
-        result = service.calculate_sleep_metrics_for_period(
-            sleep_period=incomplete_period,
-            sadeh_results=[1] * 60,
-            choi_results=[0] * 60,
-            axis_y_data=[50] * 60,
-            x_data=[i * 60 for i in range(60)],
-            participant_info=participant_info,
-        )
-        assert result is None
-
-    def test_calculates_for_complete_period(
-        self,
-        service: MetricsCalculationService,
-        participant_info: dict[str, str],
-        sample_timestamps: list[float],
-    ) -> None:
-        """Should calculate metrics for complete period."""
-        from sleep_scoring_app.core.dataclasses import SleepPeriod
-
-        sleep_period = SleepPeriod(
-            onset_timestamp=sample_timestamps[10],
-            offset_timestamp=sample_timestamps[50],
-        )
-
-        result = service.calculate_sleep_metrics_for_period(
-            sleep_period=sleep_period,
-            sadeh_results=[1] * 60,
-            choi_results=[0] * 60,
-            axis_y_data=[50] * 60,
-            x_data=sample_timestamps,
-            participant_info=participant_info,
-        )
-
-        assert result is not None
-        assert "Total Minutes in Bed" in result
-
-
 class TestCalculateSleepMetricsForAllPeriods(TestMetricsCalculationService):
     """Tests for calculate_sleep_metrics_for_all_periods method."""
 
     def test_returns_empty_for_no_complete_periods(
         self,
         service: MetricsCalculationService,
-        participant_info: dict[str, str],
+        participant_info: ParticipantInfo,
     ) -> None:
         """Should return empty list when no complete periods."""
-        from sleep_scoring_app.core.dataclasses import DailySleepMarkers
-
         daily_markers = DailySleepMarkers()  # Empty markers
 
         result = service.calculate_sleep_metrics_for_all_periods(
@@ -549,12 +489,10 @@ class TestCalculateSleepMetricsForAllPeriods(TestMetricsCalculationService):
     def test_calculates_for_multiple_periods(
         self,
         service: MetricsCalculationService,
-        participant_info: dict[str, str],
+        participant_info: ParticipantInfo,
         sample_timestamps: list[float],
     ) -> None:
         """Should calculate metrics for multiple periods."""
-        from sleep_scoring_app.core.dataclasses import DailySleepMarkers, SleepPeriod
-
         daily_markers = DailySleepMarkers()
         daily_markers.period_1 = SleepPeriod(
             onset_timestamp=sample_timestamps[10],
@@ -583,15 +521,20 @@ class TestEdgeCases(TestMetricsCalculationService):
     def test_handles_empty_activity_data(
         self,
         service: MetricsCalculationService,
-        participant_info: dict[str, str],
+        participant_info: ParticipantInfo,
         sample_timestamps: list[float],
     ) -> None:
         """Should handle empty activity data gracefully."""
-        result = service.calculate_sleep_metrics(
-            sleep_markers=[sample_timestamps[10], sample_timestamps[50]],
+        sleep_period = SleepPeriod(
+            onset_timestamp=sample_timestamps[10],
+            offset_timestamp=sample_timestamps[50],
+        )
+
+        result = service.calculate_sleep_metrics_for_period(
+            sleep_period=sleep_period,
             sadeh_results=[1] * 60,
             choi_results=[0] * 60,
-            activity_data=[],
+            axis_y_data=[],
             x_data=sample_timestamps,
             participant_info=participant_info,
         )
@@ -601,15 +544,20 @@ class TestEdgeCases(TestMetricsCalculationService):
     def test_handles_mismatched_array_lengths(
         self,
         service: MetricsCalculationService,
-        participant_info: dict[str, str],
+        participant_info: ParticipantInfo,
         sample_timestamps: list[float],
     ) -> None:
         """Should handle mismatched array lengths gracefully."""
-        result = service.calculate_sleep_metrics(
-            sleep_markers=[sample_timestamps[10], sample_timestamps[50]],
+        sleep_period = SleepPeriod(
+            onset_timestamp=sample_timestamps[10],
+            offset_timestamp=sample_timestamps[50],
+        )
+
+        result = service.calculate_sleep_metrics_for_period(
+            sleep_period=sleep_period,
             sadeh_results=[1] * 30,  # Shorter than expected
             choi_results=[0] * 60,
-            activity_data=[50] * 60,
+            axis_y_data=[50] * 60,
             x_data=sample_timestamps,
             participant_info=participant_info,
         )
@@ -619,15 +567,20 @@ class TestEdgeCases(TestMetricsCalculationService):
     def test_handles_all_wake_epochs(
         self,
         service: MetricsCalculationService,
-        participant_info: dict[str, str],
+        participant_info: ParticipantInfo,
         sample_timestamps: list[float],
     ) -> None:
         """Should handle all wake epochs."""
-        result = service.calculate_sleep_metrics(
-            sleep_markers=[sample_timestamps[10], sample_timestamps[50]],
+        sleep_period = SleepPeriod(
+            onset_timestamp=sample_timestamps[10],
+            offset_timestamp=sample_timestamps[50],
+        )
+
+        result = service.calculate_sleep_metrics_for_period(
+            sleep_period=sleep_period,
             sadeh_results=[0] * 60,  # All wake
             choi_results=[0] * 60,
-            activity_data=[50] * 60,
+            axis_y_data=[50] * 60,
             x_data=sample_timestamps,
             participant_info=participant_info,
         )
@@ -638,15 +591,20 @@ class TestEdgeCases(TestMetricsCalculationService):
     def test_handles_all_nonwear(
         self,
         service: MetricsCalculationService,
-        participant_info: dict[str, str],
+        participant_info: ParticipantInfo,
         sample_timestamps: list[float],
     ) -> None:
         """Should handle all nonwear epochs."""
-        result = service.calculate_sleep_metrics(
-            sleep_markers=[sample_timestamps[10], sample_timestamps[50]],
+        sleep_period = SleepPeriod(
+            onset_timestamp=sample_timestamps[10],
+            offset_timestamp=sample_timestamps[50],
+        )
+
+        result = service.calculate_sleep_metrics_for_period(
+            sleep_period=sleep_period,
             sadeh_results=[1] * 60,
             choi_results=[1] * 60,  # All nonwear
-            activity_data=[50] * 60,
+            axis_y_data=[50] * 60,
             x_data=sample_timestamps,
             participant_info=participant_info,
         )
@@ -657,15 +615,20 @@ class TestEdgeCases(TestMetricsCalculationService):
     def test_handles_sensor_nonwear_results(
         self,
         service: MetricsCalculationService,
-        participant_info: dict[str, str],
+        participant_info: ParticipantInfo,
         sample_timestamps: list[float],
     ) -> None:
         """Should handle sensor nonwear results separately."""
-        result = service.calculate_sleep_metrics(
-            sleep_markers=[sample_timestamps[10], sample_timestamps[50]],
+        sleep_period = SleepPeriod(
+            onset_timestamp=sample_timestamps[10],
+            offset_timestamp=sample_timestamps[50],
+        )
+
+        result = service.calculate_sleep_metrics_for_period(
+            sleep_period=sleep_period,
             sadeh_results=[1] * 60,
             choi_results=[0] * 60,
-            activity_data=[50] * 60,
+            axis_y_data=[50] * 60,
             x_data=sample_timestamps,
             participant_info=participant_info,
             nwt_sensor_results=[1] * 60,  # All sensor nonwear

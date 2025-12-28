@@ -589,6 +589,12 @@ class DataSettingsTab(QWidget):
         self.nwt_progress_bar.setVisible(False)
         nwt_layout.addWidget(self.nwt_progress_bar)
 
+        # Status label
+        self.nwt_status_label = QLabel("")
+        self.nwt_status_label.setStyleSheet("color: #666; font-size: 10px;")
+        self.nwt_status_label.setWordWrap(True)
+        nwt_layout.addWidget(self.nwt_status_label)
+
         # Clear button
         clear_layout = QHBoxLayout()
         clear_layout.addStretch()
@@ -1210,21 +1216,21 @@ class DataSettingsTab(QWidget):
 
     def _show_activity_status(self, message: str, error: bool = False) -> None:
         """Show status message for activity data import."""
-        if hasattr(self, "activity_status_label"):
-            self.activity_status_label.setText(message)
-            if error:
-                self.activity_status_label.setStyleSheet("color: #d32f2f; font-size: 10px;")
-            else:
-                self.activity_status_label.setStyleSheet("color: #666; font-size: 10px;")
+        # activity_status_label is always created in _create_activity_data_section()
+        self.activity_status_label.setText(message)
+        if error:
+            self.activity_status_label.setStyleSheet("color: #d32f2f; font-size: 10px;")
+        else:
+            self.activity_status_label.setStyleSheet("color: #666; font-size: 10px;")
 
     def _show_nwt_status(self, message: str, error: bool = False) -> None:
         """Show status message for NWT sensor data import."""
-        if hasattr(self, "nwt_status_label"):
-            self.nwt_status_label.setText(message)
-            if error:
-                self.nwt_status_label.setStyleSheet("color: #d32f2f; font-size: 10px;")
-            else:
-                self.nwt_status_label.setStyleSheet("color: #666; font-size: 10px;")
+        # nwt_status_label is always created in _create_nwt_data_section()
+        self.nwt_status_label.setText(message)
+        if error:
+            self.nwt_status_label.setStyleSheet("color: #d32f2f; font-size: 10px;")
+        else:
+            self.nwt_status_label.setStyleSheet("color: #666; font-size: 10px;")
 
     def _show_diary_status(self, message: str, error: bool = False) -> None:
         """Show status message for diary import."""

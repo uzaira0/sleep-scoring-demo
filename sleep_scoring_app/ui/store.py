@@ -416,7 +416,7 @@ def ui_reducer(state: UIState, action: Action) -> UIState:
             # MW-04 FIX: ROBUST NORMALIZATION to pure YYYY-MM-DD strings
             formatted_dates = []
             for d in raw_dates:
-                if hasattr(d, "isoformat"):
+                if hasattr(d, "isoformat"):  # KEEP: Duck typing for date/datetime objects
                     # Datetime or Date object
                     formatted_dates.append(d.isoformat()[:10])
                 else:

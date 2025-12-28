@@ -242,9 +242,11 @@ class TestGT3XLoaderFileLoading:
 
     def test_load_file_not_found(self, gt3x_loader: GT3XDataSourceLoader, tmp_path) -> None:
         """Test loading non-existent file raises error."""
+        from sleep_scoring_app.core.exceptions import ValidationError
+
         nonexistent = tmp_path / "nonexistent.gt3x"
 
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(ValidationError):
             gt3x_loader.load_file(nonexistent)
 
     def test_load_invalid_zip(self, gt3x_loader: GT3XDataSourceLoader, tmp_path) -> None:

@@ -280,9 +280,7 @@ class CSVDataTransformer:
 
         return extra_cols
 
-    def process_timestamps(
-        self, df: pd.DataFrame, date_col: str, time_col: str | None
-    ) -> tuple[list[str] | None, int | None]:
+    def process_timestamps(self, df: pd.DataFrame, date_col: str, time_col: str | None) -> tuple[list[str] | None, int | None]:
         """
         Process date and time columns into ISO timestamps.
 
@@ -336,11 +334,10 @@ class CSVDataTransformer:
             detected_epoch_seconds: int | None = None
             if len(iso_timestamps) > 1:
                 first_interval = timestamps.iloc[1] - timestamps.iloc[0]
-                detected_epoch_seconds = int(round(first_interval.total_seconds()))
+                detected_epoch_seconds = round(first_interval.total_seconds())
                 if detected_epoch_seconds != 60:
                     logger.warning(
-                        "Data epoch length is %d seconds (expected 60s). "
-                        "Some algorithms require 60-second epochs.",
+                        "Data epoch length is %d seconds (expected 60s). Some algorithms require 60-second epochs.",
                         detected_epoch_seconds,
                     )
 

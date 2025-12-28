@@ -95,7 +95,8 @@ class MarkerTableManager:
             # Fall back to getting it from the plot widget via services
             if self.services.plot_widget and self.services.plot_widget.algorithm_manager:
                 algorithm = self.services.plot_widget.algorithm_manager.get_sleep_scoring_algorithm()
-                if algorithm and hasattr(algorithm, "name"):
+                # SleepScoringAlgorithm Protocol guarantees name property exists
+                if algorithm:
                     return algorithm.name
 
         except Exception as e:

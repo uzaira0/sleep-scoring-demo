@@ -1461,7 +1461,9 @@ class ActivityPlotWidget(pg.PlotWidget):
             or len(self._cached_unix_timestamps) != len(self.timestamps)
         ):
             logger.info(f"MARKER DRAG: Rebuilding timestamp cache from {len(self.timestamps)} timestamps")
-            self._cached_unix_timestamps = np.array([ts.timestamp() if hasattr(ts, "timestamp") else ts for ts in self.timestamps])  # KEEP: Duck typing for datetime
+            self._cached_unix_timestamps = np.array(
+                [ts.timestamp() if hasattr(ts, "timestamp") else ts for ts in self.timestamps]
+            )  # KEEP: Duck typing for datetime
             logger.info(f"MARKER DRAG: Cache range: {self._cached_unix_timestamps[0]} to {self._cached_unix_timestamps[-1]}")
 
         # 2. Use binary search

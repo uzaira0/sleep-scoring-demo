@@ -215,9 +215,11 @@ class TestCSVLoaderFileLoading:
 
     def test_load_file_not_found(self, csv_loader: CSVDataSourceLoader, tmp_path) -> None:
         """Test loading non-existent file raises error."""
+        from sleep_scoring_app.core.exceptions import ValidationError
+
         nonexistent = tmp_path / "nonexistent.csv"
 
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(ValidationError):
             csv_loader.load_file(nonexistent)
 
     def test_load_file_custom_skip_rows(self, csv_loader: CSVDataSourceLoader, tmp_path) -> None:
@@ -423,9 +425,11 @@ class TestCSVLoaderMetadataExtraction:
 
     def test_get_file_metadata_not_found(self, csv_loader: CSVDataSourceLoader, tmp_path) -> None:
         """Test metadata extraction for non-existent file raises error."""
+        from sleep_scoring_app.core.exceptions import ValidationError
+
         nonexistent = tmp_path / "nonexistent.csv"
 
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(ValidationError):
             csv_loader.get_file_metadata(nonexistent)
 
     def test_load_file_includes_metadata(self, csv_loader: CSVDataSourceLoader, sample_csv_file) -> None:

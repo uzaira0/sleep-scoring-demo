@@ -679,7 +679,7 @@ class TestExportWorkflow:
         expected_columns = [
             "Numerical Participant ID",
             "filename",
-            "Sleep Date",
+            "Onset Date",
             "Onset Time",
             "Offset Time",
             "Total Sleep Time (TST)",

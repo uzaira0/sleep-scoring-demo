@@ -47,7 +47,7 @@ class TestFileLoadingWorkflow:
         assert len(window.available_files) > 0
 
         # Step 3: Select a file
-        window.selected_file = sample_file_list[0]["path"]
+        window.selected_file = sample_file_list[0].source_path
 
         # Step 4: Date dropdown should be populated
         base_date = datetime(2021, 4, 20).date()
@@ -96,7 +96,7 @@ class TestFileLoadingWorkflow:
         window = setup_workflow
 
         # Select file
-        window.selected_file = sample_file_list[0]["path"]
+        window.selected_file = sample_file_list[0].source_path
 
         # Dates should be extracted
         window.populate_date_dropdown = Mock()
@@ -126,11 +126,11 @@ class TestFileLoadingWorkflow:
         window = setup_workflow
 
         # Load first file
-        window.selected_file = sample_file_list[0]["path"]
+        window.selected_file = sample_file_list[0].source_path
         window.available_dates = [datetime(2021, 4, 20).date()]
 
         # Switch to second file
-        window.selected_file = sample_file_list[1]["path"]
+        window.selected_file = sample_file_list[1].source_path
         window.available_dates = [datetime(2021, 5, 15).date()]
 
         # Plot should be updated

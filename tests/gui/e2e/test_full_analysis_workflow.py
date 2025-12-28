@@ -65,7 +65,7 @@ class TestFullAnalysisWorkflow:
         assert len(window.available_files) > 0
 
         # STEP 2: Select a file
-        window.selected_file = sample_file_list[0]["path"]
+        window.selected_file = sample_file_list[0].source_path
         assert window.selected_file is not None
 
         # STEP 3: Populate dates for selected file
@@ -117,7 +117,7 @@ class TestFullAnalysisWorkflow:
         window = setup_full_workflow
 
         # Analyze first file
-        window.selected_file = sample_file_list[0]["path"]
+        window.selected_file = sample_file_list[0].source_path
         window.available_dates = [datetime(2021, 4, 20).date()]
         window.current_date_index = 0
 
@@ -134,7 +134,7 @@ class TestFullAnalysisWorkflow:
         window.db_manager.save_sleep_metrics.return_value = True
 
         # Switch to second file
-        window.selected_file = sample_file_list[1]["path"]
+        window.selected_file = sample_file_list[1].source_path
         window.available_dates = [datetime(2021, 5, 15).date()]
         window.current_date_index = 0
         window.plot_widget.daily_sleep_markers = DailySleepMarkers()

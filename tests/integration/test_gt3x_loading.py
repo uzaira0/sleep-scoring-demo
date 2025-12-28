@@ -409,17 +409,21 @@ class TestGT3XFileNotFound:
     """Test error handling for missing files."""
 
     def test_load_nonexistent_file_raises(self, gt3x_loader: DataSourceLoader) -> None:
-        """Test loading non-existent file raises FileNotFoundError."""
+        """Test loading non-existent file raises ValidationError."""
+        from sleep_scoring_app.core.exceptions import ValidationError
+
         nonexistent = Path("nonexistent_file.gt3x")
 
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(ValidationError, match="FILE_NOT_FOUND"):
             gt3x_loader.load_file(nonexistent)
 
     def test_get_metadata_nonexistent_file_raises(self, gt3x_loader: DataSourceLoader) -> None:
-        """Test getting metadata from non-existent file raises FileNotFoundError."""
+        """Test getting metadata from non-existent file raises ValidationError."""
+        from sleep_scoring_app.core.exceptions import ValidationError
+
         nonexistent = Path("nonexistent_file.gt3x")
 
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(ValidationError, match="FILE_NOT_FOUND"):
             gt3x_loader.get_file_metadata(nonexistent)
 
 

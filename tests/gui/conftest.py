@@ -16,8 +16,8 @@ import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QMessageBox
 
-from sleep_scoring_app.core.constants import MarkerType, ParticipantGroup, ParticipantTimepoint
-from sleep_scoring_app.core.dataclasses import DailySleepMarkers, ParticipantInfo, SleepMetrics, SleepPeriod
+from sleep_scoring_app.core.constants import FileSourceType, MarkerType, ParticipantGroup, ParticipantTimepoint
+from sleep_scoring_app.core.dataclasses import DailySleepMarkers, FileInfo, ParticipantInfo, SleepMetrics, SleepPeriod
 
 
 @pytest.fixture(autouse=True)
@@ -157,33 +157,33 @@ def sample_sleep_metrics(sample_participant, sample_daily_sleep_markers):
 def sample_file_list():
     """Generate sample file list for testing."""
     return [
-        {
-            "filename": "4000 BO (2021-04-20)60sec.csv",
-            "path": "/test/data/4000 BO (2021-04-20)60sec.csv",
-            "source": "database",
-            "completed_count": 5,
-            "total_count": 10,
-            "start_date": "2021-04-20",
-            "end_date": "2021-04-29",
-        },
-        {
-            "filename": "4001 P1 (2021-05-15)60sec.csv",
-            "path": "/test/data/4001 P1 (2021-05-15)60sec.csv",
-            "source": "database",
-            "completed_count": 8,
-            "total_count": 10,
-            "start_date": "2021-05-15",
-            "end_date": "2021-05-24",
-        },
-        {
-            "filename": "4002 P2 (2021-06-10)60sec.csv",
-            "path": "/test/data/4002 P2 (2021-06-10)60sec.csv",
-            "source": "csv",
-            "completed_count": 0,
-            "total_count": 10,
-            "start_date": "2021-06-10",
-            "end_date": "2021-06-19",
-        },
+        FileInfo(
+            filename="4000 BO (2021-04-20)60sec.csv",
+            source_path=Path("/test/data/4000 BO (2021-04-20)60sec.csv"),
+            source=FileSourceType.DATABASE,
+            completed_count=5,
+            total_dates=10,
+            start_date="2021-04-20",
+            end_date="2021-04-29",
+        ),
+        FileInfo(
+            filename="4001 P1 (2021-05-15)60sec.csv",
+            source_path=Path("/test/data/4001 P1 (2021-05-15)60sec.csv"),
+            source=FileSourceType.DATABASE,
+            completed_count=8,
+            total_dates=10,
+            start_date="2021-05-15",
+            end_date="2021-05-24",
+        ),
+        FileInfo(
+            filename="4002 P2 (2021-06-10)60sec.csv",
+            source_path=Path("/test/data/4002 P2 (2021-06-10)60sec.csv"),
+            source=FileSourceType.CSV,
+            completed_count=0,
+            total_dates=10,
+            start_date="2021-06-10",
+            end_date="2021-06-19",
+        ),
     ]
 
 

@@ -358,8 +358,8 @@ class PlotAlgorithmManager:
 
         # Performance optimization: Convert to unix timestamps for faster matching
         try:
-            main_ts_array = np.array([ts.timestamp() if hasattr(ts, "timestamp") else ts for ts in main_axis_y_timestamps])
-            current_ts_array = np.array([ts.timestamp() if hasattr(ts, "timestamp") else ts for ts in self.timestamps])
+            main_ts_array = np.array([ts.timestamp() if hasattr(ts, "timestamp") else ts for ts in main_axis_y_timestamps])  # KEEP: Duck typing for datetime
+            current_ts_array = np.array([ts.timestamp() if hasattr(ts, "timestamp") else ts for ts in self.timestamps])  # KEEP: Duck typing for datetime
 
             # Map indices using searchsorted (assuming main_ts_array is sorted)
             indices = np.searchsorted(main_ts_array, current_ts_array)

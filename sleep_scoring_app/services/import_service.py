@@ -212,9 +212,7 @@ class ImportService:
             assert column_mapping.activity_col is not None
 
             # Process timestamps using transformer
-            timestamps, detected_epoch_seconds = self.csv_transformer.process_timestamps(
-                df, column_mapping.date_col, column_mapping.time_col
-            )
+            timestamps, detected_epoch_seconds = self.csv_transformer.process_timestamps(df, column_mapping.date_col, column_mapping.time_col)
             if timestamps is None:
                 error_msg = (
                     f"File {filename}: Failed to parse timestamps. "

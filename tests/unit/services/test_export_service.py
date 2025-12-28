@@ -187,7 +187,7 @@ class TestExportManager:
         """Test export handles database errors."""
         from sleep_scoring_app.core.exceptions import DatabaseError, ErrorCodes
 
-        export_manager.db_manager.get_all_sleep_data_for_export.side_effect = DatabaseError("Query failed", ErrorCodes.DATABASE_LOCKED)
+        export_manager.db_manager.get_all_sleep_data_for_export.side_effect = DatabaseError("Query failed", ErrorCodes.DB_QUERY_FAILED)
 
         result = export_manager.export_all_sleep_data()
 
@@ -227,6 +227,8 @@ class TestExportManager:
 
     def test_perform_direct_export_success(self, export_manager, sample_sleep_metrics, tmp_path):
         """Test successful direct export."""
+        from sleep_scoring_app.core.constants import ExportColumn
+
         with patch.object(export_manager, "_ensure_metrics_calculated_for_export"):
             with patch.object(export_manager, "_group_export_data") as mock_group:
                 mock_group.return_value = {"all_data": sample_sleep_metrics}
@@ -235,10 +237,10 @@ class TestExportManager:
                     sample_sleep_metrics,
                     grouping_option=0,
                     output_directory=str(tmp_path),
-                    selected_columns=["Filename", "Participant ID"],
+                    selected_columns=[ExportColumn.NUMERICAL_PARTICIPANT_ID, ExportColumn.TOTAL_SLEEP_TIME],
                 )
 
-        assert result is True
+        assert result.success is True
 
     def test_perform_direct_export_empty_list(self, export_manager, tmp_path):
         """Test direct export with empty metrics list."""
@@ -249,10 +251,12 @@ class TestExportManager:
             selected_columns=[],
         )
 
-        assert result is False
+        assert result.success is False
 
     def test_perform_direct_export_creates_directory(self, export_manager, sample_sleep_metrics, tmp_path):
         """Test that export creates output directory if missing."""
+        from sleep_scoring_app.core.constants import ExportColumn
+
         output_dir = tmp_path / "new_dir"
         assert not output_dir.exists()
 
@@ -264,13 +268,15 @@ class TestExportManager:
                     sample_sleep_metrics,
                     grouping_option=0,
                     output_directory=str(output_dir),
-                    selected_columns=["Filename"],
+                    selected_columns=[ExportColumn.NUMERICAL_PARTICIPANT_ID],
                 )
 
         assert output_dir.exists()
 
     def test_perform_direct_export_column_filtering(self, export_manager, sample_sleep_metrics, tmp_path):
         """Test that column filtering works correctly."""
+        from sleep_scoring_app.core.constants import ExportColumn
+
         with patch.object(export_manager, "_ensure_metrics_calculated_for_export"):
             with patch.object(export_manager, "_group_export_data") as mock_group:
                 mock_group.return_value = {"all_data": sample_sleep_metrics}
@@ -280,7 +286,7 @@ class TestExportManager:
                         sample_sleep_metrics,
                         grouping_option=0,
                         output_directory=str(tmp_path),
-                        selected_columns=["Filename", "Total Sleep Time (TST)"],
+                        selected_columns=[ExportColumn.NUMERICAL_PARTICIPANT_ID, ExportColumn.TOTAL_SLEEP_TIME],
                     )
 
                 # Check that DataFrame was filtered to selected columns
@@ -359,6 +365,8 @@ class TestExportManager:
     @patch("shutil.copy2")
     def test_create_backup_success(self, mock_copy, export_manager, tmp_path):
         """Test successful backup creation."""
+        from sleep_scoring_app.core.constants import DirectoryName
+
         csv_path = tmp_path / "data.csv"
         csv_path.write_text("test,data\n1,2\n")
 
@@ -366,17 +374,21 @@ class TestExportManager:
             backup_path = export_manager._create_backup(csv_path)
 
         assert mock_copy.called
-        assert backup_path.parent.name == ".backups"
+        assert backup_path.parent.name == DirectoryName.BACKUPS
 
-    @patch("shutil.copy2")
-    def test_create_backup_hash_verification_fails(self, mock_copy, export_manager, tmp_path):
+    def test_create_backup_hash_verification_fails(self, export_manager, tmp_path):
         """Test backup creation with hash verification failure."""
+        from sleep_scoring_app.core.constants import DirectoryName
         from sleep_scoring_app.core.exceptions import DatabaseError
 
         csv_path = tmp_path / "data.csv"
         csv_path.write_text("test,data\n1,2\n")
 
-        # Mock different hashes for original and backup
+        # Create backup directory and a dummy backup file that will be created by copy2
+        backup_dir = tmp_path / DirectoryName.BACKUPS
+        backup_dir.mkdir(exist_ok=True)
+
+        # Mock different hashes for original and backup - this will trigger verification failure
         with (
             patch.object(export_manager, "_calculate_file_hash", side_effect=["hash1", "hash2"]),
             pytest.raises(DatabaseError, match="Backup verification failed"),
@@ -386,15 +398,17 @@ class TestExportManager:
     @patch("shutil.copy2")
     def test_create_backup_rotation(self, mock_copy, export_manager, tmp_path):
         """Test that old backups are rotated."""
+        from sleep_scoring_app.core.constants import DirectoryName
+
         csv_path = tmp_path / "data.csv"
         csv_path.write_text("test,data\n1,2\n")
 
-        backup_dir = csv_path.parent / ".backups"
+        backup_dir = csv_path.parent / DirectoryName.BACKUPS
         backup_dir.mkdir()
 
-        # Create 15 old backups (exceeds max_backups of 10)
+        # Create 15 old backups that match the rotation pattern *_data_*.csv
         for i in range(15):
-            old_backup = backup_dir / f"20240101_000{i:02d}_data.csv"
+            old_backup = backup_dir / f"20240101_{i:05d}_data_backup.csv"
             old_backup.touch()
 
         export_manager.max_backups = 10
@@ -402,8 +416,8 @@ class TestExportManager:
         with patch.object(export_manager, "_calculate_file_hash", return_value="abc123"), patch("pathlib.Path.write_text"):
             export_manager._create_backup(csv_path)
 
-        # Should delete oldest backups
-        remaining_backups = list(backup_dir.glob("*.csv"))
+        # Should delete oldest backups (rotation pattern: *_data_*.csv)
+        remaining_backups = list(backup_dir.glob("*_data_*.csv"))
         assert len(remaining_backups) <= export_manager.max_backups
 
 

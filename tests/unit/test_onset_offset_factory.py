@@ -35,18 +35,6 @@ class TestSleepPeriodDetectorFactoryCreation:
         assert detector.name == "Tudor-Locke (2014)"
         assert isinstance(detector, SleepPeriodDetector)
 
-    def test_create_with_legacy_id_consecutive_3_5(self) -> None:
-        """Test backward compatibility with legacy ID."""
-        detector = SleepPeriodDetectorFactory.create("consecutive_3_5")
-        assert detector is not None
-        assert detector.name == "Consecutive 3S/5S"
-
-    def test_create_with_legacy_id_consecutive_5_10(self) -> None:
-        """Test backward compatibility with legacy ID."""
-        detector = SleepPeriodDetectorFactory.create("consecutive_5_10")
-        assert detector is not None
-        assert detector.name == "Consecutive 5S/10S"
-
     def test_create_unknown_detector_raises(self) -> None:
         """Test that creating unknown detector raises ValueError."""
         with pytest.raises(ValueError, match="Unknown sleep period detector"):

@@ -1124,13 +1124,12 @@ class AnalysisTab(QWidget):
 
         """
         try:
-            if hasattr(self.app_state, "get_sleep_algorithm_display_name"):
-                return self.app_state.get_sleep_algorithm_display_name()
+            # AppStateInterface guarantees get_sleep_algorithm_display_name exists
+            return self.app_state.get_sleep_algorithm_display_name()
         except Exception as e:
             logger.warning("Failed to get sleep algorithm name: %s", e)
-
-        # Default fallback
-        return "Sadeh"
+            # Default fallback
+            return "Sadeh"
 
     def _get_algorithm_config(self):
         """Provide algorithm config to plot components."""

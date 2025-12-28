@@ -17,9 +17,6 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    pass
-
 
 @dataclass(frozen=True)
 class DateRange:
@@ -121,11 +118,10 @@ def get_range_for_view_mode(target_date: date | datetime, hours: int) -> DateRan
     """
     if hours == 24:
         return get_24h_range(target_date)
-    elif hours == 48:
+    if hours == 48:
         return get_48h_range(target_date)
-    else:
-        msg = f"Invalid view mode hours: {hours}. Must be 24 or 48."
-        raise ValueError(msg)
+    msg = f"Invalid view mode hours: {hours}. Must be 24 or 48."
+    raise ValueError(msg)
 
 
 def filter_data_to_range(
@@ -154,7 +150,7 @@ def filter_data_to_range(
     filtered_timestamps = []
     filtered_data = []
 
-    for ts, value in zip(timestamps, data):
+    for ts, value in zip(timestamps, data, strict=False):
         if isinstance(ts, datetime):
             ts_float = ts.timestamp()
         else:

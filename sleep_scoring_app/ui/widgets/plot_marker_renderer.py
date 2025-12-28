@@ -518,7 +518,7 @@ class PlotMarkerRenderer:
 
         """
         for line in self.marker_lines:
-            if hasattr(line, "period") and line.period is period and hasattr(line, "marker_type"):
+            if hasattr(line, "period") and line.period is period and hasattr(line, "marker_type"):  # KEEP: Duck typing for pyqtgraph line attributes
                 if line.marker_type == marker_type:
                     line.setPos(new_position)
                     return
@@ -964,7 +964,7 @@ class PlotMarkerRenderer:
 
         """
         for line in self.nonwear_marker_lines:
-            if hasattr(line, "period") and line.period is period and hasattr(line, "marker_type"):
+            if hasattr(line, "period") and line.period is period and hasattr(line, "marker_type"):  # KEEP: Duck typing for pyqtgraph line attributes
                 if line.marker_type == marker_type:
                     line.setPos(new_position)
                     return
