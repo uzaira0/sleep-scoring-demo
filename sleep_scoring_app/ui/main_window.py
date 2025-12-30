@@ -424,6 +424,11 @@ class SleepScoringMainWindow(QMainWindow):
         if 0 <= tab_index < self.tab_widget.count():
             self.tab_widget.setCurrentIndex(tab_index)
 
+        # 5. Restore splitter layout states
+        if self.analysis_tab:
+            states = self.session_manager.get_splitter_states()
+            self.analysis_tab.restore_splitter_states(*states)
+
         logger.info("MAIN WINDOW: _restore_session() COMPLETE")
 
     def _on_tab_changed(self, index: int) -> None:
@@ -466,7 +471,6 @@ class SleepScoringMainWindow(QMainWindow):
 
         # Create status bar
         self.status_bar = self.statusBar()
-        self.status_bar.showMessage("Ready")
         self.status_bar.setStyleSheet("""
             QStatusBar {
                 background-color: #f0f0f0;
@@ -480,14 +484,6 @@ class SleepScoringMainWindow(QMainWindow):
         self.algorithm_compat_label.setStyleSheet("padding: 0 10px; font-weight: bold;")
         self.algorithm_compat_label.setToolTip("Algorithm compatibility status")
         self.status_bar.addPermanentWidget(self.algorithm_compat_label)
-
-        self.data_source_label = QLabel("Data Source: Not configured")
-        self.data_source_label.setStyleSheet("padding: 0 10px;")
-        self.status_bar.addPermanentWidget(self.data_source_label)
-
-        self.file_count_label = QLabel("Files: 0")
-        self.file_count_label.setStyleSheet("padding: 0 10px;")
-        self.status_bar.addPermanentWidget(self.file_count_label)
 
         # Create references to UI elements from tabs for backward compatibility
         self._setup_ui_references()
@@ -2291,6 +2287,11 @@ class SleepScoringMainWindow(QMainWindow):
                 current_tab=self.tab_widget.currentIndex(),
                 window=self,
             )
+
+            # Save splitter layout states
+            if self.analysis_tab:
+                states = self.analysis_tab.save_splitter_states()
+                self.session_manager.save_splitter_states(*states)
 
             # Clean up autosave coordinator
             if self.autosave_coordinator is not None:  # Guaranteed after Phase 2

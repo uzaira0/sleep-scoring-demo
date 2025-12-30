@@ -2,7 +2,7 @@
 """
 Unified File Service.
 Pure data service for file discovery and loading.
-NO UI references allowed.
+NO UI references allowed - services are HEADLESS.
 """
 
 from __future__ import annotations
@@ -19,23 +19,20 @@ from sleep_scoring_app.services.nonwear_service import NonwearDataService
 if TYPE_CHECKING:
     from sleep_scoring_app.core.dataclasses import BatchDeleteResult, DeleteResult, FileInfo
     from sleep_scoring_app.data.database import DatabaseManager
-    from sleep_scoring_app.ui.store import UIStore
 
 logger = logging.getLogger(__name__)
 
 
 class FileService:
-    """Unified file operations service."""
+    """Unified file operations service. Headless - no UI dependencies."""
 
     def __init__(
         self,
         db_manager: DatabaseManager,
-        store: UIStore,
         max_files: int = 1000,
     ) -> None:
-        """Initialize FileService with proper DI."""
+        """Initialize FileService with proper DI. No store dependency - services are headless."""
         self.db_manager = db_manager
-        self.store = store
         self.data_manager = DataManager(database_manager=db_manager)
 
         # File discovery state
@@ -43,11 +40,6 @@ class FileService:
 
         # Initialize internal state
         self._init_state(db_manager)
-
-    @property
-    def available_files(self) -> list[FileInfo]:
-        """Get available files from Redux store (Single Source of Truth)."""
-        return list(self.store.state.available_files)
 
     def _init_state(self, db_manager: DatabaseManager) -> None:
         """Initialize service state and sub-services."""

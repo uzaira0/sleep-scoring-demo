@@ -387,9 +387,24 @@ def ui_reducer(state: UIState, action: Action) -> UIState:
 
         case ActionType.FILE_SELECTED:
             payload = action.payload or {}
+            filename = payload.get("filename")
+
+            # HIGH-005 FIX: Validate and extract filename from path if needed
+            # Database queries require filename-only (e.g., "DEMO-001.csv"), not full paths
+            if filename and ("/" in filename or "\\" in filename):
+                from pathlib import Path
+
+                original = filename
+                filename = Path(filename).name
+                logger.warning(
+                    "FILENAME FORMAT CORRECTED: Received path '%s', extracted filename '%s'. Database queries require filename-only.",
+                    original,
+                    filename,
+                )
+
             return replace(
                 state,
-                current_file=payload.get("filename"),
+                current_file=filename,
                 current_date_index=-1,  # Reset date when file changes
                 available_dates=(),  # Clear dates - will be loaded separately
             )
@@ -519,10 +534,20 @@ def ui_reducer(state: UIState, action: Action) -> UIState:
 
         case ActionType.STATE_LOADED_FROM_SETTINGS:
             payload = action.payload or {}
+
+            # HIGH-005 FIX: Validate and extract filename from path if needed
+            loaded_file = payload.get("current_file", state.current_file)
+            if loaded_file and ("/" in loaded_file or "\\" in loaded_file):
+                from pathlib import Path
+
+                original = loaded_file
+                loaded_file = Path(loaded_file).name
+                logger.warning("FILENAME FORMAT CORRECTED (settings load): Received path '%s', extracted filename '%s'.", original, loaded_file)
+
             # Merge loaded state with current state
             return replace(
                 state,
-                current_file=payload.get("current_file", state.current_file),
+                current_file=loaded_file,
                 view_mode_hours=payload.get("view_mode_hours", state.view_mode_hours),
                 database_mode=payload.get("database_mode", state.database_mode),
                 window_x=payload.get("window_x", state.window_x),
@@ -572,6 +597,8 @@ def ui_reducer(state: UIState, action: Action) -> UIState:
                 last_saved_date=state.available_dates[state.current_date_index]
                 if 0 <= state.current_date_index < len(state.available_dates)
                 else None,
+                # Clear "no sleep" flag when saving markers - saving markers means there IS sleep
+                is_no_sleep_marked=False,
             )
 
         case ActionType.MARKERS_LOADED:

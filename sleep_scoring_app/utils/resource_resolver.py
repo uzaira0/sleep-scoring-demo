@@ -181,3 +181,11 @@ def get_config_path() -> Path:
 def get_diary_config_path(config_filename: str = "diary_mapping.json") -> Path:
     """Get the diary configuration file path."""
     return resource_resolver.get_diary_config_path(config_filename)
+
+
+def get_settings_backup_path() -> Path:
+    """Get the settings backup JSON file path (always in system app data directory)."""
+    # Always use system app data directory for settings backup, regardless of dev/prod mode
+    # This keeps it alongside QSettings data for consistency
+    app_data_dir = resource_resolver._get_app_data_directory()
+    return app_data_dir / "settings_backup.json"

@@ -2,17 +2,23 @@
 """
 Session state manager using QSettings (platform-native storage).
 This is the PRIMARY session recovery mechanism.
+
+Also provides JSON backup for portability and recovery.
 """
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from PyQt6.QtCore import QSettings
 from PyQt6.QtWidgets import QApplication
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from PyQt6.QtWidgets import QMainWindow
 
 
@@ -36,6 +42,11 @@ class SessionStateManager:
     KEY_CURRENT_TAB = "session/current_tab"
     KEY_WINDOW_GEOMETRY = "session/window_geometry"
     KEY_WINDOW_STATE = "session/window_state"
+
+    # Splitter state keys
+    KEY_SPLITTER_TOP_LEVEL = "layout/splitter_top_level"
+    KEY_SPLITTER_MAIN = "layout/splitter_main"
+    KEY_SPLITTER_PLOT_TABLES = "layout/splitter_plot_tables"
 
     def __init__(self) -> None:
         self._settings = QSettings("SleepResearch", "SleepScoringApp")
@@ -170,6 +181,7 @@ class SessionStateManager:
         self._settings.setValue(self.KEY_WINDOW_GEOMETRY, window.saveGeometry())
         self._settings.setValue(self.KEY_WINDOW_STATE, window.saveState())
         self._settings.sync()
+        self.backup_to_json()  # Also save to JSON backup
         logger.info("Saved all session state")
 
     def clear_session(self) -> None:
@@ -183,3 +195,173 @@ class SessionStateManager:
         self._settings.remove(self.KEY_CURRENT_FILE)
         self._settings.remove(self.KEY_DATE_INDEX)
         self._settings.sync()
+
+    # ==================== Splitter State ====================
+
+    def save_splitter_states(
+        self,
+        top_level_state: bytes | None,
+        main_state: bytes | None,
+        plot_tables_state: bytes | None,
+    ) -> None:
+        """Save splitter states for layout persistence."""
+        if top_level_state:
+            self._settings.setValue(self.KEY_SPLITTER_TOP_LEVEL, top_level_state)
+        if main_state:
+            self._settings.setValue(self.KEY_SPLITTER_MAIN, main_state)
+        if plot_tables_state:
+            self._settings.setValue(self.KEY_SPLITTER_PLOT_TABLES, plot_tables_state)
+        self._settings.sync()
+        self.backup_to_json()  # Also save to JSON backup
+        logger.debug("Saved splitter states")
+
+    def get_splitter_states(self) -> tuple[bytes | None, bytes | None, bytes | None]:
+        """Get saved splitter states."""
+        top_level = self._settings.value(self.KEY_SPLITTER_TOP_LEVEL)
+        main = self._settings.value(self.KEY_SPLITTER_MAIN)
+        plot_tables = self._settings.value(self.KEY_SPLITTER_PLOT_TABLES)
+
+        return (
+            bytes(top_level) if top_level else None,
+            bytes(main) if main else None,
+            bytes(plot_tables) if plot_tables else None,
+        )
+
+    # ==================== JSON Backup ====================
+
+    def _get_backup_path(self) -> Path:
+        """Get the path to the JSON backup file."""
+        from sleep_scoring_app.utils.resource_resolver import get_settings_backup_path
+
+        return get_settings_backup_path()
+
+    def _collect_all_settings(self) -> dict[str, Any]:
+        """Collect all QSettings keys and values into a dictionary."""
+        from PyQt6.QtCore import QByteArray
+
+        result: dict[str, Any] = {}
+
+        def collect_group(prefix: str = "") -> None:
+            """Recursively collect all keys from the current group."""
+            for key in self._settings.childKeys():
+                full_key = f"{prefix}{key}" if prefix else key
+
+                try:
+                    value = self._settings.value(key)
+
+                    # Handle QByteArray explicitly
+                    if isinstance(value, QByteArray):
+                        result[full_key] = {"_type": "bytes", "_value": base64.b64encode(bytes(value)).decode("ascii")}
+                    # Handle binary data (bytes/bytearray) by base64 encoding
+                    elif isinstance(value, bytes | bytearray):
+                        result[full_key] = {"_type": "bytes", "_value": base64.b64encode(value).decode("ascii")}
+                    elif value is None:
+                        result[full_key] = {"_type": "none", "_value": None}
+                    else:
+                        # Store primitive types directly
+                        result[full_key] = value
+
+                except TypeError:
+                    # Some QVariant types can't be converted - skip them
+                    logger.debug("Skipping key %s - cannot convert QVariant to Python", full_key)
+
+            # Recurse into child groups
+            for group in self._settings.childGroups():
+                self._settings.beginGroup(group)
+                collect_group(f"{prefix}{group}/")
+                self._settings.endGroup()
+
+        collect_group()
+        return result
+
+    def backup_to_json(self) -> Path | None:
+        """
+        Export all QSettings to a JSON backup file.
+
+        Returns the path to the backup file, or None if backup failed.
+        """
+        try:
+            from pathlib import Path as PathLib
+
+            backup_path = self._get_backup_path()
+            logger.info("Attempting to backup settings to: %s", backup_path)
+
+            # Ensure parent directory exists
+            PathLib(backup_path).parent.mkdir(parents=True, exist_ok=True)
+
+            settings_data = self._collect_all_settings()
+            logger.info("Collected %d settings keys", len(settings_data))
+
+            # Add metadata
+            from datetime import datetime
+
+            backup_data = {
+                "_metadata": {
+                    "created_at": datetime.now().isoformat(),
+                    "app": "SleepScoringApp",
+                    "version": "1.0",
+                },
+                "settings": settings_data,
+            }
+
+            with open(backup_path, "w", encoding="utf-8") as f:
+                json.dump(backup_data, f, indent=2, default=str)
+
+            logger.info("Successfully backed up settings to JSON: %s", backup_path)
+            return PathLib(backup_path)
+
+        except Exception:
+            logger.exception("Failed to backup settings to JSON")
+            return None
+
+    def restore_from_json(self, backup_path: Path | None = None) -> bool:
+        """
+        Restore all settings from a JSON backup file.
+
+        Args:
+            backup_path: Path to backup file. If None, uses default location.
+
+        Returns:
+            True if restore succeeded, False otherwise.
+
+        """
+        try:
+            if backup_path is None:
+                backup_path = self._get_backup_path()
+
+            if not backup_path.exists():
+                logger.warning("No backup file found at: %s", backup_path)
+                return False
+
+            with open(backup_path, encoding="utf-8") as f:
+                backup_data = json.load(f)
+
+            settings_data = backup_data.get("settings", {})
+
+            # Clear existing settings first
+            self._settings.clear()
+
+            # Restore all settings
+            for key, value in settings_data.items():
+                if isinstance(value, dict) and "_type" in value:
+                    # Handle special types
+                    if value["_type"] == "bytes":
+                        decoded = base64.b64decode(value["_value"])
+                        self._settings.setValue(key, decoded)
+                    elif value["_type"] == "none":
+                        # Skip None values
+                        pass
+                else:
+                    self._settings.setValue(key, value)
+
+            self._settings.sync()
+            logger.info("Restored settings from JSON backup: %s", backup_path)
+            return True
+
+        except Exception:
+            logger.exception("Failed to restore settings from JSON")
+            return False
+
+    def sync_with_json_backup(self) -> None:
+        """Sync current QSettings to JSON backup (call after saves)."""
+        self.backup_to_json()

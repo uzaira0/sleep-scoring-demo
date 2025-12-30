@@ -877,15 +877,26 @@ class DiaryTableConnector:
 
     def _on_state_change(self, old_state: UIState, new_state: UIState) -> None:
         """React to file changes by refreshing diary."""
+        # Always log when state change is received
+        logger.debug(f"DIARY CONNECTOR: _on_state_change called. old_file='{old_state.current_file}', new_file='{new_state.current_file}'")
+
         if old_state.current_file != new_state.current_file:
+            logger.info(f"DIARY CONNECTOR: File changed from '{old_state.current_file}' to '{new_state.current_file}', updating diary")
             self._update_diary()
+        elif old_state.current_file and old_state.current_file == new_state.current_file:
+            # File unchanged - log for debugging
+            logger.debug(f"DIARY CONNECTOR: File unchanged ({new_state.current_file}), skipping update")
 
     def _update_diary(self) -> None:
         """Refresh diary table via AnalysisTab."""
         # Protocol guarantees analysis_tab has update_diary_display method
         tab = self.main_window.analysis_tab
+        logger.info(f"DIARY CONNECTOR: _update_diary called, analysis_tab exists: {tab is not None}")
         if tab:
+            logger.info("DIARY CONNECTOR: Calling update_diary_display()")
             tab.update_diary_display()
+        else:
+            logger.warning("DIARY CONNECTOR: No analysis_tab available!")
 
     def disconnect(self) -> None:
         """Cleanup subscription."""

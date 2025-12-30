@@ -172,18 +172,18 @@ class PopOutTableWindow(QDialog):
 
     def _save_geometry(self) -> None:
         """Save window size and position."""
-        settings = QSettings("SleepScoringApp", "MarkerTables")
-        settings.setValue(f"{self.table_type}_popout_geometry", self.saveGeometry())
-        settings.setValue(f"{self.table_type}_popout_pos", self.pos())
+        settings = QSettings("SleepResearch", "SleepScoringApp")
+        settings.setValue(f"popout/{self.table_type}_geometry", self.saveGeometry())
+        settings.setValue(f"popout/{self.table_type}_pos", self.pos())
 
     def _restore_geometry(self) -> None:
         """Restore window size and position."""
         from PyQt6.QtWidgets import QApplication
 
-        settings = QSettings("SleepScoringApp", "MarkerTables")
+        settings = QSettings("SleepResearch", "SleepScoringApp")
 
         # Restore geometry if available
-        geometry = settings.value(f"{self.table_type}_popout_geometry")
+        geometry = settings.value(f"popout/{self.table_type}_geometry")
         if geometry:
             self.restoreGeometry(geometry)
         else:
@@ -191,7 +191,7 @@ class PopOutTableWindow(QDialog):
             self.resize(600, 500)
 
         # Restore position if available
-        pos = settings.value(f"{self.table_type}_popout_pos")
+        pos = settings.value(f"popout/{self.table_type}_pos")
         if pos:
             self.move(pos)
 

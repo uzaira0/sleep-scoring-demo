@@ -506,9 +506,11 @@ class ExportManager:
                     )
 
                     if not timestamps or not axis_y_values:
-                        warning_msg = f"No activity data found for {filename} - metrics may be incomplete"
+                        warning_msg = (
+                            f"No activity data found for {filename} - metrics will be incomplete. Check that the file was imported correctly."
+                        )
                         warnings.append(warning_msg)
-                        logger.debug(warning_msg)
+                        logger.warning(warning_msg)  # WARNING level so it's visible in logs
                         activity_data_cache[filename] = ([], [], [])
                         continue
 

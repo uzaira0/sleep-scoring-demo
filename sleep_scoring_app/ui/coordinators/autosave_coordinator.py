@@ -90,6 +90,8 @@ class AutosaveCoordinator:
         save_sleep_markers_callback: Callable[[DailySleepMarkers], None],
         save_nonwear_markers_callback: Callable[[DailyNonwearMarkers], None],
         config: AutosaveConfig | None = None,
+        on_autosave_failed: Callable[[str], None] | None = None,
+        on_autosave_success: Callable[[], None] | None = None,
     ) -> None:
         """
         Initialize the autosave coordinator.
@@ -101,6 +103,8 @@ class AutosaveCoordinator:
             save_sleep_markers_callback: Callback function from MainWindow to save sleep markers
             save_nonwear_markers_callback: Callback function from MainWindow to save nonwear markers
             config: Optional autosave configuration
+            on_autosave_failed: Optional callback when autosave fails (receives error message)
+            on_autosave_success: Optional callback when autosave succeeds
 
         """
         self.store = store
@@ -109,9 +113,15 @@ class AutosaveCoordinator:
         self.save_sleep_markers_callback = save_sleep_markers_callback
         self.save_nonwear_markers_callback = save_nonwear_markers_callback
         self.config = config or AutosaveConfig()
+        self._on_autosave_failed = on_autosave_failed
+        self._on_autosave_success = on_autosave_success
 
         # Track pending changes
         self._pending_changes: set[PendingChangeType] = set()
+
+        # MED-004 FIX: Track autosave status for UI feedback
+        self._last_autosave_error: str | None = None
+        self._autosave_failed: bool = False
 
         # Debounce timer
         self._save_timer = QTimer()
@@ -213,6 +223,7 @@ class AutosaveCoordinator:
             # Dispatch markers_saved ONCE after both saves complete
             if markers_saved:
                 from sleep_scoring_app.ui.store import Actions
+
                 self.store.dispatch(Actions.markers_saved())
                 logger.debug("Dispatched markers_saved action after autosave")
 
@@ -224,13 +235,31 @@ class AutosaveCoordinator:
             if PendingChangeType.CONFIG in self._pending_changes:
                 self._save_config(state)
 
+            # Backup all settings to JSON
+            self._backup_settings_to_json()
+
             # Clear pending changes
             self._pending_changes.clear()
 
+            # MED-004 FIX: Track success and notify UI
+            self._autosave_failed = False
+            self._last_autosave_error = None
+            if self._on_autosave_success:
+                self._on_autosave_success()
+
             logger.info("Autosave completed successfully")
 
-        except Exception:
+        except Exception as e:
+            # MED-004 FIX: Track failure and notify UI
+            error_msg = f"Autosave failed: {e}"
+            self._autosave_failed = True
+            self._last_autosave_error = error_msg
             logger.exception("Error during autosave")
+
+            # Notify UI of failure so user knows their data may not be saved
+            if self._on_autosave_failed:
+                self._on_autosave_failed(error_msg)
+
             # Keep pending changes for retry
             # Timer will be restarted if state changes again
 
@@ -265,7 +294,7 @@ class AutosaveCoordinator:
         try:
             from PyQt6.QtCore import QSettings
 
-            settings = QSettings("SleepScoringApp", "SleepScoring")
+            settings = QSettings("SleepResearch", "SleepScoringApp")
 
             if state.window_x is not None:
                 settings.setValue("window_x", state.window_x)
@@ -294,7 +323,7 @@ class AutosaveCoordinator:
         try:
             from PyQt6.QtCore import QSettings
 
-            settings = QSettings("SleepScoringApp", "SleepScoring")
+            settings = QSettings("SleepResearch", "SleepScoringApp")
 
             # Save Redux state config
             settings.setValue("view_mode_hours", state.view_mode_hours)
@@ -312,6 +341,23 @@ class AutosaveCoordinator:
 
         except Exception:
             logger.exception("Error saving config")
+
+    def _backup_settings_to_json(self) -> None:
+        """Backup all QSettings to JSON file for portability."""
+        try:
+            logger.info("Starting settings backup to JSON")
+            from sleep_scoring_app.ui.managers.session_state_manager import SessionStateManager
+
+            # Use a temporary instance just for backup - it reads all QSettings keys
+            session_manager = SessionStateManager()
+            result = session_manager.backup_to_json()
+            if result:
+                logger.info("Settings backup completed: %s", result)
+            else:
+                logger.warning("Settings backup returned None")
+
+        except Exception:
+            logger.exception("Error backing up settings to JSON")
 
     def schedule_config_save(self) -> None:
         """
@@ -353,3 +399,24 @@ class AutosaveCoordinator:
             self._unsubscribe()
 
         logger.info("AutosaveCoordinator cleaned up")
+
+    # MED-004 FIX: Properties for UI to check autosave status
+
+    @property
+    def has_unsaved_changes(self) -> bool:
+        """Check if there are pending changes that haven't been saved yet."""
+        return bool(self._pending_changes)
+
+    @property
+    def autosave_failed(self) -> bool:
+        """Check if the last autosave attempt failed."""
+        return self._autosave_failed
+
+    @property
+    def last_autosave_error(self) -> str | None:
+        """Get the error message from the last failed autosave, if any."""
+        return self._last_autosave_error
+
+    def get_pending_change_types(self) -> list[str]:
+        """Get list of pending change types for UI display."""
+        return [str(change_type) for change_type in self._pending_changes]

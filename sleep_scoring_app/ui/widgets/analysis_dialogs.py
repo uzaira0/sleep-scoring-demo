@@ -186,7 +186,7 @@ class AnalysisDialogManager:
         self.color_widgets = {}
 
         # Load saved colors from settings
-        settings = QSettings("SleepScoring", "ColorSettings")
+        settings = QSettings("SleepResearch", "SleepScoringApp")
 
         # Create scroll area for the legend items
         scroll_area = QScrollArea()
@@ -466,7 +466,7 @@ class AnalysisDialogManager:
     def apply_colors(self) -> None:
         """Apply the selected colors to the plot in real-time."""
         # Get the saved color settings
-        settings = QSettings("SleepScoring", "ColorSettings")
+        settings = QSettings("SleepResearch", "SleepScoringApp")
 
         # Update the constants dynamically
         pw = self.services.plot_widget

@@ -108,7 +108,9 @@ class UIStateCoordinator:
     def update_folder_info_label(self) -> None:
         """Update the file selection label with current file count."""
         try:
-            file_count = len(self.parent.data_service.available_files)
+            # HIGH-002 FIX: Get available_files from parent (which reads from store)
+            # instead of from service - services should be headless
+            file_count = len(self.parent.available_files)
 
             # Update the file selection label instead of folder info label
             if self.parent.data_service.get_database_mode():
@@ -125,23 +127,12 @@ class UIStateCoordinator:
             logger.debug("Cannot update folder info label: %s", e)
 
     def update_status_bar(self, message: str | None = None) -> None:
-        """Update the status bar with current information."""
+        """Update the status bar with a temporary message."""
         try:
             if message:
                 self.parent.status_bar.showMessage(message, 5000)  # Show for 5 seconds
-
-            # Update data source label - all data is now always from database
-            self.parent.data_source_label.setText("Activity: Database")
-
-            # Update file count
-            row_count = self.parent.file_selector.table.rowCount()
-            self.parent.file_count_label.setText(f"Files: {row_count}")
         except AttributeError:
-            # Fallback if file selector not available
-            try:
-                self.parent.file_count_label.setText("Files: 0")
-            except AttributeError:
-                pass
+            pass
 
     def update_data_source_status(self) -> None:
         """Update the data source status label."""

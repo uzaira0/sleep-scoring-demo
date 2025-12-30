@@ -81,16 +81,24 @@ class DiaryTableManager:
 
         try:
             # First check if participant has any diary data at all
+            # Log the current file from the store for debugging
+            current_file = self.store.state.current_file if self.store else None
+            logger.info(f"DiaryTableManager: store.current_file = {current_file}")
             has_data = self.data_service.check_current_participant_has_diary_data()
             logger.info(f"check_current_participant_has_diary_data returned: {has_data}")
 
             if not has_data:
                 # Hide the entire diary section if no diary data for this participant
+                logger.info("DiaryTableManager: No diary data - hiding section")
                 self._hide_diary_section()
                 return
 
             # Show the diary section since participant has data
+            logger.info("DiaryTableManager: HAS diary data - SHOWING section")
             self._show_diary_section()
+            logger.info(
+                f"DiaryTableManager: After _show_diary_section, widget visible: {self.diary_table_widget.isVisible() if self.diary_table_widget else 'N/A'}"
+            )
 
             # Load diary data for current file
             diary_entries = self.data_service.load_diary_data_for_current_file()

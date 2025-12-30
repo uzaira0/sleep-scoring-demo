@@ -156,7 +156,9 @@ class AnalysisTab(QWidget):
         )
 
         # Create top-level vertical splitter to separate file selection from plot area
-        top_level_splitter = QSplitter(Qt.Orientation.Vertical)
+        # Store as instance variable for layout persistence
+        self.top_level_splitter = QSplitter(Qt.Orientation.Vertical)
+        top_level_splitter = self.top_level_splitter
 
         # File selection bar
         file_bar = self._create_file_selection_bar()
@@ -176,11 +178,15 @@ class AnalysisTab(QWidget):
         plot_area_layout.addWidget(control_bar)
 
         # Create vertical splitter for plot area and diary table
-        main_splitter = QSplitter(Qt.Orientation.Vertical)
+        # Store as instance variable for layout persistence
+        self.main_splitter = QSplitter(Qt.Orientation.Vertical)
+        main_splitter = self.main_splitter
 
         # Create horizontal splitter for plot and data tables (top section)
         # This allows users to resize the side tables by dragging
-        plot_and_tables_splitter = QSplitter(Qt.Orientation.Horizontal)
+        # Store as instance variable for layout persistence
+        self.plot_and_tables_splitter = QSplitter(Qt.Orientation.Horizontal)
+        plot_and_tables_splitter = self.plot_and_tables_splitter
         plot_and_tables_splitter.setChildrenCollapsible(False)
         plot_and_tables_splitter.setHandleWidth(6)
 
@@ -1100,6 +1106,28 @@ class AnalysisTab(QWidget):
         """Handle click on diary table row - delegates to DiaryTableManager."""
         if self.diary_table_manager:
             self.diary_table_manager.on_diary_row_clicked(item)
+
+    def save_splitter_states(self) -> tuple[bytes, bytes, bytes]:
+        """Save splitter states for layout persistence."""
+        return (
+            bytes(self.top_level_splitter.saveState()),
+            bytes(self.main_splitter.saveState()),
+            bytes(self.plot_and_tables_splitter.saveState()),
+        )
+
+    def restore_splitter_states(
+        self,
+        top_level: bytes | None,
+        main: bytes | None,
+        plot_tables: bytes | None,
+    ) -> None:
+        """Restore splitter states from saved layout."""
+        if top_level:
+            self.top_level_splitter.restoreState(top_level)
+        if main:
+            self.main_splitter.restoreState(main)
+        if plot_tables:
+            self.plot_and_tables_splitter.restoreState(plot_tables)
 
     def _get_current_participant_id(self) -> str | None:
         """Get participant ID from current filename."""

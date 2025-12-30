@@ -112,9 +112,24 @@ class DataLoadingService:
     def _load_database_file(self, filename: str) -> list[date]:
         """Load file dates from database."""
         try:
+            # CRIT-002 FIX: Validate filename format to catch path vs filename bugs early
+            if "/" in filename or "\\" in filename:
+                logger.warning(
+                    "FILENAME FORMAT ERROR: Expected filename-only but got path: '%s'. "
+                    "Database queries require filename-only (e.g., 'DEMO-001.csv'). "
+                    "This will likely cause 0 rows returned.",
+                    filename,
+                )
+                # Extract just the filename as a recovery attempt
+                from pathlib import Path
+
+                extracted_filename = Path(filename).name
+                logger.warning("Attempting recovery with extracted filename: '%s'", extracted_filename)
+                filename = extracted_filename
+
             dates = self.db_manager.get_file_date_ranges(filename)
             if not dates:
-                logger.warning(f"No activity data found in database for {filename}")
+                logger.warning("DATABASE QUERY RETURNED 0 DATES for '%s'. This file may not be imported or has no activity data.", filename)
                 return []  # MW-04 FIX: Return empty list, NOT a fallback date
             return dates
         except Exception:
@@ -304,8 +319,8 @@ class DataLoadingService:
         if self.current_data is not None:
             return self._load_csv_activity_data(target_date, hours, activity_column)
 
-        # Final fallback
-        logger.debug("No data source available")
+        # Final fallback - this is a problem the user should know about
+        logger.warning("No data source available for %s on %s. Check that the file was imported correctly.", filename, target_date)
         return None, None
 
     def _load_database_activity_data(
@@ -313,6 +328,16 @@ class DataLoadingService:
     ) -> tuple[list[datetime], list[float]]:
         """Load activity data from database with configurable activity column."""
         try:
+            # CRIT-002 FIX: Validate filename format to catch path vs filename bugs early
+            if "/" in filename or "\\" in filename:
+                logger.warning(
+                    "FILENAME FORMAT ERROR in activity load: Expected filename-only but got path: '%s'. Extracting filename for database query.",
+                    filename,
+                )
+                from pathlib import Path
+
+                filename = Path(filename).name
+
             # Convert date to datetime if needed
             if isinstance(target_date, date) and not isinstance(target_date, datetime):
                 target_datetime = datetime.combine(target_date, datetime.min.time())
@@ -328,7 +353,14 @@ class DataLoadingService:
             timestamps, activities = self.db_manager.load_raw_activity_data(filename, start_time, end_time, activity_column=activity_column)
 
             if not timestamps:
-                logger.warning("No data found in database for %s in time range %s to %s", filename, start_time, end_time)
+                logger.warning(
+                    "DATABASE QUERY RETURNED 0 ROWS for '%s' in time range %s to %s. "
+                    "This may indicate: (1) filename mismatch (expected filename-only, got full path?), "
+                    "(2) no data exists for this date range, or (3) file was not imported correctly.",
+                    filename,
+                    start_time,
+                    end_time,
+                )
                 return None, None
 
             logger.debug("Loaded %s data points from database for %s using %s column", len(timestamps), filename, activity_column)
@@ -507,10 +539,17 @@ class DataLoadingService:
                 except Exception as e:
                     logger.warning("AXIS_Y UNIFIED: CSV load failed: %s", e)
 
+            # No data found - this is a user-visible problem
+            logger.warning(
+                "AXIS_Y UNIFIED: No axis_y data found for %s on %s. "
+                "Sleep scoring algorithms require axis_y data. Check that the file was imported correctly.",
+                filename,
+                date_str,
+            )
             return [], []
 
         except Exception as e:
-            logger.warning("AXIS_Y UNIFIED: Unexpected error loading data: %s", e)
+            logger.warning("AXIS_Y UNIFIED: Unexpected error loading data for %s: %s", filename, e)
             return [], []
 
     def clear_current_data(self) -> None:

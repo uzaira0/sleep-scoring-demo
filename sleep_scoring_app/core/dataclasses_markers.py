@@ -565,13 +565,27 @@ class SleepMetrics:
 
     def to_export_dict(self) -> dict[str, Any]:
         """Convert to dictionary for CSV/JSON export with display-friendly keys."""
+        # Build full participant ID from components
+        full_participant_id = None
+        if self.participant:
+            parts = [self.participant.numerical_id]
+            if self.participant.timepoint_str:
+                parts.append(self.participant.timepoint_str)
+            if self.participant.group_str:
+                parts.append(self.participant.group_str)
+            full_participant_id = "_".join(filter(None, parts))
+
         return {
+            ExportColumn.FULL_PARTICIPANT_ID: full_participant_id,
             ExportColumn.NUMERICAL_PARTICIPANT_ID: self.participant.numerical_id if self.participant else None,
             ExportColumn.PARTICIPANT_GROUP: self.participant.group_str if self.participant else None,
             ExportColumn.PARTICIPANT_TIMEPOINT: self.participant.timepoint_str if self.participant else None,
             "filename": self.filename,
+            ExportColumn.SLEEP_DATE: self.analysis_date,
             ExportColumn.ONSET_DATE: self.analysis_date,
             ExportColumn.SLEEP_ALGORITHM: self.algorithm_type.value if self.algorithm_type else None,
+            ExportColumn.SLEEP_ALGORITHM_NAME: self.sleep_algorithm_name,
+            ExportColumn.ONSET_OFFSET_RULE: self.sleep_period_detector_id,
             ExportColumn.ONSET_TIME: self.onset_time,
             ExportColumn.OFFSET_TIME: self.offset_time,
             ExportColumn.TOTAL_SLEEP_TIME: self.total_sleep_time,
@@ -634,6 +648,28 @@ class SleepMetrics:
     def get_dynamic_field(self, key: str, default: Any = None) -> Any:
         """Get a dynamic field value."""
         return self._dynamic_fields.get(key, default)
+
+    def store_period_metrics(self, period: SleepPeriod, metrics_dict: dict[str, Any]) -> None:
+        """
+        Store metrics for a specific sleep period.
+
+        Args:
+            period: The SleepPeriod to store metrics for
+            metrics_dict: Dictionary of metric values to store
+
+        """
+        # Find the period's index in the complete periods list
+        complete_periods = self.daily_sleep_markers.get_complete_periods()
+        for i, p in enumerate(complete_periods, 1):
+            if p == period or (p.onset_timestamp == period.onset_timestamp and p.offset_timestamp == period.offset_timestamp):
+                period_key = f"period_{i}_metrics"
+                self._dynamic_fields[period_key] = metrics_dict
+                return
+
+        # If period not found, store with marker_index as fallback
+        if period.marker_index is not None:
+            period_key = f"period_{period.marker_index}_metrics"
+            self._dynamic_fields[period_key] = metrics_dict
 
 
 __all__ = [

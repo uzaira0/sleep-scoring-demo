@@ -70,6 +70,10 @@ class DataSourceDetector:
         "datetime",
         "Timestamp",
         "Date Time",
+        "Date",
+        "date",
+        "Time",
+        "time",
     }
 
     # Threshold for epoch detection (seconds)
@@ -153,9 +157,8 @@ class DataSourceDetector:
                 reason="DataFrame is None or empty",
             )
 
-        # Get column names (case-insensitive check)
+        # Get column names
         columns = set(df.columns)
-        columns_lower = {col.lower() for col in columns}
 
         # Check for raw tri-axial data columns
         if self._has_raw_columns(columns):
@@ -201,8 +204,12 @@ class DataSourceDetector:
         try:
             import pandas as pd
 
+            # First, detect how many header rows to skip (ActiGraph files have 10)
+            skip_rows = self._detect_skip_rows(file_path)
+            logger.debug(f"Detected {skip_rows} header rows to skip in {file_path.name}")
+
             # Read first few rows to inspect columns
-            df_sample = pd.read_csv(file_path, nrows=100)
+            df_sample = pd.read_csv(file_path, skiprows=skip_rows, nrows=100)
 
             return self.detect_from_dataframe(df_sample)
 
@@ -211,6 +218,62 @@ class DataSourceDetector:
                 file_path=str(file_path),
                 reason=f"Failed to read CSV file: {e}",
             ) from e
+
+    def _detect_skip_rows(self, file_path: Path) -> int:
+        """
+        Detect number of header rows to skip before the column header.
+
+        Algorithm:
+        1. Read first 20 lines
+        2. Find the first line that looks like a CSV column header
+           (multiple comma-separated non-numeric strings)
+
+        Args:
+            file_path: Path to CSV file
+
+        Returns:
+            Number of rows to skip (0 if no headers detected)
+
+        """
+        try:
+            with open(file_path, encoding="utf-8", errors="ignore") as f:
+                lines = []
+                for i, line in enumerate(f):
+                    if i >= 20:
+                        break
+                    lines.append(line.strip())
+
+            # Look for first line that looks like a column header
+            for i, line in enumerate(lines):
+                # Split by comma
+                parts = [p.strip() for p in line.split(",")]
+
+                # Check if this looks like a header row:
+                # - Has at least 3 columns
+                # - Most values are non-numeric strings (column names)
+                if len(parts) >= 3:
+                    non_numeric_count = 0
+                    for part in parts:
+                        # Skip empty parts
+                        if not part:
+                            continue
+                        # Check if it's non-numeric (a column name)
+                        try:
+                            float(part.replace(",", ""))
+                        except ValueError:
+                            non_numeric_count += 1
+
+                    # If most columns are non-numeric, this is likely the header
+                    if non_numeric_count >= 3:
+                        logger.debug(f"Found column header at line {i}: {line[:60]}...")
+                        return i
+
+            # No header found - assume no rows to skip
+            return 0
+
+        except Exception as e:
+            logger.warning(f"Error detecting skip rows: {e}")
+            return 0  # Default to no skip
 
     def _has_raw_columns(self, columns: set[str]) -> bool:
         """
@@ -250,18 +313,12 @@ class DataSourceDetector:
             True if median interval is approximately 60 seconds
 
         """
-        # Find timestamp column
-        timestamp_col = self._find_timestamp_column(df)
-
-        if timestamp_col is None:
-            logger.warning("No timestamp column found, cannot verify epoch intervals")
-            return True  # Assume epoch data if no timestamp column
-
         try:
-            import pandas as pd
+            timestamps = self._get_timestamps_from_df(df)
 
-            # Convert to datetime
-            timestamps = pd.to_datetime(df[timestamp_col])
+            if timestamps is None or len(timestamps) < 2:
+                logger.warning("No timestamp column found, cannot verify epoch intervals")
+                return True  # Assume epoch data if no timestamp column
 
             # Calculate intervals
             intervals = timestamps.diff().dt.total_seconds()
@@ -277,6 +334,52 @@ class DataSourceDetector:
         except Exception as e:
             logger.warning(f"Failed to check timestamp intervals: {e}")
             return True  # Assume epoch data if interval check fails
+
+    def _get_timestamps_from_df(self, df: pd.DataFrame):
+        """
+        Extract timestamps from DataFrame, handling both combined and separate Date/Time columns.
+
+        Args:
+            df: DataFrame to inspect
+
+        Returns:
+            pandas Series of datetime values, or None if no timestamps found
+
+        """
+        import pandas as pd
+
+        columns = set(df.columns)
+        columns_lower = {col.lower(): col for col in columns}
+
+        # Check for combined datetime columns first
+        for col in df.columns:
+            if col.lower() in {"timestamp", "datetime", "date time"}:
+                try:
+                    return pd.to_datetime(df[col])
+                except Exception:
+                    continue
+
+        # Check for separate Date and Time columns (ActiGraph format)
+        date_col = columns_lower.get("date")
+        time_col = columns_lower.get("time")
+
+        if date_col and time_col:
+            try:
+                # Combine Date and Time columns
+                combined = df[date_col].astype(str) + " " + df[time_col].astype(str)
+                return pd.to_datetime(combined)
+            except Exception:
+                pass
+
+        # Fallback to first timestamp column found
+        timestamp_col = self._find_timestamp_column(df)
+        if timestamp_col:
+            try:
+                return pd.to_datetime(df[timestamp_col])
+            except Exception:
+                pass
+
+        return None
 
     def _find_timestamp_column(self, df: pd.DataFrame) -> str | None:
         """

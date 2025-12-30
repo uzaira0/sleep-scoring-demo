@@ -126,6 +126,7 @@ class TudorLockeSleepMetricsCalculator:
         onset_idx: int,
         offset_idx: int,
         timestamps: list[datetime],
+        epoch_seconds: int = 60,
     ) -> SleepPeriodMetrics:
         """
         Calculate comprehensive sleep quality metrics for a sleep period.
@@ -136,6 +137,8 @@ class TudorLockeSleepMetricsCalculator:
             onset_idx: Index of sleep onset
             offset_idx: Index of sleep offset
             timestamps: List of datetime objects corresponding to epochs
+            epoch_seconds: Duration of each epoch in seconds. Defaults to 60.
+                          Must match the actual data epoch duration for correct metrics.
 
         Returns:
             SleepPeriodMetrics containing all calculated metrics
@@ -146,6 +149,18 @@ class TudorLockeSleepMetricsCalculator:
         """
         # Validate inputs
         self._validate_inputs(sleep_scores, activity_counts, onset_idx, offset_idx, timestamps)
+
+        # HIGH-004 FIX: Validate epoch duration against actual data
+        if len(timestamps) >= 2:
+            actual_epoch_seconds = (timestamps[1] - timestamps[0]).total_seconds()
+            if abs(actual_epoch_seconds - epoch_seconds) > 5:  # 5-second tolerance
+                logger.warning(
+                    "EPOCH DURATION MISMATCH: Expected %d seconds but data shows %.1f seconds. "
+                    "Metrics (TST, WASO, etc.) may be incorrect. Using specified epoch_seconds=%d.",
+                    epoch_seconds,
+                    actual_epoch_seconds,
+                    epoch_seconds,
+                )
 
         # Extract sleep period data
         period_sleep_scores = sleep_scores[onset_idx : offset_idx + 1]
@@ -158,9 +173,11 @@ class TudorLockeSleepMetricsCalculator:
         sleep_onset = self._find_first_sleep_epoch(period_sleep_scores, period_timestamps)
         sleep_offset = self._find_last_sleep_epoch(period_sleep_scores, period_timestamps)
 
-        # Duration metrics
-        time_in_bed = len(period_sleep_scores)  # Minutes (assuming 60-second epochs)
-        total_sleep_time = sum(period_sleep_scores)  # Count of sleep epochs
+        # Duration metrics - convert epoch count to minutes using epoch_seconds
+        # HIGH-004 FIX: Use epoch_seconds parameter instead of hardcoded 60
+        epoch_minutes = epoch_seconds / 60.0
+        time_in_bed = len(period_sleep_scores) * epoch_minutes  # Minutes
+        total_sleep_time = sum(period_sleep_scores) * epoch_minutes  # Minutes of sleep
         sleep_onset_latency = 0.0  # By Tudor-Locke definition, always 0
         wake_after_sleep_onset = time_in_bed - total_sleep_time - sleep_onset_latency
 
@@ -171,10 +188,12 @@ class TudorLockeSleepMetricsCalculator:
         # Activity metrics
         total_activity_counts = sum(period_activity)
         nonzero_epochs = sum(1 for count in period_activity if count > 0)
+        total_epochs = len(period_sleep_scores)
 
         # Quality indices
         sleep_efficiency = (total_sleep_time / time_in_bed * 100) if time_in_bed > 0 else 0.0
-        movement_index = (nonzero_epochs / time_in_bed * 100) if time_in_bed > 0 else 0.0
+        # movement_index uses epoch count (not minutes) for percentage calculation
+        movement_index = (nonzero_epochs / total_epochs * 100) if total_epochs > 0 else 0.0
 
         # Fragmentation index calculation
         fragmentation_index = self._calculate_fragmentation_index(period_sleep_scores)

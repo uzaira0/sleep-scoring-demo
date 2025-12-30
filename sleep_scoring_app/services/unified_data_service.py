@@ -39,8 +39,8 @@ class UnifiedDataService:
         self.db_manager = db_manager
         self.store = store
 
-        # Initialize core sub-services
-        self._file_service = FileService(db_manager, store)
+        # Initialize core sub-services (FileService is headless - no store dependency)
+        self._file_service = FileService(db_manager)
         self._diary_service = DiaryService(db_manager)
 
         # Initialize cache service (depends on file service)
@@ -57,15 +57,31 @@ class UnifiedDataService:
 
     # === Pure Data Operations ===
 
-    def load_current_date(self, current_date_48h_cache: BoundedCache) -> tuple | None:
+    def load_current_date(
+        self,
+        current_date_48h_cache: BoundedCache,
+        available_dates_iso: list[str] | None = None,
+        current_date_index: int | None = None,
+        selected_file: str | None = None,
+    ) -> tuple | None:
         """
-        Load data for the current state in Redux.
+        Load data for the current date.
+
+        Args:
+            current_date_48h_cache: Cache for 48h data
+            available_dates_iso: Optional list of ISO date strings. If None, reads from store.
+            current_date_index: Optional index into available_dates. If None, reads from store.
+            selected_file: Optional filename. If None, reads from store.
+
         Returns: (timestamps, activity_data) or None.
+
         """
-        state = self.store.state
-        available_dates_iso = state.available_dates
-        current_date_index = state.current_date_index
-        selected_file = state.current_file
+        # HIGH-003 FIX: Accept parameters directly, fall back to store for legacy callers
+        if available_dates_iso is None or current_date_index is None or selected_file is None:
+            state = self.store.state
+            available_dates_iso = available_dates_iso or list(state.available_dates)
+            current_date_index = current_date_index if current_date_index is not None else state.current_date_index
+            selected_file = selected_file or state.current_file
 
         if not available_dates_iso or not selected_file:
             return None
@@ -92,16 +108,42 @@ class UnifiedDataService:
         """Delete files via the file service."""
         return self._file_service.delete_files(filenames)
 
-    def load_available_files(self, preserve_selection: bool = True, load_completion_counts: bool = False) -> None:
-        """Load available files into Redux state."""
+    def load_available_files(
+        self,
+        preserve_selection: bool = True,
+        load_completion_counts: bool = False,
+        on_files_loaded: callable | None = None,
+    ) -> list[FileInfo]:
+        """
+        Load available files.
+
+        Args:
+            preserve_selection: Whether to preserve current file selection (legacy, unused)
+            load_completion_counts: Whether to include completion counts
+            on_files_loaded: Optional callback to receive loaded files.
+                           If None, dispatches to store directly (legacy behavior).
+
+        Returns:
+            List of loaded FileInfo objects
+
+        """
         if load_completion_counts:
             files = self.find_available_files_with_completion_count()
         else:
             files = self.find_available_files()
 
-        from sleep_scoring_app.ui.store import Actions
+        # HIGH-003 FIX: Use callback if provided, otherwise fall back to store dispatch
+        # This allows callers to handle the result without service importing from UI
+        if on_files_loaded is not None:
+            on_files_loaded(files)
+        else:
+            # Legacy behavior - dispatch to store directly
+            # TODO: Remove this once all callers use the callback pattern
+            from sleep_scoring_app.ui.store import Actions
 
-        self.store.dispatch(Actions.files_loaded(files))
+            self.store.dispatch(Actions.files_loaded(files))
+
+        return files
 
     def toggle_database_mode(self, use_database: bool) -> None:
         """Toggle between database and CSV mode."""
@@ -162,9 +204,17 @@ class UnifiedDataService:
 
     # === Diary Data Operations ===
 
-    def check_current_participant_has_diary_data(self) -> bool:
-        """Check if current participant has diary data."""
-        selected_file = self.store.state.current_file
+    def check_current_participant_has_diary_data(self, selected_file: str | None = None) -> bool:
+        """
+        Check if current participant has diary data.
+
+        Args:
+            selected_file: Optional filename. If None, reads from store.
+
+        """
+        # HIGH-003 FIX: Accept parameter directly, fall back to store for legacy callers
+        if selected_file is None:
+            selected_file = self.store.state.current_file
         if not selected_file:
             return False
 
@@ -177,9 +227,17 @@ class UnifiedDataService:
 
         return self._diary_service.check_participant_has_diary_data(participant_id)
 
-    def load_diary_data_for_current_file(self) -> list:
-        """Load diary data for currently selected file."""
-        selected_file = self.store.state.current_file
+    def load_diary_data_for_current_file(self, selected_file: str | None = None) -> list:
+        """
+        Load diary data for currently selected file.
+
+        Args:
+            selected_file: Optional filename. If None, reads from store.
+
+        """
+        # HIGH-003 FIX: Accept parameter directly, fall back to store for legacy callers
+        if selected_file is None:
+            selected_file = self.store.state.current_file
         if not selected_file:
             return []
 

@@ -148,6 +148,10 @@ class ConfigManager:
                 if choi_axis:
                     self.config.choi_axis = choi_axis
 
+                preferred_activity_column = self.settings.value("preferred_activity_column", "")
+                if preferred_activity_column:
+                    self.config.preferred_activity_column = preferred_activity_column
+
                 nonwear_algorithm_id = self.settings.value("nonwear_algorithm_id", "")
                 if nonwear_algorithm_id:
                     self.config.nonwear_algorithm_id = nonwear_algorithm_id
@@ -294,6 +298,7 @@ class ConfigManager:
                     self.settings.setValue("night_start_hour", self.config.night_start_hour)
                     self.settings.setValue("night_end_hour", self.config.night_end_hour)
                     self.settings.setValue("choi_axis", self.config.choi_axis)
+                    self.settings.setValue("preferred_activity_column", self.config.preferred_activity_column)
                     self.settings.setValue("nonwear_algorithm_id", self.config.nonwear_algorithm_id)
                     self.settings.setValue("sleep_algorithm_id", self.config.sleep_algorithm_id)
                     self.settings.setValue("onset_offset_rule_id", self.config.onset_offset_rule_id)
