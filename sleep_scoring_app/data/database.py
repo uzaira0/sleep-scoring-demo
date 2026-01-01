@@ -31,7 +31,6 @@ from sleep_scoring_app.data.repositories import (
     NonwearRepository,
     SleepMetricsRepository,
 )
-from sleep_scoring_app.services.memory_service import resource_manager
 from sleep_scoring_app.utils.column_registry import (
     column_registry,
 )
@@ -46,6 +45,7 @@ if TYPE_CHECKING:
         DailyNonwearMarkers,
         SleepMetrics,
     )
+    from sleep_scoring_app.services.memory_service import ResourceManager
 
 # Configure logging
 logging.basicConfig(level=logging.WARNING)
@@ -66,7 +66,6 @@ class DatabaseManager:
     # Pre-validate table and column names to prevent injection
     VALID_TABLES: ClassVar[set[str]] = {
         DatabaseTable.SLEEP_METRICS,
-        DatabaseTable.AUTOSAVE_METRICS,
         DatabaseTable.RAW_ACTIVITY_DATA,
         DatabaseTable.FILE_REGISTRY,
         DatabaseTable.NONWEAR_SENSOR_PERIODS,
@@ -186,8 +185,18 @@ class DatabaseManager:
         DatabaseColumn.END_TIMESTAMP,
     }
 
-    def __init__(self, db_path: Path | None = None) -> None:
-        """Initialize database manager with security validations."""
+    def __init__(self, db_path: Path | None = None, resource_manager: ResourceManager | None = None) -> None:
+        """
+        Initialize database manager with security validations.
+
+        Args:
+            db_path: Path to the database file. Uses default location if not provided.
+            resource_manager: Optional resource manager for cleanup registration.
+                             Injected to avoid data layer depending on services layer.
+
+        """
+        self._resource_manager = resource_manager
+
         # Update valid columns dynamically from registry
         self._update_valid_columns()
 
@@ -232,8 +241,9 @@ class DatabaseManager:
             self._validate_column_name,
         )
 
-        # Register for cleanup
-        resource_manager.register_resource(f"database_manager_{id(self)}", self, self._cleanup_resources)
+        # Register for cleanup if resource manager was provided
+        if self._resource_manager:
+            self._resource_manager.register_resource(f"database_manager_{id(self)}", self, self._cleanup_resources)
 
         # Initialize database
         self._init_database()
@@ -292,9 +302,9 @@ class DatabaseManager:
     # ==================== Facade Methods - Delegate to Repositories ====================
 
     # Sleep Metrics Methods
-    def save_sleep_metrics(self, sleep_metrics: SleepMetrics, is_autosave: bool = False) -> bool:
+    def save_sleep_metrics(self, sleep_metrics: SleepMetrics) -> bool:
         """Save sleep metrics to database."""
-        return self.sleep_metrics.save_sleep_metrics(sleep_metrics, is_autosave)
+        return self.sleep_metrics.save_sleep_metrics(sleep_metrics)
 
     def save_sleep_metrics_atomic(self, metrics: SleepMetrics) -> bool:
         """Atomically save sleep metrics to both tables."""
@@ -312,17 +322,9 @@ class DatabaseManager:
         """Get single sleep metrics record by filename and date."""
         return self.sleep_metrics.get_sleep_metrics_by_filename_and_date(filename, analysis_date)
 
-    def load_autosave_metrics(self, filename: str, analysis_date: str) -> SleepMetrics | None:
-        """Load autosaved metrics."""
-        return self.sleep_metrics.load_autosave_metrics(filename, analysis_date)
-
     def delete_sleep_metrics_for_date(self, filename: str, analysis_date: str) -> bool:
         """Delete sleep metrics for specific file and date."""
         return self.sleep_metrics.delete_sleep_metrics_for_date(filename, analysis_date)
-
-    def cleanup_old_autosaves(self, days_old: int = 7) -> int:
-        """Remove old autosave entries."""
-        return self.sleep_metrics.cleanup_old_autosaves(days_old)
 
     def get_database_stats(self) -> dict[str, int]:
         """Get database statistics."""
@@ -482,6 +484,20 @@ class DatabaseManager:
         """Load raw activity data for visualization."""
         return self.activity.load_raw_activity_data(filename, start_time, end_time, activity_column)
 
+    def load_all_activity_columns(
+        self,
+        filename: str,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+    ) -> dict[str, list]:
+        """
+        Load ALL activity columns in ONE query with unified timestamps.
+
+        This is the SINGLE SOURCE OF TRUTH for activity data loading.
+        All columns share the SAME timestamps, preventing alignment bugs.
+        """
+        return self.activity.load_all_activity_columns(filename, start_time, end_time)
+
     def get_available_activity_columns(self, filename: str) -> list[ActivityDataPreference]:
         """Check which activity columns have data."""
         return self.activity.get_available_activity_columns(filename)
@@ -543,7 +559,7 @@ class DatabaseManager:
         """Clear all sleep AND nonwear markers from database."""
         from sleep_scoring_app.data.repositories.base_repository import BaseRepository
 
-        cleared = {"sleep_metrics_cleared": 0, "autosave_metrics_cleared": 0, "nonwear_markers_cleared": 0, "total_cleared": 0}
+        cleared = {"sleep_metrics_cleared": 0, "nonwear_markers_cleared": 0, "total_cleared": 0}
 
         try:
             temp_repo = BaseRepository(self.db_path, self._validate_table_name, self._validate_column_name)
@@ -552,11 +568,6 @@ class DatabaseManager:
                 metrics_table = self._validate_table_name(DatabaseTable.SLEEP_METRICS)
                 cursor = conn.execute(f"DELETE FROM {metrics_table}")
                 cleared["sleep_metrics_cleared"] = cursor.rowcount
-
-                # Clear autosave_metrics
-                autosave_table = self._validate_table_name(DatabaseTable.AUTOSAVE_METRICS)
-                cursor = conn.execute(f"DELETE FROM {autosave_table}")
-                cleared["autosave_metrics_cleared"] = cursor.rowcount
 
                 # Clear sleep_markers_extended
                 markers_table = self._validate_table_name(DatabaseTable.SLEEP_MARKERS_EXTENDED)
@@ -568,7 +579,7 @@ class DatabaseManager:
                 cleared["nonwear_markers_cleared"] = cursor.rowcount
 
                 conn.commit()
-                cleared["total_cleared"] = cleared["sleep_metrics_cleared"] + cleared["autosave_metrics_cleared"] + cleared["nonwear_markers_cleared"]
+                cleared["total_cleared"] = cleared["sleep_metrics_cleared"] + cleared["nonwear_markers_cleared"]
                 logger.info("Cleared all markers (sleep + nonwear): %s", cleared)
                 return cleared
 

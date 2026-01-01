@@ -6,7 +6,7 @@ Reduces hasattr() checks by providing type-safe interfaces.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from datetime import date, datetime
@@ -18,6 +18,49 @@ if TYPE_CHECKING:
     from sleep_scoring_app.services.unified_data_service import UnifiedDataService
     from sleep_scoring_app.ui.widgets.activity_plot import ActivityPlotWidget
     from sleep_scoring_app.utils.config import ConfigManager
+
+
+@runtime_checkable
+class MarkerLineProtocol(Protocol):
+    """
+    Protocol for pyqtgraph InfiniteLine objects with marker attributes.
+
+    When creating marker lines, these attributes are monkey-patched onto
+    the pyqtgraph InfiniteLine. However, these are ONLY set for complete
+    markers (not "incomplete" markers being drawn). Therefore, hasattr()
+    checks are REQUIRED when handling lines from mixed sources.
+
+    Attributes:
+        period: The SleepPeriod/ManualNonwearPeriod this marker belongs to
+        marker_type: MarkerType enum value (e.g., "onset", "offset")
+        label: pyqtgraph TextItem for the marker label
+
+    Usage:
+        # For lines from unknown sources (e.g., mouse events), use hasattr:
+        if hasattr(line, "period") and line.period:
+            renderer.select_marker_set_by_period(line.period)
+
+        # For lines from known marker collections, cast to protocol:
+        marker: MarkerLineProtocol = line  # type: ignore[assignment]
+        if marker.period:
+            ...
+
+    Note: The hasattr() pattern is correct here because incomplete markers
+    do NOT have these attributes set. See marker_drawing_strategy.py:108-111.
+
+    """
+
+    period: SleepPeriod | None  # The sleep period this marker belongs to
+    marker_type: str | None  # MarkerType enum value (e.g., "onset", "offset")
+    label: Any | None  # pyqtgraph TextItem for the marker label
+
+
+@runtime_checkable
+class ConfigWithAlgorithmProtocol(Protocol):
+    """Protocol for config objects with algorithm settings."""
+
+    sleep_algorithm_id: str | None
+    onset_offset_rule_id: str | None
 
 
 class PlotWidgetProtocol(Protocol):

@@ -193,6 +193,7 @@ class PlotDataManager:
         self.main_48h_activity = None
         self.main_48h_axis_y_data = None
         self.main_48h_sadeh_results = None
+        self.main_48h_sadeh_timestamps = None  # CRITICAL: Clear alongside sadeh_results
         self.data_start_time = 0
         self.data_end_time = 0
         self.view_start_idx = 0
@@ -206,6 +207,7 @@ class PlotDataManager:
         self.parent.main_48h_activity = None
         self.parent.main_48h_axis_y_data = None
         self.parent.main_48h_sadeh_results = None
+        self.parent.main_48h_sadeh_timestamps = None  # CRITICAL: Clear alongside sadeh_results
 
         logger.info("Cleared all plot data")
 

@@ -2,7 +2,7 @@
 """
 Unified Data Service for Sleep Scoring Application.
 Pure data service facade that delegates to focused sub-services.
-NO UI references allowed.
+NO UI references allowed - this service is headless.
 """
 
 from __future__ import annotations
@@ -18,28 +18,33 @@ from sleep_scoring_app.services.memory_service import estimate_object_size_mb
 from sleep_scoring_app.utils.participant_extractor import extract_participant_info
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from datetime import date, datetime
 
     from sleep_scoring_app.core.constants import ActivityDataPreference
     from sleep_scoring_app.core.dataclasses import FileInfo
     from sleep_scoring_app.data.database import DatabaseManager
     from sleep_scoring_app.services.memory_service import BoundedCache
-    from sleep_scoring_app.ui.store import UIStore
 
 logger = logging.getLogger(__name__)
 
 
 class UnifiedDataService:
-    """Unified service facade that delegates to focused sub-services."""
+    """
+    Unified service facade that delegates to focused sub-services.
+
+    This service is HEADLESS - it has no UI dependencies and does not import
+    from ui.store. All state that was previously read from the store must now
+    be passed as explicit parameters to methods.
+    """
 
     _instance: UnifiedDataService | None = None
 
-    def __init__(self, db_manager: DatabaseManager, store: UIStore) -> None:
-        """Initialize UnifiedDataService with proper DI."""
+    def __init__(self, db_manager: DatabaseManager) -> None:
+        """Initialize UnifiedDataService with database manager only."""
         self.db_manager = db_manager
-        self.store = store
 
-        # Initialize core sub-services (FileService is headless - no store dependency)
+        # Initialize core sub-services (all headless - no store dependency)
         self._file_service = FileService(db_manager)
         self._diary_service = DiaryService(db_manager)
 
@@ -60,29 +65,22 @@ class UnifiedDataService:
     def load_current_date(
         self,
         current_date_48h_cache: BoundedCache,
-        available_dates_iso: list[str] | None = None,
-        current_date_index: int | None = None,
-        selected_file: str | None = None,
+        available_dates_iso: list[str],
+        current_date_index: int,
+        selected_file: str,
     ) -> tuple | None:
         """
         Load data for the current date.
 
         Args:
             current_date_48h_cache: Cache for 48h data
-            available_dates_iso: Optional list of ISO date strings. If None, reads from store.
-            current_date_index: Optional index into available_dates. If None, reads from store.
-            selected_file: Optional filename. If None, reads from store.
+            available_dates_iso: List of ISO date strings (required)
+            current_date_index: Index into available_dates (required)
+            selected_file: Filename (required)
 
         Returns: (timestamps, activity_data) or None.
 
         """
-        # HIGH-003 FIX: Accept parameters directly, fall back to store for legacy callers
-        if available_dates_iso is None or current_date_index is None or selected_file is None:
-            state = self.store.state
-            available_dates_iso = available_dates_iso or list(state.available_dates)
-            current_date_index = current_date_index if current_date_index is not None else state.current_date_index
-            selected_file = selected_file or state.current_file
-
         if not available_dates_iso or not selected_file:
             return None
 
@@ -110,18 +108,16 @@ class UnifiedDataService:
 
     def load_available_files(
         self,
-        preserve_selection: bool = True,
         load_completion_counts: bool = False,
-        on_files_loaded: callable | None = None,
+        on_files_loaded: Callable[[list[FileInfo]], None] | None = None,
     ) -> list[FileInfo]:
         """
         Load available files.
 
         Args:
-            preserve_selection: Whether to preserve current file selection (legacy, unused)
             load_completion_counts: Whether to include completion counts
             on_files_loaded: Optional callback to receive loaded files.
-                           If None, dispatches to store directly (legacy behavior).
+                           Callers should use this to dispatch to store.
 
         Returns:
             List of loaded FileInfo objects
@@ -132,16 +128,9 @@ class UnifiedDataService:
         else:
             files = self.find_available_files()
 
-        # HIGH-003 FIX: Use callback if provided, otherwise fall back to store dispatch
-        # This allows callers to handle the result without service importing from UI
+        # Call the callback if provided - caller is responsible for store dispatch
         if on_files_loaded is not None:
             on_files_loaded(files)
-        else:
-            # Legacy behavior - dispatch to store directly
-            # TODO: Remove this once all callers use the callback pattern
-            from sleep_scoring_app.ui.store import Actions
-
-            self.store.dispatch(Actions.files_loaded(files))
 
         return files
 
@@ -204,17 +193,14 @@ class UnifiedDataService:
 
     # === Diary Data Operations ===
 
-    def check_current_participant_has_diary_data(self, selected_file: str | None = None) -> bool:
+    def check_current_participant_has_diary_data(self, selected_file: str) -> bool:
         """
         Check if current participant has diary data.
 
         Args:
-            selected_file: Optional filename. If None, reads from store.
+            selected_file: Filename (required)
 
         """
-        # HIGH-003 FIX: Accept parameter directly, fall back to store for legacy callers
-        if selected_file is None:
-            selected_file = self.store.state.current_file
         if not selected_file:
             return False
 
@@ -227,17 +213,14 @@ class UnifiedDataService:
 
         return self._diary_service.check_participant_has_diary_data(participant_id)
 
-    def load_diary_data_for_current_file(self, selected_file: str | None = None) -> list:
+    def load_diary_data_for_current_file(self, selected_file: str) -> list:
         """
         Load diary data for currently selected file.
 
         Args:
-            selected_file: Optional filename. If None, reads from store.
+            selected_file: Filename (required)
 
         """
-        # HIGH-003 FIX: Accept parameter directly, fall back to store for legacy callers
-        if selected_file is None:
-            selected_file = self.store.state.current_file
         if not selected_file:
             return []
 

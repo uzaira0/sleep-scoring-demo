@@ -439,13 +439,6 @@ class FileRegistryRepository(BaseRepository):
                     )
                     deleted_counts["sleep_metrics"] = cursor.rowcount
 
-                    if DataConfig.ENABLE_AUTOSAVE:
-                        cursor = conn.execute(
-                            f"DELETE FROM {self._validate_table_name(DatabaseTable.AUTOSAVE_METRICS)} WHERE {self._validate_column_name(DatabaseColumn.FILENAME)} = ?",
-                            (filename,),
-                        )
-                        deleted_counts["autosave_metrics"] = cursor.rowcount
-
                     cursor = conn.execute(
                         f"DELETE FROM {self._validate_table_name(DatabaseTable.NONWEAR_SENSOR_PERIODS)} WHERE {self._validate_column_name(DatabaseColumn.FILENAME)} = ?",
                         (filename,),

@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(frozen=True)
 class PatternValidationResult:
     """Result of pattern validation."""
 
@@ -25,7 +25,7 @@ class PatternValidationResult:
     error_message: str | None = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class ExtractionTestResult:
     """Result of testing participant extraction."""
 

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import csv
 import logging
-import random
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -522,33 +521,3 @@ class FileColumnMappingBuilder:
         )
 
         dialog.accept()
-
-    def get_sample_file_from_context(self, parent_widget) -> Path | None:
-        """
-        Try to get a sample file from parent context.
-
-        Args:
-            parent_widget: The parent widget (typically DataSettingsTab)
-
-        Returns:
-            Path to a sample CSV file if available, None otherwise
-
-        """
-        # Try to get from selected files
-        if hasattr(parent_widget, "parent") and hasattr(parent_widget.parent, "_selected_activity_files"):  # KEEP: Dynamic parent check
-            files = parent_widget.parent._selected_activity_files
-            if files:
-                csv_files = [f for f in files if f.suffix.lower() == ".csv"]
-                if csv_files:
-                    return random.choice(csv_files)
-
-        # Fall back to import directory
-        if hasattr(parent_widget, "parent") and hasattr(parent_widget.parent, "config_manager"):  # KEEP: Dynamic parent check
-            config = parent_widget.parent.config_manager.config
-            if config.import_activity_directory:
-                folder = Path(config.import_activity_directory)
-                csv_files = list(folder.glob("*.csv"))
-                if csv_files:
-                    return random.choice(csv_files)
-
-        return None

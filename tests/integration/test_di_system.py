@@ -33,11 +33,7 @@ class TestFactoryEnumAlignment:
         assert AlgorithmType.SADEH_1994_ACTILIFE.value in factory_ids
         assert AlgorithmType.COLE_KRIPKE_1992_ORIGINAL.value in factory_ids
         assert AlgorithmType.COLE_KRIPKE_1992_ACTILIFE.value in factory_ids
-
-        # Raw data algorithms should be in factory
-        assert "van_hees_2015_sib" in factory_ids
-        # Note: hdcza_2018 has been moved to SleepPeriodDetectorFactory
-        # as it's a SPT boundary detector, not a sleep/wake classifier
+        # Note: Raw data algorithms (van_hees_2015_sib, hdcza) removed - use rpy2/GGIR instead
 
     def test_nonwear_algorithm_enum_matches_factory(self) -> None:
         """Test NonwearAlgorithm enum values match factory registered IDs."""
@@ -225,11 +221,11 @@ class TestCrossFactoryIntegration:
         sleep_algo = AlgorithmFactory.create(AlgorithmType.SADEH_1994_ACTILIFE.value)
         scored_df = sleep_algo.score(df)
 
-        assert "Sadeh Score" in scored_df.columns
+        assert "Sleep Score" in scored_df.columns
 
         # Step 2: Find onset/offset with detector
         detector = SleepPeriodDetectorFactory.create("consecutive_onset3s_offset5s")
-        sleep_scores = scored_df["Sadeh Score"].tolist()
+        sleep_scores = scored_df["Sleep Score"].tolist()
         ts_list = [pd.Timestamp(t).to_pydatetime() for t in timestamps]
 
         onset_idx, _offset_idx = detector.apply_rules(
@@ -277,7 +273,7 @@ class TestCrossFactoryIntegration:
 
         # Both should complete without errors
         assert isinstance(nonwear_periods, list)
-        assert "Sadeh Score" in scored_df.columns
+        assert "Sleep Score" in scored_df.columns
 
 
 class TestDataSourceDIIntegration:
@@ -391,7 +387,7 @@ class TestDataSourceDIIntegration:
         scored_df = algo.score(df_for_scoring)
 
         # Verify integration works
-        assert "Sadeh Score" in scored_df.columns
+        assert "Sleep Score" in scored_df.columns
         assert len(scored_df) == n_epochs
 
     def test_enum_default_consistency(self) -> None:
@@ -466,12 +462,10 @@ class TestDataSourceFiltering:
         """Test filtering algorithms that work with raw data."""
         raw_algorithms = AlgorithmFactory.get_algorithms_by_data_source("raw")
 
-        # Should include raw data algorithms
-        assert "van_hees_2015_sib" in raw_algorithms
-        # Note: hdcza_2018 has been moved to SleepPeriodDetectorFactory
-        # as it's a SPT boundary detector, not a sleep/wake classifier
+        # Raw algorithms have been removed - use rpy2/GGIR instead
+        assert len(raw_algorithms) == 0
 
-        # Should NOT include epoch-based algorithms
+        # Epoch-based algorithms should not appear here
         assert "sadeh_1994_original" not in raw_algorithms
         assert "sadeh_1994_actilife" not in raw_algorithms
         assert "cole_kripke_1992_original" not in raw_algorithms
@@ -483,30 +477,8 @@ class TestDataSourceFiltering:
         assert AlgorithmFactory.get_algorithm_data_source_type("sadeh_1994_actilife") == "epoch"
         assert AlgorithmFactory.get_algorithm_data_source_type("cole_kripke_1992_original") == "epoch"
 
-        # Raw data algorithms
-        assert AlgorithmFactory.get_algorithm_data_source_type("van_hees_2015_sib") == "raw"
-        # Note: hdcza_2018 is now in SleepPeriodDetectorFactory
-
         # Unknown algorithm
         assert AlgorithmFactory.get_algorithm_data_source_type("nonexistent_algo") is None
-
-    def test_raw_algorithms_have_correct_properties(self) -> None:
-        """Test that raw data algorithms have correct protocol properties."""
-        # van Hees 2015 SIB
-        sib = AlgorithmFactory.create("van_hees_2015_sib")
-        assert sib.data_source_type == "raw"
-        assert sib.requires_axis == "raw_triaxial"
-        assert sib.identifier == "van_hees_2015_sib"
-        assert sib.name == "van Hees (2015) SIB"
-
-        # HDCZA is now in SleepPeriodDetectorFactory (it's a SPT detector, not sleep/wake)
-        from sleep_scoring_app.core.algorithms.compatibility import AlgorithmDataRequirement
-        from sleep_scoring_app.core.algorithms.sleep_period import SleepPeriodDetectorFactory
-
-        hdcza = SleepPeriodDetectorFactory.create("hdcza_2018")
-        assert hdcza.data_requirement == AlgorithmDataRequirement.RAW_DATA
-        assert hdcza.identifier == "hdcza_2018"
-        assert hdcza.name == "HDCZA (van Hees 2018)"
 
     def test_epoch_algorithms_have_correct_properties(self) -> None:
         """Test that epoch-based algorithms have correct protocol properties."""

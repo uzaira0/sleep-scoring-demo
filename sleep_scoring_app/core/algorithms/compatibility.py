@@ -56,7 +56,7 @@ if TYPE_CHECKING:
 # Import at runtime for implementation
 import logging
 
-from sleep_scoring_app.core.constants import AlgorithmType, SleepPeriodDetectorType
+from sleep_scoring_app.core.constants import AlgorithmType
 from sleep_scoring_app.core.pipeline.types import (
     AlgorithmDataRequirement,
     DataSourceType,
@@ -250,33 +250,7 @@ class AlgorithmCompatibilityRegistry:
             ),
             description="Count-scaled variant for modern accelerometers",
         ),
-        # === RAW DATA ALGORITHMS ===
-        AlgorithmType.VAN_HEES_2015_SIB: AlgorithmCompatibilityInfo(
-            algorithm_id=AlgorithmType.VAN_HEES_2015_SIB,
-            display_name="van Hees (2015) SIB",
-            data_requirement=AlgorithmDataRequirement.RAW_DATA,
-            category=AlgorithmCategory.RAW_DATA,
-            incompatible_message=(
-                "van Hees (2015) SIB requires raw tri-axial accelerometer data from GT3X files. "
-                "Pre-epoched CSV files cannot be used with this algorithm because raw acceleration "
-                "data cannot be recovered from epoch counts. Please select an epoch-based algorithm "
-                "like Sadeh or Cole-Kripke instead."
-            ),
-            description="Sustained Inactivity Bout detection using z-angle from raw data",
-        ),
-        SleepPeriodDetectorType.HDCZA_2018: AlgorithmCompatibilityInfo(
-            algorithm_id=SleepPeriodDetectorType.HDCZA_2018,
-            display_name="HDCZA (van Hees 2018)",
-            data_requirement=AlgorithmDataRequirement.RAW_DATA,
-            category=AlgorithmCategory.RAW_DATA,
-            incompatible_message=(
-                "HDCZA (2018) requires raw tri-axial accelerometer data from GT3X files. "
-                "Pre-epoched CSV files cannot be used with this algorithm because raw acceleration "
-                "data cannot be recovered from epoch counts. Please select an epoch-based algorithm "
-                "like Sadeh or Cole-Kripke instead."
-            ),
-            description="Advanced sleep detection using z-angle changes from raw data",
-        ),
+        # NOTE: Raw-data algorithms (Van Hees SIB, HDCZA) removed - use rpy2/GGIR instead
     }
 
     @classmethod

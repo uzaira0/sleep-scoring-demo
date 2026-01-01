@@ -29,7 +29,7 @@ import pandas as pd
 
 from sleep_scoring_app.core.algorithms.sleep_wake.utils import find_datetime_column, validate_and_collapse_epochs
 from sleep_scoring_app.core.algorithms.types import ActivityColumn
-from sleep_scoring_app.core.constants import NonwearAlgorithm, NonwearDataSource
+from sleep_scoring_app.core.constants import AlgorithmOutputColumn, NonwearAlgorithm, NonwearDataSource
 from sleep_scoring_app.core.dataclasses import NonwearPeriod
 
 if TYPE_CHECKING:
@@ -162,7 +162,7 @@ def choi_detect_nonwear(
 
     if len(counts) == 0:
         result_df = data.copy()
-        result_df["Choi Nonwear"] = []
+        result_df[AlgorithmOutputColumn.NONWEAR_SCORE] = []
         return result_df
 
     nonwear_periods: list[NonwearPeriod] = []
@@ -224,7 +224,7 @@ def choi_detect_nonwear(
             nonwear_mask[period.start_index : period.end_index + 1] = 1
 
     result_df = data.copy()
-    result_df["Choi Nonwear"] = nonwear_mask
+    result_df[AlgorithmOutputColumn.NONWEAR_SCORE] = nonwear_mask
 
     return result_df
 

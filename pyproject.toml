@@ -40,10 +40,8 @@ gui = [
     "openpyxl>=3.1.0",
     "xlsxwriter>=3.1.0",
 ]
-# Advanced features - high-performance Rust backend for raw accelerometer processing
-# Required for: van Hees SIB, HDCZA, van Hees 2023 nonwear, GGIR-compatible calibration
-# NOTE: gt3x-rs is a local Rust package, install via: pip install ../../../packages/gt3x-rs
-# advanced = [
+
+# local = [
 #     "gt3x-rs>=0.1.0",
 # ]
 # Development dependencies - testing and code quality tools

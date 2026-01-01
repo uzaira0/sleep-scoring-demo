@@ -44,6 +44,8 @@ if TYPE_CHECKING:
 
     from sleep_scoring_app.core.algorithms.sleep_wake.protocol import SleepScoringAlgorithm
 
+from sleep_scoring_app.core.constants import AlgorithmOutputColumn
+
 from .exceptions import IncompatiblePipelineError
 from .types import AlgorithmDataRequirement, DataSourceType, EpochingService, PipelineType
 
@@ -290,7 +292,7 @@ class PipelineOrchestrator:
                 algorithm_name=algorithm.name,
             )
 
-        # Find the score column (can be "Sleep Score", "Sadeh Score", etc.)
+        # Find the score column (all algorithms output "Sleep Score")
         score_column = self._find_score_column(scored_data)
 
         # Wrap result
@@ -400,11 +402,8 @@ class PipelineOrchestrator:
         """
         Find the score column in the result DataFrame.
 
-        Different algorithms use different column names:
-        - Sadeh: "Sadeh Score"
-        - Cole-Kripke: "Sleep Score"
-        - Van Hees SIB: "Sleep Score"
-        - HDCZA: "Sleep Score"
+        All algorithms output to a generic "Sleep Score" column defined by
+        AlgorithmOutputColumn.SLEEP_SCORE.
 
         Args:
             df: DataFrame with scoring results
@@ -416,8 +415,8 @@ class PipelineOrchestrator:
             ValueError: If no score column is found
 
         """
-        # Common score column patterns
-        score_columns = ["Sleep Score", "Sadeh Score", "Cole-Kripke Score", "score"]
+        # Common score column patterns (all algorithms now output generic "Sleep Score")
+        score_columns = [AlgorithmOutputColumn.SLEEP_SCORE, "score"]
 
         for col in score_columns:
             if col in df.columns:

@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from sleep_scoring_app.core.constants import AlgorithmType
+from sleep_scoring_app.core.constants import AlgorithmOutputColumn, AlgorithmType
 from sleep_scoring_app.core.pipeline.types import AlgorithmDataRequirement
 
 from .utils import find_datetime_column, scale_counts, validate_and_collapse_epochs
@@ -189,7 +189,7 @@ def sadeh_score(
     logger.debug(f"Sadeh algorithm completed successfully for {len(capped_activity)} epochs")
 
     result_df = df.copy()
-    result_df["Sadeh Score"] = sleep_wake_scores
+    result_df[AlgorithmOutputColumn.SLEEP_SCORE] = sleep_wake_scores
 
     return result_df
 

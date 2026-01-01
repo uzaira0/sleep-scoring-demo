@@ -209,7 +209,10 @@ class DataSourceDetector:
             logger.debug(f"Detected {skip_rows} header rows to skip in {file_path.name}")
 
             # Read first few rows to inspect columns
-            df_sample = pd.read_csv(file_path, skiprows=skip_rows, nrows=100)
+            # Use skipinitialspace to handle CSVs with spaces after commas
+            df_sample = pd.read_csv(file_path, skiprows=skip_rows, nrows=100, skipinitialspace=True)
+            # Also strip any remaining whitespace from column names (handles trailing spaces)
+            df_sample.columns = df_sample.columns.str.strip()
 
             return self.detect_from_dataframe(df_sample)
 

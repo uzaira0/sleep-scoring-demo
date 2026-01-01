@@ -32,6 +32,8 @@ from sleep_scoring_app.core.constants import (
     ButtonText,
     FeatureFlags,
     InfoMessage,
+    MarkerEndpoint,
+    SleepMarkerEndpoint,
     SleepStatusValue,
     StudyDataParadigm,
     SuccessMessage,
@@ -49,16 +51,18 @@ from sleep_scoring_app.services.memory_service import (
     resource_manager,
 )
 from sleep_scoring_app.services.nonwear_service import NonwearDataService
-from sleep_scoring_app.services.ui_state_coordinator import UIStateCoordinator
 from sleep_scoring_app.services.unified_data_service import UnifiedDataService
 from sleep_scoring_app.ui.analysis_tab import AnalysisTab
-from sleep_scoring_app.ui.coordinators import ImportUICoordinator
+from sleep_scoring_app.ui.coordinators import (
+    DiaryIntegrationManager,
+    ImportUICoordinator,
+    SessionStateManager,
+    TimeFieldManager,
+    UIStateCoordinator,
+)
 from sleep_scoring_app.ui.data_settings_tab import DataSettingsTab
 from sleep_scoring_app.ui.export_tab import ExportTab
 from sleep_scoring_app.ui.file_navigation import FileNavigationManager
-from sleep_scoring_app.ui.managers.diary_integration_manager import DiaryIntegrationManager
-from sleep_scoring_app.ui.managers.session_state_manager import SessionStateManager
-from sleep_scoring_app.ui.managers.time_field_manager import TimeFieldManager
 from sleep_scoring_app.ui.marker_table import MarkerTableManager
 from sleep_scoring_app.ui.store import UIStore
 from sleep_scoring_app.ui.store_connectors import connect_all_components
@@ -100,7 +104,7 @@ class SleepScoringMainWindow(QMainWindow):
                     from PyQt6.QtCore import Qt
 
                     splash.showMessage(
-                        f"Sleep Research Analysis Tool\n\n{message}",
+                        f"Sleep Scoring App\n\n{message}",
                         Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignBottom,
                         Qt.GlobalColor.white,
                     )
@@ -110,7 +114,7 @@ class SleepScoringMainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Sleep Research Analysis Tool - Activity Data Visualization")
+        self.setWindowTitle("Sleep Scoring App - Activity Data Visualization")
         self.setGeometry(100, 100, 1280, 720)
         self.setContentsMargins(20, 10, 20, 10)
 
@@ -130,7 +134,7 @@ class SleepScoringMainWindow(QMainWindow):
         self._update_splash("Initializing database...")
 
         # PHASE 3: Initialize core services
-        self.db_manager = DatabaseManager()
+        self.db_manager = DatabaseManager(resource_manager=resource_manager)
         self.config_manager = ConfigManager()
 
         # Initialize config - use defaults if config doesn't exist or is invalid
@@ -145,8 +149,8 @@ class SleepScoringMainWindow(QMainWindow):
         # Initialize Redux store state from config
         self.store.initialize_from_config(self.config_manager.config)
 
-        # Initialize unified data service
-        self.data_service = UnifiedDataService(self.db_manager, self.store)
+        # Initialize unified data service (headless - no store dependency)
+        self.data_service = UnifiedDataService(self.db_manager)
         self.data_manager = self.data_service.data_manager
         self.export_manager = EnhancedExportManager(self.db_manager)
         self.nonwear_service = NonwearDataService(self.db_manager)
@@ -551,8 +555,13 @@ class SleepScoringMainWindow(QMainWindow):
         """Load available data files into the Redux state."""
         # data_service is initialized in __init__ before this method can be called
         if self.data_service:
-            # Service now dispatches Action to Store, which triggers FileListConnector
-            self.data_service.load_available_files(preserve_selection, load_completion_counts)
+            # Service is headless - we provide a callback to dispatch to store
+            def on_files_loaded(files):
+                from sleep_scoring_app.ui.store import Actions
+
+                self.store.dispatch(Actions.files_loaded(files))
+
+            self.data_service.load_available_files(load_completion_counts, on_files_loaded)
 
     def load_current_date(self) -> None:
         """Load data for the currently selected file and date index."""
@@ -567,9 +576,15 @@ class SleepScoringMainWindow(QMainWindow):
                 logger.warning("MAIN WINDOW: Cannot load date - index < 0")
                 return
 
-            # MW-04 FIX: Delegate to data service with required cache
+            # Service is headless - pass required parameters explicitly
+            state = self.store.state
             logger.info("MAIN WINDOW: Triggering data_service.load_current_date()")
-            result = self.data_service.load_current_date(self.current_date_48h_cache)
+            result = self.data_service.load_current_date(
+                self.current_date_48h_cache,
+                list(state.available_dates),
+                state.current_date_index,
+                state.current_file,
+            )
 
             # 2. Update visuals if load was successful
             if result:
@@ -718,37 +733,25 @@ class SleepScoringMainWindow(QMainWindow):
             self.export_tab.refresh_data_summary()
 
     def _get_axis_y_data_for_sadeh(self) -> list[float]:
-        """Get axis_y data specifically for Sadeh algorithm using UNIFIED loading method."""
-        # Get current filename from store state (which stores just the filename, not full path)
-        # CRITICAL: The database uses filename (not full path) as the key
-        current_filename = self.store.state.current_file
-        current_date = self.available_dates[self.current_date_index] if self.available_dates and self.current_date_index != -1 else None
+        """
+        Get axis_y data specifically for Sadeh algorithm.
 
-        logger.info(f"MAIN WINDOW: Loading axis_y for Sadeh | File: {current_filename} | Date: {current_date}")
+        ARCHITECTURE: Uses Redux store as single source of truth.
+        ActivityDataConnector loads ALL columns with SAME timestamps,
+        preventing the alignment bugs that occurred when loading columns separately.
+        """
+        # Get axis_y from Redux store - single source of truth
+        state = self.store.state
+        if state.axis_y_data and state.activity_timestamps:
+            logger.info(
+                "Using axis_y from STORE: %d points (guaranteed aligned with timestamps)",
+                len(state.axis_y_data),
+            )
+            return list(state.axis_y_data)
 
-        if not current_filename or not current_date:
-            logger.warning("No current filename or date for axis_y loading")
-            return []
-
-        # Use the UNIFIED loading method - single source of truth
-        timestamps, axis_y_data = self.data_service.data_manager.load_axis_y_data_for_sadeh(
-            current_filename,
-            current_date,
-            hours=48,  # Always 48hr for main data consistency
-        )
-
-        if not axis_y_data:
-            logger.warning("No axis_y data available for Sadeh algorithm")
-            return []
-
-        # Store in plot widget for table access (single cache location)
-        if hasattr(self.plot_widget, "main_48h_timestamps"):  # KEEP: Plot widget duck typing
-            self.plot_widget.main_48h_axis_y_data = axis_y_data
-            # CRITICAL: Also store axis_y timestamps for proper alignment
-            self.plot_widget.main_48h_axis_y_timestamps = timestamps
-            logger.debug("Stored %d axis_y timestamps for Sadeh alignment", len(timestamps))
-
-        return axis_y_data
+        # Store is empty - this should not happen if ActivityDataConnector is working
+        logger.warning("axis_y not in store - ActivityDataConnector may not have loaded data yet")
+        return []
 
     def _get_file_completion_count(self, filename: str) -> tuple[int, int]:
         """Get file completion count as (completed/total) - returns tuple (completed_count, total_count)."""
@@ -801,6 +804,11 @@ class SleepScoringMainWindow(QMainWindow):
         # Guard: Skip if same file is already selected (prevents clearing markers)
         if self.store.state.current_file == file_info.filename:
             logger.info("MAIN WINDOW: Same file already selected, skipping reload")
+            return
+
+        # Check for unsaved markers before switching files
+        if not self._check_unsaved_markers_before_navigation():
+            logger.info("MAIN WINDOW: File switch cancelled - unsaved markers")
             return
 
         # 1. Dispatch file_selected to Redux (this is the ONLY place it should be dispatched)
@@ -949,40 +957,59 @@ class SleepScoringMainWindow(QMainWindow):
             # Cancel button or dialog closed
             return False
 
-        # No unsaved markers or autosave is enabled, use existing auto-save behavior
-        self.auto_save_current_markers()
+        # Autosave is enabled - force immediate save before navigation to prevent data loss
+        # This ensures any pending debounced saves are executed synchronously
+        if markers_dirty and self.store.state.auto_save_enabled:
+            logger.info("Forcing immediate save before navigation (autosave enabled, markers dirty)")
+            # Force the autosave coordinator to save immediately (bypasses debounce timer)
+            if hasattr(self, "autosave_coordinator") and self.autosave_coordinator:
+                self.autosave_coordinator.force_save()
+            else:
+                # Fallback to direct save if coordinator not available
+                self.auto_save_current_markers()
+
         return True
 
     def prev_date(self) -> None:
-        """Navigate to previous date."""
+        """
+        Navigate to previous date.
+
+        NOTE: This method exists for Protocol compatibility.
+        Navigation is normally handled by NavigationGuardConnector via button signals.
+        """
         # Check for unsaved markers before proceeding
         if not self._check_unsaved_markers_before_navigation():
             return  # User canceled the navigation
 
         try:
             if self.current_date_index > 0:
-                self.current_date_index -= 1
-                self.date_dropdown.setCurrentIndex(self.current_date_index)
-                self.load_current_date()
-                # NOTE: Marker loading handled by MarkerLoadingCoordinator on navigation
-                # Dropdown color handled reactively via DateDropdownConnector
+                # Dispatch to store - ActivityDataConnector handles data loading
+                from sleep_scoring_app.ui.store import Actions
+
+                self.store.dispatch(Actions.date_navigated(-1))
+                # NOTE: NavigationConnector updates dropdown, ActivityDataConnector loads data
         except (TypeError, AttributeError):
             # Handle mock objects during testing
             return
 
     def next_date(self) -> None:
-        """Navigate to next date."""
+        """
+        Navigate to next date.
+
+        NOTE: This method exists for Protocol compatibility.
+        Navigation is normally handled by NavigationGuardConnector via button signals.
+        """
         # Check for unsaved markers before proceeding
         if not self._check_unsaved_markers_before_navigation():
             return  # User canceled the navigation
 
         try:
             if self.current_date_index < len(self.available_dates) - 1:
-                self.current_date_index += 1
-                self.date_dropdown.setCurrentIndex(self.current_date_index)
-                self.load_current_date()
-                # NOTE: Marker loading handled by MarkerLoadingCoordinator on navigation
-                # Dropdown color handled reactively via DateDropdownConnector
+                # Dispatch to store - ActivityDataConnector handles data loading
+                from sleep_scoring_app.ui.store import Actions
+
+                self.store.dispatch(Actions.date_navigated(1))
+                # NOTE: NavigationConnector updates dropdown, ActivityDataConnector loads data
         except (TypeError, AttributeError):
             # Handle mock objects during testing
             return
@@ -1055,51 +1082,77 @@ class SleepScoringMainWindow(QMainWindow):
 
     def _autosave_sleep_markers_to_db(self, daily_sleep_markers: DailySleepMarkers) -> None:
         """
-        Autosaves sleep markers to the database.
-        This method is a callback for the AutosaveCoordinator.
-        Uses the SAME save path as manual save for consistency.
+        Lightweight autosave of sleep markers to the database.
+
+        PERFORMANCE: Only saves marker positions (onset/offset timestamps).
+        Skips all expensive operations:
+        - No algorithm result fetching (Choi, sensor, Sadeh)
+        - No metrics calculation (WASO, TST, sleep efficiency, etc.)
+
+        Full metrics are calculated at EXPORT time, not on every marker drag.
         """
         try:
-            # Get main sleep period for metrics calculation
+            # Get main sleep period - just need the marker positions
             main_sleep = daily_sleep_markers.get_main_sleep()
-            if not main_sleep:
+            if not main_sleep or not main_sleep.is_complete:
                 return
 
-            # Get algorithm results and activity data from plot widget
-            sadeh_results = getattr(self.plot_widget, "sadeh_results", [])
-            choi_results = self.plot_widget.get_choi_results_per_minute()
-            nwt_sensor_results = self.plot_widget.get_nonwear_sensor_results_per_minute()
-            axis_y_data = self._get_axis_y_data_for_sadeh()
-            x_data = getattr(self.plot_widget, "x_data", [])
+            if not self.selected_file:
+                return
 
-            # Calculate comprehensive sleep metrics using SleepPeriod directly
-            sleep_metrics = self.data_manager.calculate_sleep_metrics_for_period_object(
-                main_sleep,
-                sadeh_results,
-                choi_results,
-                axis_y_data,
-                x_data,
-                file_path=self.selected_file,
-                nwt_sensor_results=nwt_sensor_results,
+            # Get current date
+            current_date = self.available_dates[self.current_date_index] if self.available_dates else datetime.now()
+            analysis_date = current_date.strftime("%Y-%m-%d")
+            filename = Path(self.selected_file).name
+
+            # Create MINIMAL SleepMetrics with just marker positions
+            # No expensive calculations - metrics will be computed at export time
+            from sleep_scoring_app.core.dataclasses_markers import SleepMetrics
+            from sleep_scoring_app.utils.participant_extractor import extract_participant_info
+
+            # Extract participant info from filename (timepoint, group, numerical ID)
+            participant = extract_participant_info(filename)
+
+            # Get current algorithm and rule from store state
+            from sleep_scoring_app.core.constants import AlgorithmType, SleepPeriodDetectorType
+
+            algorithm_id = self.store.state.sleep_algorithm_id
+            rule_id = self.store.state.onset_offset_rule_id
+
+            # Convert algorithm ID to enum
+            try:
+                algorithm_type = AlgorithmType(algorithm_id) if algorithm_id else AlgorithmType.SADEH_1994_ACTILIFE
+            except ValueError:
+                algorithm_type = AlgorithmType.SADEH_1994_ACTILIFE
+
+            # Convert timestamps to time strings
+            onset_time_str = ""
+            offset_time_str = ""
+            if main_sleep.onset_timestamp:
+                onset_time_str = datetime.fromtimestamp(main_sleep.onset_timestamp).strftime("%H:%M")
+            if main_sleep.offset_timestamp:
+                offset_time_str = datetime.fromtimestamp(main_sleep.offset_timestamp).strftime("%H:%M")
+
+            sleep_metrics = SleepMetrics(
+                participant=participant,
+                filename=filename,
+                analysis_date=analysis_date,
+                daily_sleep_markers=daily_sleep_markers,
+                algorithm_type=algorithm_type,
+                sleep_algorithm_name=algorithm_id,
+                sleep_period_detector_id=rule_id or SleepPeriodDetectorType.CONSECUTIVE_ONSET3S_OFFSET5S,
+                onset_time=onset_time_str,
+                offset_time=offset_time_str,
+                updated_at=datetime.now().isoformat(),
             )
 
-            if sleep_metrics:
-                # Add current date and file information
-                current_date = self.available_dates[self.current_date_index] if self.available_dates else datetime.now()
-                sleep_metrics.analysis_date = current_date.strftime("%Y-%m-%d")
-                sleep_metrics.updated_at = datetime.now().isoformat()
-                sleep_metrics.filename = Path(self.selected_file).name if self.selected_file else ""
+            # Save directly to database - lightweight path
+            self.db_manager.save_sleep_metrics(sleep_metrics)
+            logger.debug("Autosaved markers for %s (lightweight)", filename)
 
-                # CRITICAL: Set full daily_sleep_markers to save ALL periods (same as manual save)
-                sleep_metrics.daily_sleep_markers = daily_sleep_markers
-
-                # Use SAME save method as manual save for consistency
-                self.export_manager.save_comprehensive_sleep_metrics([sleep_metrics], AlgorithmType.SADEH_1994_ACTILIFE)
-                logger.debug("Autosaved sleep markers for %s", Path(self.selected_file).name if self.selected_file else "unknown")
-
-                # Invalidate marker status cache for this file after auto-save
-                if self.selected_file and self.state_manager:
-                    self.state_manager.invalidate_marker_status_cache(Path(self.selected_file).name)
+            # Invalidate marker status cache
+            if self.state_manager:
+                self.state_manager.invalidate_marker_status_cache(filename)
 
             # NOTE: markers_saved() is dispatched by AutosaveCoordinator after ALL saves complete
 
@@ -1334,7 +1387,7 @@ class SleepScoringMainWindow(QMainWindow):
         row = item.row()
         # Clear selection to prevent highlighting on right-click
         table.clearSelection()
-        self._move_marker_from_table_click("onset", row)
+        self._move_marker_from_table_click(SleepMarkerEndpoint.ONSET, row)
 
     def _on_offset_table_right_clicked(self, pos) -> None:
         """Handle right-click on offset table row to move offset marker."""
@@ -1346,7 +1399,7 @@ class SleepScoringMainWindow(QMainWindow):
         row = item.row()
         # Clear selection to prevent highlighting on right-click
         table.clearSelection()
-        self._move_marker_from_table_click("offset", row)
+        self._move_marker_from_table_click(SleepMarkerEndpoint.OFFSET, row)
 
     def _get_marker_data_cached(self, marker_timestamp: float, cached_idx: int | None = None) -> list[dict[str, Any]]:
         """Get marker surrounding data using cached index for better performance during drag operations."""
@@ -1387,7 +1440,7 @@ class SleepScoringMainWindow(QMainWindow):
             if active_category == MarkerCategory.NONWEAR:
                 # Move nonwear marker
                 # Map onset/offset to start/end for nonwear markers
-                nonwear_marker_type = "start" if marker_type == "onset" else "end"
+                nonwear_marker_type = MarkerEndpoint.START if marker_type == SleepMarkerEndpoint.ONSET else MarkerEndpoint.END
 
                 selected_period = self.plot_widget.marker_renderer.get_selected_nonwear_period()
                 period_slot = selected_period.marker_index if selected_period else None
@@ -1641,14 +1694,14 @@ class SleepScoringMainWindow(QMainWindow):
         onset_timestamp = self._parse_time_to_timestamp(onset_text, base_date)
         if onset_timestamp is None:
             logger.warning(f"Invalid onset time format: {onset_text}")
-            self._restore_field_from_marker("onset")
+            self._restore_field_from_marker(SleepMarkerEndpoint.ONSET)
             return
 
         # For offset, if time is earlier than onset, assume next day
         offset_timestamp = self._parse_time_to_timestamp(offset_text, base_date)
         if offset_timestamp is None:
             logger.warning(f"Invalid offset time format: {offset_text}")
-            self._restore_field_from_marker("offset")
+            self._restore_field_from_marker(SleepMarkerEndpoint.OFFSET)
             return
 
         # Handle overnight sleep (offset before onset means next day)
@@ -1700,10 +1753,10 @@ class SleepScoringMainWindow(QMainWindow):
         if not selected_period:
             return
 
-        if field_type == "onset" and selected_period.onset_timestamp:
+        if field_type == SleepMarkerEndpoint.ONSET and selected_period.onset_timestamp:
             onset_time = datetime.fromtimestamp(selected_period.onset_timestamp)
             self.onset_time_input.setText(onset_time.strftime("%H:%M"))
-        elif field_type == "offset" and selected_period.offset_timestamp:
+        elif field_type == SleepMarkerEndpoint.OFFSET and selected_period.offset_timestamp:
             offset_time = datetime.fromtimestamp(selected_period.offset_timestamp)
             self.offset_time_input.setText(offset_time.strftime("%H:%M"))
 
@@ -1766,105 +1819,6 @@ class SleepScoringMainWindow(QMainWindow):
     def toggle_adjacent_day_markers(self, show: bool) -> None:
         """Toggle display of adjacent day markers from adjacent days."""
         self.ui_state_coordinator.toggle_adjacent_day_markers(show)
-
-    def _load_and_display_adjacent_day_markers(self) -> None:
-        """Load markers from adjacent days and display as adjacent day markers."""
-        if (
-            not self.available_dates
-            or self.current_date_index is None
-            or self.current_date_index < 0
-            or self.current_date_index >= len(self.available_dates)
-        ):
-            logger.info("Adjacent day markers: No available dates or invalid date index")
-            return
-
-        current_date = self.available_dates[self.current_date_index]
-        adjacent_day_markers = []
-
-        logger.info(f"Loading adjacent day markers for current date: {current_date}, index: {self.current_date_index}")
-        logger.info(f"Total available dates: {len(self.available_dates)}")
-
-        # Load markers from day-1 (if exists)
-        if self.current_date_index > 0:
-            prev_date = self.available_dates[self.current_date_index - 1]
-            logger.info(f"Loading markers from previous day: {prev_date}")
-            prev_markers = self._load_markers_for_date(prev_date)
-            logger.info(f"Found {len(prev_markers)} markers for previous day")
-            if prev_markers:
-                for marker in prev_markers:
-                    marker["adjacent_date"] = prev_date.strftime("%Y-%m-%d")
-                    marker["is_adjacent_day"] = True
-                adjacent_day_markers.extend(prev_markers)
-
-        # Load markers from day+1 (if exists)
-        if self.current_date_index < len(self.available_dates) - 1:
-            next_date = self.available_dates[self.current_date_index + 1]
-            logger.info(f"Loading markers from next day: {next_date}")
-            next_markers = self._load_markers_for_date(next_date)
-            logger.info(f"Found {len(next_markers)} markers for next day")
-            if next_markers:
-                for marker in next_markers:
-                    marker["adjacent_date"] = next_date.strftime("%Y-%m-%d")
-                    marker["is_adjacent_day"] = True
-                adjacent_day_markers.extend(next_markers)
-
-        logger.info(f"Total adjacent day markers to display: {len(adjacent_day_markers)}")
-
-        # Display adjacent day markers on plot
-        if adjacent_day_markers:
-            if hasattr(self.plot_widget, "display_adjacent_day_markers"):  # KEEP: Plot widget duck typing
-                logger.info("Displaying adjacent day markers on plot")
-                self.plot_widget.display_adjacent_day_markers(adjacent_day_markers)
-            else:
-                logger.error("Plot widget does not have display_adjacent_day_markers method")
-        else:
-            logger.info("No adjacent day markers found to display")
-
-    def _load_markers_for_date(self, date) -> None:
-        """Load sleep markers for a specific date."""
-        try:
-            filename = Path(self.selected_file).name
-            date_str = date.strftime("%Y-%m-%d")
-            logger.info(f"Loading markers for file: {filename}, date: {date_str}")
-
-            # First, let's check what dates are actually in the database
-            try:
-                available_dates = self.db_manager.file_registry.get_available_dates_for_file(filename)
-                logger.info(f"Available dates in database for {filename}: {available_dates}")
-            except Exception as e:
-                logger.exception(f"Error checking available dates: {e}")
-
-            # Use the same method as regular marker loading (sleep_metrics table)
-            saved_data = self.export_manager.db_manager.load_sleep_metrics(filename=filename, analysis_date=date_str)
-            logger.info(f"Sleep metrics loaded: {len(saved_data) if saved_data else 0} records")
-
-            # Convert sleep metrics to adjacent day marker format
-            markers = []
-            if saved_data:
-                for record in saved_data:
-                    # Get complete periods from daily_sleep_markers
-                    complete_periods = record.daily_sleep_markers.get_complete_periods()
-                    logger.info(f"Record has {len(complete_periods)} complete periods")
-
-                    for period in complete_periods:
-                        if period.onset_timestamp and period.offset_timestamp:
-                            marker = {
-                                "onset_datetime": period.onset_timestamp,
-                                "offset_datetime": period.offset_timestamp,
-                            }
-                            markers.append(marker)
-                            logger.info(f"Added adjacent day marker: onset={period.onset_timestamp}, offset={period.offset_timestamp}")
-
-            logger.info(f"Converted to {len(markers)} adjacent day markers")
-            return markers
-        except Exception as e:
-            logger.exception(f"Error loading markers for date {date}: {e}")
-            return []
-
-    def _clear_adjacent_day_markers(self) -> None:
-        """Clear all adjacent day markers from the plot."""
-        if hasattr(self.plot_widget, "clear_adjacent_day_markers"):  # KEEP: Plot widget duck typing
-            self.plot_widget.clear_adjacent_day_markers()
 
     def load_saved_markers(self) -> None:
         """Load saved markers for current file and date."""
@@ -1970,16 +1924,23 @@ class SleepScoringMainWindow(QMainWindow):
         self.ui_state_coordinator.update_status_bar(message)
 
     def get_sleep_algorithm_display_name(self) -> str:
-        """Get the display name for the configured sleep algorithm."""
-        try:
-            if self.config_manager and self.config_manager.config:
-                algorithm_id = self.config_manager.config.sleep_algorithm_id
-                if algorithm_id:
-                    from sleep_scoring_app.services.algorithm_service import get_algorithm_service
+        """
+        Get the display name for the configured sleep algorithm.
 
-                    available = get_algorithm_service().get_available_sleep_algorithms()
-                    if algorithm_id in available:
-                        return available[algorithm_id]
+        CRITICAL: Must read from STORE state, not config_manager.config!
+        When study settings change, ConfigPersistenceConnector updates config AFTER
+        other connectors have already reacted to the state change. Reading from config
+        would return stale values.
+        """
+        try:
+            # Read from store state (single source of truth)
+            algorithm_id = self.store.state.sleep_algorithm_id
+            if algorithm_id:
+                from sleep_scoring_app.services.algorithm_service import get_algorithm_service
+
+                available = get_algorithm_service().get_available_sleep_algorithms()
+                if algorithm_id in available:
+                    return available[algorithm_id]
         except Exception as e:
             logger.warning("Failed to get sleep algorithm name: %s", e)
 

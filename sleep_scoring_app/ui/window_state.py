@@ -123,7 +123,14 @@ class WindowStateManager:
         # Also invalidate the data service cache and refresh file table
         if self.services.data_service is not None:
             self.services.data_service.clear_file_cache(filename)
-            self.services.data_service.load_available_files(preserve_selection=True, load_completion_counts=True)
+
+            # Service is headless - provide callback to dispatch to store
+            def on_files_loaded(files):
+                from sleep_scoring_app.ui.store import Actions
+
+                self.store.dispatch(Actions.files_loaded(files))
+
+            self.services.data_service.load_available_files(load_completion_counts=True, on_files_loaded=on_files_loaded)
 
     def invalidate_metrics_cache(self) -> None:
         """Invalidate the metrics cache to force reload on next access."""
@@ -371,13 +378,25 @@ class WindowStateManager:
             daily_markers = DailySleepMarkers()
 
             # Create sleep metrics with NO_SLEEP indicator
-            from sleep_scoring_app.core.constants import SleepStatusValue
+            from sleep_scoring_app.core.constants import SleepPeriodDetectorType, SleepStatusValue
+
+            # Get current algorithm and rule from store state
+            algorithm_id = self.store.state.sleep_algorithm_id
+            rule_id = self.store.state.onset_offset_rule_id
+
+            # Convert algorithm ID to enum
+            try:
+                algorithm_type = AlgorithmType(algorithm_id) if algorithm_id else AlgorithmType.SADEH_1994_ACTILIFE
+            except ValueError:
+                algorithm_type = AlgorithmType.SADEH_1994_ACTILIFE
 
             sleep_metrics = SleepMetrics(
                 participant=participant,
                 filename=filename,
                 analysis_date=date_str,
-                algorithm_type=AlgorithmType.SADEH_1994_ACTILIFE,
+                algorithm_type=algorithm_type,
+                sleep_algorithm_name=algorithm_id,
+                sleep_period_detector_id=rule_id or SleepPeriodDetectorType.CONSECUTIVE_ONSET3S_OFFSET5S,
                 daily_sleep_markers=daily_markers,
                 onset_time=SleepStatusValue.NO_SLEEP,
                 offset_time=SleepStatusValue.NO_SLEEP,
@@ -399,7 +418,7 @@ class WindowStateManager:
             )
 
             # Save to database via services
-            success = self.services.db_manager.save_sleep_metrics(sleep_metrics, is_autosave=False)
+            success = self.services.db_manager.save_sleep_metrics(sleep_metrics)
 
             if success:
                 # Update Redux state - this triggers StatusConnector to update the button
@@ -716,9 +735,7 @@ class WindowStateManager:
                 details = f"Successfully cleared {total_cleared} records from the database.\n\n"
                 details += "Details:\n"
                 details += f"• Sleep metrics: {result.get('sleep_metrics_cleared', 0)}\n"
-                details += f"• Nonwear markers: {result.get('nonwear_markers_cleared', 0)}\n"
-                if FeatureFlags.ENABLE_AUTOSAVE:
-                    details += f"• Autosave records: {result.get('autosave_metrics_cleared', 0)}"
+                details += f"• Nonwear markers: {result.get('nonwear_markers_cleared', 0)}"
 
                 QMessageBox.information(
                     self.main_window,

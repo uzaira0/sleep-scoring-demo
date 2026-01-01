@@ -20,6 +20,7 @@ from sleep_scoring_app.core.validation import InputValidator
 from sleep_scoring_app.utils.date_range import get_range_for_view_mode
 
 if TYPE_CHECKING:
+    from sleep_scoring_app.core.dataclasses import AlignedActivityData
     from sleep_scoring_app.data.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
@@ -323,6 +324,63 @@ class DataLoadingService:
         logger.warning("No data source available for %s on %s. Check that the file was imported correctly.", filename, target_date)
         return None, None
 
+    def load_unified_activity_data(self, filename: str, target_date: datetime | date, hours: int = 48) -> dict[str, list] | None:
+        """
+        Load ALL activity columns in ONE query with unified timestamps.
+
+        This is the SINGLE SOURCE OF TRUTH for activity data loading.
+        All columns share the SAME timestamps, preventing alignment bugs.
+
+        Args:
+            filename: Name of file to load (filename only, not full path)
+            target_date: Target date for data loading
+            hours: Number of hours to load (default 48)
+
+        Returns:
+            Dictionary with keys: 'timestamps', 'axis_y', 'axis_x', 'axis_z', 'vector_magnitude'
+            All lists have the SAME length (guaranteed).
+            Returns None if loading fails.
+
+        """
+        if not filename or not self.use_database:
+            return None
+
+        try:
+            # Validate filename format
+            if "/" in filename or "\\" in filename:
+                logger.warning("Path detected in filename, extracting: %s", filename)
+                from pathlib import Path
+
+                filename = Path(filename).name
+
+            # Convert date to datetime if needed
+            if isinstance(target_date, date) and not isinstance(target_date, datetime):
+                target_datetime = datetime.combine(target_date, datetime.min.time())
+            else:
+                target_datetime = target_date
+
+            # Calculate time range
+            date_range = get_range_for_view_mode(target_datetime, hours)
+            start_time = date_range.start
+            end_time = date_range.end
+
+            # Load ALL columns in ONE query
+            result = self.db_manager.load_all_activity_columns(filename, start_time, end_time)
+
+            if not result or not result.get("timestamps"):
+                logger.warning("No unified data found for %s in range %s to %s", filename, start_time, end_time)
+                return None
+
+            logger.info(
+                "Loaded unified activity data: %d rows, all columns aligned",
+                len(result["timestamps"]),
+            )
+            return result
+
+        except Exception as e:
+            logger.exception("Failed to load unified activity data: %s", e)
+            return None
+
     def _load_database_activity_data(
         self, filename: str, target_date: datetime, hours: int, activity_column: ActivityDataPreference | None = None
     ) -> tuple[list[datetime], list[float]]:
@@ -487,7 +545,7 @@ class DataLoadingService:
             logger.exception("TARGETED LOAD: Unexpected error loading %s: %s", activity_column, e)
             return None
 
-    def load_axis_y_data_for_sadeh(self, filename: str, target_date: datetime, hours: int = 48) -> tuple[list[datetime], list[float]] | None:
+    def load_axis_y_data_for_sadeh(self, filename: str, target_date: datetime, hours: int = 48) -> tuple[list[datetime], list[float]]:
         """
         Unified method to load axis_y (vertical) data specifically for Sadeh algorithm.
         This is the SINGLE SOURCE OF TRUTH for axis_y loading.
@@ -501,8 +559,30 @@ class DataLoadingService:
             Tuple of (timestamps, axis_y_data) if successful, ([], []) if failed
 
         """
+        aligned_data = self.load_axis_y_aligned(filename, target_date, hours)
+        return list(aligned_data.timestamps), list(aligned_data.activity_values)
+
+    def load_axis_y_aligned(self, filename: str, target_date: datetime, hours: int = 48) -> AlignedActivityData:
+        """
+        Load axis_y data as an aligned immutable container.
+
+        This is the SINGLE SOURCE OF TRUTH for axis_y loading that guarantees
+        timestamps and activity values are ALWAYS aligned and cannot get out of sync.
+
+        Args:
+            filename: Name of file to load from
+            target_date: Target date for data loading
+            hours: Number of hours to load (24 or 48, default 48)
+
+        Returns:
+            AlignedActivityData with timestamps and activity_values guaranteed to be aligned.
+            Returns empty AlignedActivityData if loading fails.
+
+        """
+        from sleep_scoring_app.core.dataclasses import AlignedActivityData
+
         date_str = target_date.date() if hasattr(target_date, "date") else target_date  # KEEP: Duck typing date/datetime
-        logger.debug("AXIS_Y UNIFIED LOAD: Loading axis_y data for Sadeh from %s on %s (%sh)", filename, date_str, hours)
+        logger.debug("AXIS_Y ALIGNED LOAD: Loading axis_y data for Sadeh from %s on %s (%sh)", filename, date_str, hours)
 
         # Convert date to datetime if needed
         if isinstance(target_date, date) and not isinstance(target_date, datetime):
@@ -524,33 +604,34 @@ class DataLoadingService:
                         filename, start_time, end_time, activity_column=ActivityDataPreference.AXIS_Y
                     )
                     if timestamps:
-                        logger.debug("AXIS_Y UNIFIED: Loaded %d points from database", len(timestamps))
-                        return timestamps, activities
+                        logger.debug("AXIS_Y ALIGNED: Loaded %d points from database", len(timestamps))
+                        # Create immutable aligned container - validates alignment at construction
+                        return AlignedActivityData.from_lists(timestamps, activities, column_type="axis_y")
                 except Exception as e:
-                    logger.debug("AXIS_Y UNIFIED: Database load attempt failed: %s", e)
+                    logger.debug("AXIS_Y ALIGNED: Database load attempt failed: %s", e)
 
             # Try CSV fallback
             if self.current_data is not None:
                 try:
                     timestamps, activities = self._load_csv_activity_data(target_date, hours, ActivityDataPreference.AXIS_Y)
                     if timestamps:
-                        logger.debug("AXIS_Y UNIFIED: Loaded %d points from CSV", len(timestamps))
-                        return timestamps, activities
+                        logger.debug("AXIS_Y ALIGNED: Loaded %d points from CSV", len(timestamps))
+                        return AlignedActivityData.from_lists(timestamps, activities, column_type="axis_y")
                 except Exception as e:
-                    logger.warning("AXIS_Y UNIFIED: CSV load failed: %s", e)
+                    logger.warning("AXIS_Y ALIGNED: CSV load failed: %s", e)
 
             # No data found - this is a user-visible problem
             logger.warning(
-                "AXIS_Y UNIFIED: No axis_y data found for %s on %s. "
+                "AXIS_Y ALIGNED: No axis_y data found for %s on %s. "
                 "Sleep scoring algorithms require axis_y data. Check that the file was imported correctly.",
                 filename,
                 date_str,
             )
-            return [], []
+            return AlignedActivityData.empty(column_type="axis_y")
 
         except Exception as e:
-            logger.warning("AXIS_Y UNIFIED: Unexpected error loading data for %s: %s", filename, e)
-            return [], []
+            logger.warning("AXIS_Y ALIGNED: Unexpected error loading data for %s: %s", filename, e)
+            return AlignedActivityData.empty(column_type="axis_y")
 
     def clear_current_data(self) -> None:
         """Clear current loaded CSV data."""

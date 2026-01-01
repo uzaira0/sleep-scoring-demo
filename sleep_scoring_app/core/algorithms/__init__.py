@@ -9,12 +9,15 @@ Algorithms Included:
     - Sadeh (1994): Sleep/wake classification from actigraphy
     - Cole-Kripke (1992): Alternative sleep/wake classification algorithm
     - Choi (2011): Nonwear period detection
-    - van Hees (2023): Alternative nonwear detection algorithm
     - ConsecutiveEpochsSleepPeriodDetector: Configurable sleep period detection
+
+Note:
+    Raw data algorithms (Van Hees SIB, HDCZA, van Hees nonwear) are not included.
+    For raw accelerometer analysis, use rpy2 to call GGIR.
 
 Package Structure:
     sleep_wake/     - Sleep/wake classification (protocol, factory, Sadeh, Cole-Kripke)
-    nonwear/        - Nonwear detection (protocol, factory, Choi, van Hees)
+    nonwear/        - Nonwear detection (protocol, factory, Choi)
     sleep_period/   - Sleep period detection (protocol, factory, ConsecutiveEpochs)
     protocols/      - Shared callback protocols
     types.py        - Common type definitions (ActivityColumn enum)
@@ -52,6 +55,7 @@ Example Usage (Function-based API):
     # Choi nonwear detection
     df = choi_detect_nonwear(df, activity_column=ActivityColumn.VECTOR_MAGNITUDE)
     ```
+
 """
 
 from __future__ import annotations
@@ -84,7 +88,6 @@ from .nonwear import (
     ChoiAlgorithm,
     NonwearAlgorithmFactory,
     NonwearDetectionAlgorithm,
-    VanHeesNonwearAlgorithm,
 )
 from .nonwear.choi import NonwearPeriod, choi_detect_nonwear, detect_nonwear
 
@@ -175,7 +178,6 @@ __all__ = [
     # === Sleep/Wake Classification ===
     "SleepScoringAlgorithm",
     "TudorLockeSleepMetricsCalculator",
-    "VanHeesNonwearAlgorithm",
     "apply_calibration",
     "calibrate",
     "choi_detect_nonwear",

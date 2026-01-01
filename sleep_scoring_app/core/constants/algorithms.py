@@ -129,7 +129,7 @@ class AlgorithmType(StrEnum):
     SADEH_1994_ACTILIFE = "sadeh_1994_actilife"
     COLE_KRIPKE_1992_ORIGINAL = "cole_kripke_1992_original"
     COLE_KRIPKE_1992_ACTILIFE = "cole_kripke_1992_actilife"
-    VAN_HEES_2015_SIB = "van_hees_2015_sib"
+    VAN_HEES_2015_SIB = "van_hees_2015_sib"  # Implementation via rpy2/GGIR
 
     # Special values for UI/workflow states
     MANUAL = "manual"  # Manual scoring without algorithm
@@ -169,8 +169,7 @@ class NonwearAlgorithm(StrEnum):
     """
 
     CHOI_2011 = "choi_2011"
-    VAN_HEES_2023 = "van_hees_2023"
-    VANHEES_2013 = "vanhees_2013"
+    # NOTE: Raw data algorithms (van Hees, etc.) removed - use rpy2/GGIR instead
 
     @classmethod
     def get_default(cls) -> "NonwearAlgorithm":
@@ -200,9 +199,7 @@ class SleepPeriodDetectorType(StrEnum):
     CONSECUTIVE_ONSET3S_OFFSET5S = "consecutive_onset3s_offset5s"
     CONSECUTIVE_ONSET5S_OFFSET10S = "consecutive_onset5s_offset10s"
     TUDOR_LOCKE_2014 = "tudor_locke_2014"
-
-    # Raw-data detectors (work directly on raw accelerometer data)
-    HDCZA_2018 = "hdcza_2018"
+    # NOTE: Raw-data detectors (HDCZA, etc.) removed - use rpy2/GGIR instead
 
     @classmethod
     def get_default(cls) -> "SleepPeriodDetectorType":
@@ -222,7 +219,6 @@ class NonwearDataSource(StrEnum):
     """Nonwear data source types."""
 
     CHOI_ALGORITHM = "Choi Algorithm"  # Choi nonwear detection from accelerometer
-    VAN_HEES_2023 = "van Hees 2023"  # van Hees 2023 nonwear detection from raw data
     NONWEAR_SENSOR = "Nonwear Sensor"  # External nonwear sensor data
     NWT_SENSOR = "NWT Sensor"  # Alternative name for nonwear time sensor
     MANUAL_NWT = "Manual NWT"  # Manually marked non-wear time
@@ -296,10 +292,24 @@ class MarkerCategory(StrEnum):
 
 
 class MarkerEndpoint(StrEnum):
-    """Which end of a marker period."""
+    """Which end of a marker period (generic, used for nonwear markers)."""
 
     START = "start"
     END = "end"
+
+
+class SleepMarkerEndpoint(StrEnum):
+    """Which end of a sleep marker period (onset/offset terminology)."""
+
+    ONSET = "onset"
+    OFFSET = "offset"
+
+
+class MarkerPlacementState(StrEnum):
+    """Marker placement state for rendering incomplete markers."""
+
+    INCOMPLETE = "incomplete"
+    COMPLETE = "complete"
 
 
 class SelectionState(StrEnum):
@@ -318,9 +328,7 @@ class AlgorithmOutputColumn(StrEnum):
     """
 
     # Sleep scoring algorithm outputs
-    SADEH_SCORE = "Sadeh Score"  # Sadeh algorithm output (1=sleep, 0=wake)
-    SLEEP_SCORE = "Sleep Score"  # Cole-Kripke, Van Hees, HDCZA output (1=sleep, 0=wake)
+    SLEEP_SCORE = "Sleep Score"  # All sleep algorithms output (1=sleep, 0=wake)
 
     # Nonwear detection algorithm outputs
-    CHOI_NONWEAR = "Choi Nonwear"  # Choi algorithm output (1=nonwear, 0=wear)
-    VAN_HEES_NONWEAR = "Van Hees Nonwear"  # Van Hees 2023 nonwear output
+    NONWEAR_SCORE = "Nonwear Score"  # All nonwear algorithms output (1=nonwear, 0=wear)

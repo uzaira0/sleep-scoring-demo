@@ -17,7 +17,7 @@ Example usage:
     >>> # Save to database
     >>> db = DatabaseManager()
     >>> for sleep_metrics in results:
-    ...     db.save_sleep_metrics(sleep_metrics, is_autosave=False)
+    ...     db.save_sleep_metrics(sleep_metrics)
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from sleep_scoring_app.core.algorithms import (
     choi_detect_nonwear,
 )
 from sleep_scoring_app.core.algorithms.types import ActivityColumn
-from sleep_scoring_app.core.constants import AlgorithmType, SleepPeriodDetectorType
+from sleep_scoring_app.core.constants import AlgorithmOutputColumn, AlgorithmType, SleepPeriodDetectorType
 from sleep_scoring_app.core.dataclasses import DailySleepMarkers, ParticipantInfo, SleepMetrics, SleepPeriod
 from sleep_scoring_app.utils.participant_extractor import extract_participant_info
 
@@ -85,7 +85,7 @@ def auto_score_activity_epoch_files(
         >>> # Save to database
         >>> db = DatabaseManager()
         >>> for sleep_metrics in results:
-        ...     db.save_sleep_metrics(sleep_metrics, is_autosave=False)
+        ...     db.save_sleep_metrics(sleep_metrics)
 
     """
     # 0. Initialize algorithm (use default Sadeh if none provided)
@@ -370,6 +370,8 @@ def _find_diary_entry(
     if len(matching) == 0:
         return None
 
+    # NOTE: to_dict() is correct here - converting pandas Series to dict for downstream processing.
+    # This is the interface between pandas DataFrame and the _extract_diary_times function.
     return matching.iloc[0].to_dict()
 
 
@@ -454,7 +456,7 @@ def _apply_sleep_rules(
         sleep_period_detector = SleepPeriodDetectorFactory.create(SleepPeriodDetectorFactory.get_default_detector_id())
 
     # Extract data from DataFrame
-    sadeh_scores = activity_df["Sadeh Score"].tolist()
+    sleep_scores = activity_df[AlgorithmOutputColumn.SLEEP_SCORE].tolist()
     timestamps = activity_df["datetime"].tolist()
 
     # If no diary reference, use entire dataset
@@ -466,7 +468,7 @@ def _apply_sleep_rules(
 
     # Apply sleep period detection via injected detector instance
     onset_idx, offset_idx = sleep_period_detector.apply_rules(
-        sleep_scores=sadeh_scores,
+        sleep_scores=sleep_scores,
         sleep_start_marker=diary_onset,
         sleep_end_marker=diary_offset,
         timestamps=timestamps,
@@ -541,8 +543,12 @@ def _calculate_metrics(
         return {}
 
     # Extract period data
-    period_sadeh = activity_df["Sadeh Score"].iloc[onset_idx : offset_idx + 1]
-    period_choi = activity_df["Choi Nonwear"].iloc[onset_idx : offset_idx + 1] if "Choi Nonwear" in activity_df.columns else None
+    period_sleep = activity_df[AlgorithmOutputColumn.SLEEP_SCORE].iloc[onset_idx : offset_idx + 1]
+    period_nonwear = (
+        activity_df[AlgorithmOutputColumn.NONWEAR_SCORE].iloc[onset_idx : offset_idx + 1]
+        if AlgorithmOutputColumn.NONWEAR_SCORE in activity_df.columns
+        else None
+    )
 
     # Get activity column (prefer Vector Magnitude, fallback to Axis1)
     activity_col = None
@@ -560,14 +566,14 @@ def _calculate_metrics(
     # while data_service uses exclusive range (offset_idx - onset_idx)
     # This is intentional for batch processing compatibility
     total_minutes_in_bed = offset_idx - onset_idx + 1
-    sleep_minutes = period_sadeh.sum()
+    sleep_minutes = period_sleep.sum()
     total_sleep_time = float(sleep_minutes)
 
     # Calculate WASO (wake after sleep onset)
     # Find first and last sleep epochs
     first_sleep_idx = None
     last_sleep_idx = None
-    for i, score in enumerate(period_sadeh):
+    for i, score in enumerate(period_sleep):
         if score == 1:
             if first_sleep_idx is None:
                 first_sleep_idx = i
@@ -587,7 +593,7 @@ def _calculate_metrics(
     awakening_lengths = []
     current_awakening_length = 0
 
-    for i, score in enumerate(period_sadeh):
+    for i, score in enumerate(period_sleep):
         if score == 1:  # Sleep
             if current_awakening_length > 0:
                 awakening_lengths.append(current_awakening_length)
@@ -607,15 +613,15 @@ def _calculate_metrics(
     sleep_fragmentation_index = ((waso + movement_events) / total_minutes_in_bed * 100) if total_minutes_in_bed > 0 and waso is not None else None
 
     # Get algorithm values at markers
-    sadeh_onset = int(period_sadeh.iloc[0]) if len(period_sadeh) > 0 else None
-    sadeh_offset = int(period_sadeh.iloc[-1]) if len(period_sadeh) > 0 else None
+    sadeh_onset = int(period_sleep.iloc[0]) if len(period_sleep) > 0 else None
+    sadeh_offset = int(period_sleep.iloc[-1]) if len(period_sleep) > 0 else None
 
     # Calculate overlapping nonwear minutes during sleep period
     # Sum of 0/1 values per minute epoch = total nonwear minutes
     from sleep_scoring_app.utils.calculations import calculate_overlapping_nonwear_minutes
 
     # Note: For batch scoring we need to convert series to list for the calculation
-    choi_list = period_choi.tolist() if period_choi is not None else None
+    choi_list = period_nonwear.tolist() if period_nonwear is not None else None
     overlapping_nonwear_minutes_algorithm = calculate_overlapping_nonwear_minutes(choi_list, 0, len(choi_list) - 1) if choi_list else None
 
     return {

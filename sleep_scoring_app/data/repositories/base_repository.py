@@ -30,7 +30,6 @@ class BaseRepository:
     # Pre-validate table and column names to prevent injection
     VALID_TABLES: ClassVar[set[str]] = {
         DatabaseTable.SLEEP_METRICS,
-        DatabaseTable.AUTOSAVE_METRICS,
         DatabaseTable.RAW_ACTIVITY_DATA,
         DatabaseTable.FILE_REGISTRY,
         DatabaseTable.NONWEAR_SENSOR_PERIODS,

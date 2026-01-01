@@ -45,6 +45,7 @@ class MarkerLoadingCoordinator:
         Args:
             store: Redux store to subscribe to and dispatch to
             db_manager: Database manager for loading markers
+
         """
         self.store = store
         self.db_manager = db_manager
@@ -57,29 +58,37 @@ class MarkerLoadingCoordinator:
         logger.info("MarkerLoadingCoordinator initialized")
 
     def _on_state_change(self, old_state: "UIState", new_state: "UIState") -> None:
-        """Detect navigation changes and schedule marker loading."""
+        """
+        Detect activity data changes and schedule marker loading.
+
+        CRITICAL: We wait for activity_timestamps to change, NOT date index.
+        This ensures data bounds are set before we try to load markers.
+        The old approach triggered on date change, which raced with data loading
+        and caused markers to be rejected as "out of bounds".
+        """
         # Get current file and date
         current_file = new_state.current_file
         current_date_str = None
         if 0 <= new_state.current_date_index < len(new_state.available_dates):
             current_date_str = new_state.available_dates[new_state.current_date_index]
 
-        # Check if navigation changed
+        # Check if ACTIVITY DATA changed (not just date index)
+        # This means ActivityDataConnector has loaded data and PlotDataConnector has updated bounds
+        data_changed = old_state.activity_timestamps != new_state.activity_timestamps
         file_changed = current_file != self._last_file
         date_changed = current_date_str != self._last_date_str
 
-        if file_changed or date_changed:
+        # Only load markers when activity data changes AND we have valid data
+        if data_changed and new_state.activity_timestamps and current_file and current_date_str:
             self._last_file = current_file
             self._last_date_str = current_date_str
 
-            # Only load if we have valid file and date
-            if current_file and current_date_str:
-                # Schedule load OUTSIDE of current dispatch using QTimer
-                # This is the Coordinator pattern - use Qt mechanisms for async
-                if not self._pending_load:
-                    self._pending_load = True
-                    QTimer.singleShot(0, self._load_markers)
-                    logger.debug(f"MARKER COORDINATOR: Scheduled marker load for {current_file} / {current_date_str}")
+            # Schedule load OUTSIDE of current dispatch using QTimer
+            # This is the Coordinator pattern - use Qt mechanisms for async
+            if not self._pending_load:
+                self._pending_load = True
+                QTimer.singleShot(0, self._load_markers)
+                logger.debug(f"MARKER COORDINATOR: Scheduled marker load for {current_file} / {current_date_str}")
 
     def _load_markers(self) -> None:
         """Load markers from database and dispatch to store."""
@@ -118,13 +127,9 @@ class MarkerLoadingCoordinator:
                 if sleep_metrics.onset_time == SleepStatusValue.NO_SLEEP:
                     # "No sleep" was marked for this date
                     self.store.dispatch(Actions.markers_loaded(sleep=None, nonwear=nonwear_markers, is_no_sleep=True))
-                    logger.info(f"MARKER COORDINATOR: Date marked as 'no sleep'")
+                    logger.info("MARKER COORDINATOR: Date marked as 'no sleep'")
                 elif sleep_metrics.daily_sleep_markers:
-                    self.store.dispatch(Actions.markers_loaded(
-                        sleep=sleep_metrics.daily_sleep_markers,
-                        nonwear=nonwear_markers,
-                        is_no_sleep=False
-                    ))
+                    self.store.dispatch(Actions.markers_loaded(sleep=sleep_metrics.daily_sleep_markers, nonwear=nonwear_markers, is_no_sleep=False))
                 else:
                     self.store.dispatch(Actions.markers_loaded(sleep=None, nonwear=nonwear_markers, is_no_sleep=False))
             else:

@@ -35,7 +35,6 @@ from sleep_scoring_app.core.constants import AlgorithmType
 
 from .cole_kripke import ColeKripkeAlgorithm
 from .sadeh import SadehAlgorithm
-from .van_hees_2015 import VanHees2015SIB
 
 if TYPE_CHECKING:
     from sleep_scoring_app.core.pipeline import AlgorithmDataRequirement
@@ -126,22 +125,8 @@ class AlgorithmFactory:
         #     params={"variant_name": "count_scaled", "enable_count_scaling": True, "scale_factor": 100.0, "count_cap": 300.0},
         # ),
         # =============================================================================
-        # Raw data algorithms (require raw tri-axial accelerometer data from GT3X)
-        # These calculate z-angle from raw X/Y/Z acceleration and detect sustained inactivity
-        # =============================================================================
-        AlgorithmType.VAN_HEES_2015_SIB: _AlgorithmEntry(
-            algorithm_class=VanHees2015SIB,
-            display_name="van Hees (2015) SIB",
-            params={},
-        ),
-        # NOTE: HDCZA has been moved to SleepPeriodDetectorFactory.
-        # HDCZA is a Sleep Period Time (SPT) boundary detector, not a sleep/wake classifier.
-        # It detects the onset/offset of the main sleep period using z-angle distributions.
-        # See: GGIR's HASPT.R - HDCZA is in HASPT (SPT detection), not HASIB (sleep/wake).
-        # =============================================================================
-        # Future algorithms:
-        # - GGIR-style Sadeh/Cole-Kripke with zero-crossing counts from raw data
-        # - Sazonov (2004)
+        # NOTE: Raw data algorithms (van Hees, HDCZA, etc.) have been removed.
+        # Sleep scoring from raw accelerometer data will be done via rpy2 calling GGIR.
         # =============================================================================
     }
 

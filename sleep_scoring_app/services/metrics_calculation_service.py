@@ -32,6 +32,7 @@ class MetricsCalculationService:
         x_data,
         participant_info: ParticipantInfo,
         nwt_sensor_results=None,
+        algorithm_type: AlgorithmType | None = None,
     ) -> dict[str, Any] | None:
         """Calculate comprehensive sleep metrics from onset/offset timestamps."""
         try:
@@ -135,12 +136,15 @@ class MetricsCalculationService:
                 overlapping_nonwear_minutes_algorithm = None
                 overlapping_nonwear_minutes_sensor = None
 
+            # Use passed algorithm_type or default to SADEH
+            algo_type = algorithm_type or AlgorithmType.SADEH_1994_ACTILIFE
+
             return {
                 "Full Participant ID": participant_info.full_id,
                 "Numerical Participant ID": participant_info.numerical_id,
                 "Participant Group": participant_info.group_str,
                 "Participant Timepoint": participant_info.timepoint_str,
-                "Sleep Algorithm": AlgorithmType.SADEH_1994_ACTILIFE.value,
+                "Sleep Algorithm": algo_type.value,
                 "Onset Date": onset_dt.strftime("%Y-%m-%d"),
                 "Onset Time": onset_dt.strftime("%H:%M"),
                 "Offset Date": offset_dt.strftime("%Y-%m-%d"),
@@ -284,6 +288,7 @@ class MetricsCalculationService:
         participant_info: ParticipantInfo,
         file_path: str | None = None,
         nwt_sensor_results=None,
+        algorithm_type: AlgorithmType | None = None,
     ) -> dict[str, Any] | None:
         """Calculate sleep metrics for a specific sleep period."""
         if not sleep_period or not sleep_period.is_complete:
@@ -299,6 +304,7 @@ class MetricsCalculationService:
             x_data=x_data,
             participant_info=participant_info,
             nwt_sensor_results=nwt_sensor_results,
+            algorithm_type=algorithm_type,
         )
 
         if metrics:
@@ -319,6 +325,7 @@ class MetricsCalculationService:
         participant_info: ParticipantInfo,
         file_path: str | None = None,
         nwt_sensor_results=None,
+        algorithm_type: AlgorithmType | None = None,
     ) -> SleepMetrics | None:
         """Calculate sleep metrics for a SleepPeriod and return as SleepMetrics object."""
         if not sleep_period or not sleep_period.is_complete:
@@ -333,6 +340,7 @@ class MetricsCalculationService:
             participant_info=participant_info,
             file_path=file_path,
             nwt_sensor_results=nwt_sensor_results,
+            algorithm_type=algorithm_type,
         )
 
         if metrics_dict is None:
@@ -358,13 +366,14 @@ class MetricsCalculationService:
         participant_info: ParticipantInfo,
         file_path: str | None = None,
         nwt_sensor_results=None,
+        algorithm_type: AlgorithmType | None = None,
     ) -> list[dict[str, Any]]:
         """Calculate sleep metrics for all complete sleep periods."""
         all_metrics = []
 
         for period in daily_sleep_markers.get_complete_periods():
             period_metrics = self.calculate_sleep_metrics_for_period(
-                period, sadeh_results, choi_results, axis_y_data, x_data, participant_info, file_path, nwt_sensor_results
+                period, sadeh_results, choi_results, axis_y_data, x_data, participant_info, file_path, nwt_sensor_results, algorithm_type
             )
             if period_metrics:
                 all_metrics.append(period_metrics)

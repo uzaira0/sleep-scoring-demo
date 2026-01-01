@@ -58,8 +58,8 @@ from sleep_scoring_app.core.constants import (
     TooltipText,
     UIColors,
 )
-from sleep_scoring_app.ui.managers import DiaryTableManager, SeamlessSourceSwitcher, TimeFieldManager
-from sleep_scoring_app.ui.managers.diary_table_manager import DiaryTableColumn
+from sleep_scoring_app.ui.coordinators import DiaryTableManager, SeamlessSourceSwitcher, TimeFieldManager
+from sleep_scoring_app.ui.coordinators.diary_table_manager import DiaryTableColumn
 from sleep_scoring_app.ui.widgets.activity_plot import ActivityPlotWidget
 from sleep_scoring_app.ui.widgets.analysis_dialogs import AnalysisDialogManager
 from sleep_scoring_app.utils.table_helpers import create_marker_data_table
@@ -432,7 +432,7 @@ class AnalysisTab(QWidget):
             available_dates=self.navigation.available_dates,
             set_pref_callback=self.app_state.set_activity_data_preferences,
             auto_save_callback=self.marker_ops.auto_save_current_markers,
-            load_date_callback=self.navigation.load_current_date,
+            # NOTE: load_date_callback REMOVED - store dispatch triggers ActivityDataConnector
             load_markers_callback=self.marker_ops.load_saved_markers,
             get_tab_dropdown_fn=lambda: self.activity_source_dropdown,
         )
@@ -514,20 +514,18 @@ class AnalysisTab(QWidget):
         layout.addWidget(self.prev_date_btn)
 
         self.date_dropdown = QComboBox()
+        # NOTE: List item centering is done via Qt.ItemDataRole.TextAlignmentRole in DateDropdownConnector
+        # CSS text-align doesn't work for QListView items - must use setItemData with AlignCenter
         self.date_dropdown.setStyleSheet(f"""
             QComboBox {{
                 padding: 8px 20px 8px 20px;
                 font-size: 16px;
                 font-weight: bold;
                 min-width: 120px;
-                text-align: center;
             }}
             QComboBox:focus {{
                 border: 2px solid {UIColors.FOCUS_BORDER};
                 background-color: {UIColors.FOCUS_BACKGROUND};
-            }}
-            QComboBox QAbstractItemView {{
-                text-align: center;
             }}
             QComboBox QAbstractItemView::item {{
                 padding: 8px;

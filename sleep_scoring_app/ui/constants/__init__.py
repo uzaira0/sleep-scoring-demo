@@ -1,11 +1,12 @@
 """
 UI constants package.
 
-Re-exports all UI-related constants for convenient importing.
-Moved from core.constants.ui to maintain proper layer boundaries.
+Re-exports all UI-related constants from core.constants for convenient importing.
+These constants are defined in core/constants/ui.py and re-exported here for
+backwards compatibility with imports from sleep_scoring_app.ui.constants.
 """
 
-from .ui import (
+from sleep_scoring_app.core.constants.ui import (
     AlgorithmHelpText,
     AlgorithmTooltip,
     AppArgument,

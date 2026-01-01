@@ -3,11 +3,13 @@ Sleep period detector factory for dependency injection.
 
 Provides centralized detector instantiation and configuration management.
 
-This factory supports two types of sleep period detectors:
-1. Epoch-based detectors (e.g., ConsecutiveEpochsSleepPeriodDetector) - work on
-   pre-classified sleep/wake epoch data
-2. Raw-data detectors (e.g., HDCZA) - work directly on raw accelerometer data
-   and detect SPT boundaries using z-angle analysis
+This factory supports epoch-based sleep period detectors that work on
+pre-classified sleep/wake epoch data.
+
+Note:
+    Raw-data detectors (HDCZA, etc.) are not included. For raw accelerometer
+    analysis, use rpy2 to call GGIR.
+
 """
 
 from __future__ import annotations
@@ -26,7 +28,6 @@ from .config import (
     ConsecutiveEpochsSleepPeriodDetectorConfig,
 )
 from .consecutive_epochs import ConsecutiveEpochsSleepPeriodDetector
-from .hdcza import HDCZA
 
 if TYPE_CHECKING:
     from .protocol import SleepPeriodDetector
@@ -42,7 +43,6 @@ class _DetectorEntry:
     display_name: str
     data_requirement: AlgorithmDataRequirement
     config: Any = None  # Optional config for ConsecutiveEpochsSleepPeriodDetector
-    params: dict[str, Any] | None = None  # Optional params for HDCZA
 
 
 class SleepPeriodDetectorFactory:
@@ -52,11 +52,7 @@ class SleepPeriodDetectorFactory:
     Manages detector instantiation, configuration, and registration.
     Enables dependency injection throughout the application.
 
-    Supports two categories of detectors:
-    - EPOCH_DATA: Detectors that work on pre-classified sleep/wake epochs
-      (e.g., Consecutive 3S/5S, Tudor-Locke 2014)
-    - RAW_DATA: Detectors that work directly on raw accelerometer data
-      (e.g., HDCZA)
+    All detectors work on pre-classified sleep/wake epoch data.
     """
 
     # Registry of all available detectors
@@ -83,17 +79,7 @@ class SleepPeriodDetectorFactory:
             data_requirement=AlgorithmDataRequirement.EPOCH_DATA,
             config=TUDOR_LOCKE_2014_CONFIG,
         ),
-        # =============================================================================
-        # Raw-data detectors (work directly on raw accelerometer data)
-        # These bypass sleep/wake classification and detect SPT boundaries directly
-        # using z-angle analysis
-        # =============================================================================
-        SleepPeriodDetectorType.HDCZA_2018: _DetectorEntry(
-            detector_class=HDCZA,
-            display_name="HDCZA (van Hees 2018)",
-            data_requirement=AlgorithmDataRequirement.RAW_DATA,
-            params={},
-        ),
+        # NOTE: Raw-data detectors (HDCZA, etc.) removed - use rpy2/GGIR instead
     }
 
     @classmethod
@@ -106,7 +92,7 @@ class SleepPeriodDetectorFactory:
         Create a sleep period detector instance.
 
         Args:
-            detector_id: Detector identifier (e.g., "consecutive_onset3s_offset5s", "hdcza_2018")
+            detector_id: Detector identifier (e.g., "consecutive_onset3s_offset5s")
             config: Optional custom config (only applies to ConsecutiveEpochsSleepPeriodDetector)
 
         Returns:
@@ -123,30 +109,22 @@ class SleepPeriodDetectorFactory:
 
         entry = cls._registry[detector_id]
 
-        # Create instance based on detector type
-        if entry.detector_class == ConsecutiveEpochsSleepPeriodDetector:
-            # Use custom config if provided, otherwise use preset
-            final_config = config if config is not None else entry.config
+        # Use custom config if provided, otherwise use preset
+        final_config = config if config is not None else entry.config
 
-            # Runtime type check to catch misuse (e.g., passing AppConfig instead)
-            if final_config is not None and not isinstance(final_config, ConsecutiveEpochsSleepPeriodDetectorConfig):
-                msg = (
-                    f"Invalid config type for ConsecutiveEpochsSleepPeriodDetector: "
-                    f"expected ConsecutiveEpochsSleepPeriodDetectorConfig, got {type(final_config).__name__}. "
-                    f"Do not pass AppConfig to the factory."
-                )
-                raise TypeError(msg)
-
-            return ConsecutiveEpochsSleepPeriodDetector(
-                config=final_config,
-                preset_name=entry.display_name,
+        # Runtime type check to catch misuse (e.g., passing AppConfig instead)
+        if final_config is not None and not isinstance(final_config, ConsecutiveEpochsSleepPeriodDetectorConfig):
+            msg = (
+                f"Invalid config type for ConsecutiveEpochsSleepPeriodDetector: "
+                f"expected ConsecutiveEpochsSleepPeriodDetectorConfig, got {type(final_config).__name__}. "
+                f"Do not pass AppConfig to the factory."
             )
-        if entry.detector_class == HDCZA:
-            # HDCZA uses params, not config
-            params = entry.params or {}
-            return HDCZA(**params)
-        # Generic fallback
-        return entry.detector_class()
+            raise TypeError(msg)
+
+        return ConsecutiveEpochsSleepPeriodDetector(
+            config=final_config,
+            preset_name=entry.display_name,
+        )
 
     @classmethod
     def get_available_detectors(cls) -> dict[str, str]:
@@ -177,7 +155,7 @@ class SleepPeriodDetectorFactory:
                 # Epoch paradigm: only epoch-based detectors
                 if entry.data_requirement == AlgorithmDataRequirement.EPOCH_DATA:
                     result[detector_id] = entry.display_name
-            # Raw paradigm: only raw-data detectors
+            # Raw paradigm: only raw-data detectors (none available)
             elif entry.data_requirement == AlgorithmDataRequirement.RAW_DATA:
                 result[detector_id] = entry.display_name
         return result
@@ -225,10 +203,8 @@ class SleepPeriodDetectorFactory:
             Default detector ID for the paradigm
 
         """
-        if paradigm == "epoch_based":
-            return SleepPeriodDetectorType.CONSECUTIVE_ONSET3S_OFFSET5S
-        # raw_accelerometer
-        return SleepPeriodDetectorType.HDCZA_2018
+        # All detectors are epoch-based now
+        return SleepPeriodDetectorType.CONSECUTIVE_ONSET3S_OFFSET5S
 
     # Backward compatibility alias
     get_default_rule_id = get_default_detector_id
@@ -241,7 +217,6 @@ class SleepPeriodDetectorFactory:
         display_name: str,
         data_requirement: AlgorithmDataRequirement,
         config: ConsecutiveEpochsSleepPeriodDetectorConfig | None = None,
-        params: dict[str, Any] | None = None,
     ) -> None:
         """
         Register a new sleep period detector.
@@ -252,7 +227,6 @@ class SleepPeriodDetectorFactory:
             display_name: Human-readable name for UI
             data_requirement: Data requirement (EPOCH_DATA or RAW_DATA)
             config: Configuration for ConsecutiveEpochsSleepPeriodDetector
-            params: Constructor parameters for other detector types
 
         Raises:
             ValueError: If detector_id already registered
@@ -267,7 +241,6 @@ class SleepPeriodDetectorFactory:
             display_name=display_name,
             data_requirement=data_requirement,
             config=config,
-            params=params,
         )
         logger.info("Registered new sleep period detector: %s", detector_id)
 

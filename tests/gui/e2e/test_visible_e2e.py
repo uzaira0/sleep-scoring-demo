@@ -25,8 +25,8 @@ import numpy as np
 import pandas as pd
 import pytest
 from PyQt6.QtCore import QPoint, Qt, QTimer
-from PyQt6.QtWidgets import QApplication, QPushButton, QTableWidget, QTabWidget
 from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QApplication, QPushButton, QTableWidget, QTabWidget
 
 if TYPE_CHECKING:
     from pytestqt.qtbot import QtBot
@@ -63,15 +63,17 @@ def test_data_folder(tmp_path):
             base = 10 + np.random.randint(0, 30)
         activity.append(max(0, base))
 
-    df = pd.DataFrame({
-        "Date": [ts.strftime("%m/%d/%Y") for ts in timestamps],
-        "Time": [ts.strftime("%H:%M:%S") for ts in timestamps],
-        "Axis1": activity,
-        "Axis2": [int(a * 0.8) for a in activity],
-        "Axis3": [int(a * 0.5) for a in activity],
-        "Vector Magnitude": [int(np.sqrt(a**2 + (a*0.8)**2 + (a*0.5)**2)) for a in activity],
-        "Steps": [np.random.randint(0, 20) if a > 50 else 0 for a in activity],
-    })
+    df = pd.DataFrame(
+        {
+            "Date": [ts.strftime("%m/%d/%Y") for ts in timestamps],
+            "Time": [ts.strftime("%H:%M:%S") for ts in timestamps],
+            "Axis1": activity,
+            "Axis2": [int(a * 0.8) for a in activity],
+            "Axis3": [int(a * 0.5) for a in activity],
+            "Vector Magnitude": [int(np.sqrt(a**2 + (a * 0.8) ** 2 + (a * 0.5) ** 2)) for a in activity],
+            "Steps": [np.random.randint(0, 20) if a > 50 else 0 for a in activity],
+        }
+    )
 
     # Save with realistic filename pattern
     test_file = data_folder / "4000 T1 (2021-04-20)60sec.csv"
@@ -82,15 +84,17 @@ def test_data_folder(tmp_path):
     timestamps2 = [start2 + timedelta(minutes=i) for i in range(epochs)]
     activity2 = [max(0, 100 + np.random.randint(-50, 100)) for _ in range(epochs)]
 
-    df2 = pd.DataFrame({
-        "Date": [ts.strftime("%m/%d/%Y") for ts in timestamps2],
-        "Time": [ts.strftime("%H:%M:%S") for ts in timestamps2],
-        "Axis1": activity2,
-        "Axis2": [int(a * 0.8) for a in activity2],
-        "Axis3": [int(a * 0.5) for a in activity2],
-        "Vector Magnitude": [int(np.sqrt(a**2 + (a*0.8)**2 + (a*0.5)**2)) for a in activity2],
-        "Steps": [np.random.randint(0, 20) if a > 50 else 0 for a in activity2],
-    })
+    df2 = pd.DataFrame(
+        {
+            "Date": [ts.strftime("%m/%d/%Y") for ts in timestamps2],
+            "Time": [ts.strftime("%H:%M:%S") for ts in timestamps2],
+            "Axis1": activity2,
+            "Axis2": [int(a * 0.8) for a in activity2],
+            "Axis3": [int(a * 0.5) for a in activity2],
+            "Vector Magnitude": [int(np.sqrt(a**2 + (a * 0.8) ** 2 + (a * 0.5) ** 2)) for a in activity2],
+            "Steps": [np.random.randint(0, 20) if a > 50 else 0 for a in activity2],
+        }
+    )
 
     test_file2 = data_folder / "4001 T1 (2021-04-22)60sec.csv"
     df2.to_csv(test_file2, index=False)
@@ -127,16 +131,16 @@ def visible_main_window(qtbot, tmp_path, test_data_folder, temp_db_path):
         original_init(self, db_path=str(temp_db_path))
 
     # Patch ConfigManager to use temp directories
-    from sleep_scoring_app.utils.config import ConfigManager
     from sleep_scoring_app.core.dataclasses import AppConfig
+    from sleep_scoring_app.utils.config import ConfigManager
 
     temp_config = AppConfig.create_default()
     temp_config.data_folder = str(test_data_folder)
     temp_config.export_directory = str(tmp_path / "exports")
 
-    with patch.object(db_module.DatabaseManager, '__init__', patched_init):
-        with patch.object(ConfigManager, 'is_config_valid', return_value=True):
-            with patch.object(ConfigManager, 'config', temp_config, create=True):
+    with patch.object(db_module.DatabaseManager, "__init__", patched_init):
+        with patch.object(ConfigManager, "is_config_valid", return_value=True):
+            with patch.object(ConfigManager, "config", temp_config, create=True):
                 from sleep_scoring_app.ui.main_window import SleepScoringMainWindow
 
                 # Create the REAL window
@@ -157,9 +161,6 @@ def visible_main_window(qtbot, tmp_path, test_data_folder, temp_db_path):
 
                 # Give extra time for all widgets to initialize
                 qtbot.wait(OBSERVATION_DELAY_MS)
-
-                print(f"\n[VISIBLE] Window is now VISIBLE at {window.geometry()}")
-                print(f"[DATA] Test data folder: {test_data_folder}")
 
                 yield window
 
@@ -182,28 +183,24 @@ class TestVisibleWindowStartup:
         VISIBLE TEST: Watch the main window appear on screen.
 
         You should SEE:
-        - A window titled "Sleep Research Analysis Tool"
+        - A window titled "Sleep Scoring App"
         - Multiple tabs (Data Settings, Study Settings, Analysis, Export)
         - A file navigation panel
         - An activity plot area
         """
-        print("\n[WATCH] TEST: Watching window appear...")
 
         # Verify window is visible
         assert visible_main_window.isVisible(), "Window should be visible!"
 
         # Verify title
         assert "Sleep" in visible_main_window.windowTitle()
-        print(f"[OK] Window title: {visible_main_window.windowTitle()}")
 
         # Verify minimum size
         assert visible_main_window.width() >= 800, "Window should be at least 800px wide"
         assert visible_main_window.height() >= 600, "Window should be at least 600px tall"
-        print(f"[OK] Window size: {visible_main_window.width()}x{visible_main_window.height()}")
 
         # Pause so human can observe
         qtbot.wait(OBSERVATION_DELAY_MS)
-        print("[OK] Window startup test complete")
 
     def test_tabs_are_visible(self, qtbot, visible_main_window):
         """
@@ -213,27 +210,22 @@ class TestVisibleWindowStartup:
         - A tab bar with multiple tabs
         - Each tab is clickable
         """
-        print("\n[WATCH] TEST: Checking visible tabs...")
 
         # Find the tab widget
         tab_widget = visible_main_window.findChild(QTabWidget)
 
         if tab_widget:
             tab_count = tab_widget.count()
-            print(f"[OK] Found {tab_count} tabs")
 
             for i in range(tab_count):
                 tab_name = tab_widget.tabText(i)
-                print(f"   Tab {i}: {tab_name}")
 
             # Click through each tab so human can see them
             for i in range(tab_count):
                 tab_widget.setCurrentIndex(i)
                 qtbot.wait(OBSERVATION_DELAY_MS // 2)
-                print(f"   -> Switched to tab: {tab_widget.tabText(i)}")
 
         qtbot.wait(OBSERVATION_DELAY_MS)
-        print("[OK] Tab visibility test complete")
 
 
 # ============================================================================
@@ -254,14 +246,12 @@ class TestVisibleFileNavigation:
         - The file table populate with test files
         - File names visible in the table
         """
-        print("\n[WATCH] TEST: Watching file table populate...")
 
         # Set data folder through the service
         visible_main_window.data_service.set_data_folder(str(test_data_folder))
 
         # Find files
         files = visible_main_window.data_service.find_available_files()
-        print(f"[OK] Found {len(files)} files in test folder")
 
         # Wait for UI to update
         qtbot.wait(OBSERVATION_DELAY_MS)
@@ -270,9 +260,7 @@ class TestVisibleFileNavigation:
         tables = visible_main_window.findChildren(QTableWidget)
         for table in tables:
             if table.isVisible() and table.rowCount() > 0:
-                print(f"   Table has {table.rowCount()} rows, {table.columnCount()} columns")
-
-        print("[OK] File table test complete")
+                pass
 
     def test_keyboard_navigation(self, qtbot, visible_main_window, test_data_folder):
         """
@@ -282,7 +270,6 @@ class TestVisibleFileNavigation:
         - The date changing when arrow keys are pressed
         - The plot updating with new data
         """
-        print("\n[WATCH] TEST: Testing keyboard navigation...")
 
         # Set data folder
         visible_main_window.data_service.set_data_folder(str(test_data_folder))
@@ -294,23 +281,18 @@ class TestVisibleFileNavigation:
 
         # Get initial date index
         initial_index = visible_main_window.store.state.current_date_index
-        print(f"   Initial date index: {initial_index}")
 
         # Simulate pressing Right arrow key
         QTest.keyClick(visible_main_window, Qt.Key.Key_Right)
         qtbot.wait(OBSERVATION_DELAY_MS)
 
         new_index = visible_main_window.store.state.current_date_index
-        print(f"   After Right arrow: date index = {new_index}")
 
         # Simulate pressing Left arrow key
         QTest.keyClick(visible_main_window, Qt.Key.Key_Left)
         qtbot.wait(OBSERVATION_DELAY_MS)
 
         final_index = visible_main_window.store.state.current_date_index
-        print(f"   After Left arrow: date index = {final_index}")
-
-        print("[OK] Keyboard navigation test complete")
 
 
 # ============================================================================
@@ -331,21 +313,17 @@ class TestVisibleButtonClicks:
         - Buttons being highlighted/clicked
         - UI responding to button clicks
         """
-        print("\n[WATCH] TEST: Finding and clicking buttons...")
 
         # Find all buttons in the window
         buttons = visible_main_window.findChildren(QPushButton)
-        print(f"[OK] Found {len(buttons)} buttons")
 
         # List visible buttons
         visible_buttons = [b for b in buttons if b.isVisible() and b.isEnabled()]
-        print(f"   {len(visible_buttons)} are visible and enabled")
 
         for i, button in enumerate(visible_buttons[:5]):  # Show first 5
-            print(f"   Button {i}: '{button.text()}'")
+            pass
 
         qtbot.wait(OBSERVATION_DELAY_MS)
-        print("[OK] Button discovery test complete")
 
 
 # ============================================================================
@@ -366,7 +344,6 @@ class TestVisiblePlotInteraction:
         - An activity plot area (possibly empty initially)
         - Plot axes and labels
         """
-        print("\n[WATCH] TEST: Checking plot widget visibility...")
 
         # Look for the plot widget
         from sleep_scoring_app.ui.widgets.activity_plot import ActivityPlotWidget
@@ -374,14 +351,12 @@ class TestVisiblePlotInteraction:
         plot_widgets = visible_main_window.findChildren(ActivityPlotWidget)
 
         if plot_widgets:
-            print(f"[OK] Found {len(plot_widgets)} plot widget(s)")
             for i, plot in enumerate(plot_widgets):
-                print(f"   Plot {i}: visible={plot.isVisible()}, size={plot.width()}x{plot.height()}")
+                pass
         else:
-            print("[WARN] No ActivityPlotWidget found (may be named differently)")
+            pass
 
         qtbot.wait(OBSERVATION_DELAY_MS)
-        print("[OK] Plot visibility test complete")
 
 
 # ============================================================================
@@ -402,7 +377,6 @@ class TestVisibleStateChanges:
         - File name appearing in the UI
         - Related widgets updating
         """
-        print("\n[WATCH] TEST: Selecting file and watching UI update...")
 
         from sleep_scoring_app.ui.store import Actions
 
@@ -414,7 +388,6 @@ class TestVisibleStateChanges:
         files = list(test_data_folder.glob("*.csv"))
         if files:
             filename = files[0].name
-            print(f"   Selecting file: {filename}")
 
             # Dispatch file selection action
             visible_main_window.store.dispatch(Actions.file_selected(filename))
@@ -424,9 +397,6 @@ class TestVisibleStateChanges:
 
             # Verify state changed
             assert visible_main_window.store.state.current_file == filename
-            print(f"[OK] File selected in store: {visible_main_window.store.state.current_file}")
-
-        print("[OK] File selection test complete")
 
     def test_date_loading_updates_ui(self, qtbot, visible_main_window):
         """
@@ -436,7 +406,6 @@ class TestVisibleStateChanges:
         - Date navigation controls updating
         - Current date indicator changing
         """
-        print("\n[WATCH] TEST: Loading dates and watching UI update...")
 
         from sleep_scoring_app.ui.store import Actions
 
@@ -449,7 +418,6 @@ class TestVisibleStateChanges:
         # Verify dates are in state
         state = visible_main_window.store.state
         assert state.available_dates == test_dates
-        print(f"[OK] Dates loaded: {state.available_dates}")
 
         # Select a date
         visible_main_window.store.dispatch(Actions.date_selected(1))
@@ -458,9 +426,6 @@ class TestVisibleStateChanges:
         # Get fresh state reference after dispatch
         new_state = visible_main_window.store.state
         assert new_state.current_date_index == 1
-        print(f"[OK] Selected date index: {new_state.current_date_index}")
-
-        print("[OK] Date loading test complete")
 
 
 # ============================================================================
@@ -474,4 +439,5 @@ def cleanup_after_test():
     yield
     # Force garbage collection
     import gc
+
     gc.collect()

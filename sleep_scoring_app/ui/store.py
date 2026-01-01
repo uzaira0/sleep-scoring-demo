@@ -69,6 +69,19 @@ class UIState:
     available_dates: tuple[str, ...] = ()  # ISO date strings for immutability
     available_files: tuple[FileInfo, ...] = ()  # File info objects
 
+    # === Activity Data (SINGLE SOURCE OF TRUTH) ===
+    # TODO(refactor): Review this section - is storing all 4 columns optimal?
+    # Consider: memory usage, whether we need axis_x/axis_z, lazy loading
+    # All activity data lives here - widgets just display it
+    # Unified loading guarantees ALL columns have SAME timestamps (no alignment bugs)
+    activity_timestamps: tuple = ()  # Immutable tuple of datetime
+    axis_x_data: tuple = ()  # Immutable tuple of float
+    axis_y_data: tuple = ()  # Immutable tuple of float (used by Sadeh)
+    axis_z_data: tuple = ()  # Immutable tuple of float
+    vector_magnitude_data: tuple = ()  # Immutable tuple of float
+    preferred_display_column: str = "axis_y"  # Which column to display
+    sadeh_results: tuple = ()  # Immutable tuple of int (0=wake, 1=sleep)
+
     # === Algorithm State ===
     current_algorithm: str = AlgorithmType.SADEH_1994_ACTILIFE
 
@@ -80,6 +93,11 @@ class UIState:
     show_adjacent_markers: bool = True
     auto_calibrate_enabled: bool = True
     impute_gaps_enabled: bool = True
+
+    # === Pending Requests (for effect handlers) ===
+    # These flags are set by reducer and cleared by effect handlers after processing
+    pending_clear_activity: bool = False
+    pending_refresh_files: bool = False
 
     # === Navigation ===
     current_sleep_markers: Any = None  # DailySleepMarkers | None
@@ -138,6 +156,11 @@ class ActionType(StrEnum):
     DATE_SELECTED = auto()
     DATES_LOADED = auto()  # Available dates for current file
 
+    # Activity data loading
+    ACTIVITY_DATA_LOADED = auto()  # Main activity data loaded
+    SADEH_RESULTS_COMPUTED = auto()  # Sadeh algorithm completed
+    ACTIVITY_DATA_CLEARED = auto()  # Clear all activity data
+
     # Algorithm state
     ALGORITHM_CHANGED = auto()
 
@@ -146,6 +169,8 @@ class ActionType(StrEnum):
     DATABASE_MODE_TOGGLED = "database_mode_toggled"
     REFRESH_FILES_REQUESTED = "refresh_files_requested"
     DELETE_FILES_REQUESTED = "delete_files_requested"
+    CLEAR_ACTIVITY_DATA_REQUESTED = "clear_activity_data_requested"
+    PENDING_REQUEST_CLEARED = "pending_request_cleared"
     AUTO_SAVE_TOGGLED = "auto_save_toggled"
     MARKER_MODE_CHANGED = auto()
     ADJACENT_MARKERS_TOGGLED = auto()
@@ -154,6 +179,7 @@ class ActionType(StrEnum):
     SELECTED_NONWEAR_CHANGED = auto()
     CALIBRATION_TOGGLED = auto()
     IMPUTATION_TOGGLED = auto()
+    PREFERRED_DISPLAY_COLUMN_CHANGED = auto()
 
     # === Navigation ===
 
@@ -247,6 +273,43 @@ class Actions:
         )
 
     @staticmethod
+    def activity_data_loaded(
+        timestamps: list,
+        axis_x: list[float],
+        axis_y: list[float],
+        axis_z: list[float],
+        vector_magnitude: list[float],
+    ) -> Action:
+        """
+        Create action for when unified activity data is loaded.
+
+        All columns come from ONE query with SAME timestamps - no alignment bugs.
+        """
+        return Action(
+            type=ActionType.ACTIVITY_DATA_LOADED,
+            payload={
+                "timestamps": timestamps,
+                "axis_x": axis_x,
+                "axis_y": axis_y,
+                "axis_z": axis_z,
+                "vector_magnitude": vector_magnitude,
+            },
+        )
+
+    @staticmethod
+    def sadeh_results_computed(results: list[int]) -> Action:
+        """Create action for when Sadeh algorithm completes."""
+        return Action(
+            type=ActionType.SADEH_RESULTS_COMPUTED,
+            payload={"results": results},
+        )
+
+    @staticmethod
+    def activity_data_cleared() -> Action:
+        """Create action for clearing all activity data."""
+        return Action(type=ActionType.ACTIVITY_DATA_CLEARED)
+
+    @staticmethod
     def view_mode_changed(hours: int) -> Action:
         """Create action for changing view mode (24h or 48h)."""
         return Action(
@@ -263,6 +326,16 @@ class Actions:
     def delete_files_requested(filenames: list[str]) -> Action:
         """Action representing a request to delete files."""
         return Action(type=ActionType.DELETE_FILES_REQUESTED, payload={"filenames": filenames})
+
+    @staticmethod
+    def clear_activity_data_requested() -> Action:
+        """Action representing a request to clear all activity data."""
+        return Action(type=ActionType.CLEAR_ACTIVITY_DATA_REQUESTED)
+
+    @staticmethod
+    def pending_request_cleared(request_type: str) -> Action:
+        """Clear a pending request flag after effect handler processes it."""
+        return Action(type=ActionType.PENDING_REQUEST_CLEARED, payload={"request_type": request_type})
 
     @staticmethod
     def database_mode_toggled(enabled: bool) -> Action:
@@ -299,6 +372,11 @@ class Actions:
     @staticmethod
     def imputation_toggled(enabled: bool) -> Action:
         return Action(type=ActionType.IMPUTATION_TOGGLED, payload={"enabled": enabled})
+
+    @staticmethod
+    def preferred_display_column_changed(column: str) -> Action:
+        """Create action for display column preference change (e.g., axis_y, vector_magnitude)."""
+        return Action(type=ActionType.PREFERRED_DISPLAY_COLUMN_CHANGED, payload={"column": column})
 
     # === Navigation ===
 
@@ -464,6 +542,36 @@ def ui_reducer(state: UIState, action: Action) -> UIState:
                 current_algorithm=payload.get("algorithm", state.current_algorithm),
             )
 
+        case ActionType.ACTIVITY_DATA_LOADED:
+            payload = action.payload or {}
+            return replace(
+                state,
+                activity_timestamps=tuple(payload.get("timestamps", [])),
+                axis_x_data=tuple(payload.get("axis_x", [])),
+                axis_y_data=tuple(payload.get("axis_y", [])),
+                axis_z_data=tuple(payload.get("axis_z", [])),
+                vector_magnitude_data=tuple(payload.get("vector_magnitude", [])),
+                sadeh_results=(),  # Clear sadeh when new data loaded
+            )
+
+        case ActionType.SADEH_RESULTS_COMPUTED:
+            payload = action.payload or {}
+            return replace(
+                state,
+                sadeh_results=tuple(payload.get("results", [])),
+            )
+
+        case ActionType.ACTIVITY_DATA_CLEARED:
+            return replace(
+                state,
+                activity_timestamps=(),
+                axis_x_data=(),
+                axis_y_data=(),
+                axis_z_data=(),
+                vector_magnitude_data=(),
+                sadeh_results=(),
+            )
+
         case ActionType.VIEW_MODE_CHANGED:
             payload = action.payload or {}
             return replace(
@@ -478,6 +586,23 @@ def ui_reducer(state: UIState, action: Action) -> UIState:
         case ActionType.AUTO_SAVE_TOGGLED:
             payload = action.payload or {}
             return replace(state, auto_save_enabled=payload.get("enabled", True))
+
+        case ActionType.REFRESH_FILES_REQUESTED:
+            # Set pending flag - effect handler will process and clear
+            return replace(state, pending_refresh_files=True)
+
+        case ActionType.CLEAR_ACTIVITY_DATA_REQUESTED:
+            # Set pending flag - effect handler will process and clear
+            return replace(state, pending_clear_activity=True)
+
+        case ActionType.PENDING_REQUEST_CLEARED:
+            payload = action.payload or {}
+            request_type = payload.get("request_type", "")
+            if request_type == "clear_activity":
+                return replace(state, pending_clear_activity=False)
+            if request_type == "refresh_files":
+                return replace(state, pending_refresh_files=False)
+            return state
 
         case ActionType.MARKER_MODE_CHANGED:
             payload = action.payload or {}
@@ -512,6 +637,10 @@ def ui_reducer(state: UIState, action: Action) -> UIState:
         case ActionType.IMPUTATION_TOGGLED:
             payload = action.payload or {}
             return replace(state, impute_gaps_enabled=payload.get("enabled", True))
+
+        case ActionType.PREFERRED_DISPLAY_COLUMN_CHANGED:
+            payload = action.payload or {}
+            return replace(state, preferred_display_column=payload.get("column", "axis_y"))
 
         # === Navigation ===
 

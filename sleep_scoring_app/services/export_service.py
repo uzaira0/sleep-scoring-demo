@@ -554,6 +554,12 @@ class ExportManager:
                     algorithm_id = metrics.sleep_algorithm_name or AlgorithmFactory.get_default_algorithm_id()
                     sleep_algorithm = AlgorithmFactory.create(algorithm_id)
 
+                    # Convert algorithm_id to AlgorithmType for metrics
+                    try:
+                        algorithm_type_for_metrics = AlgorithmType(algorithm_id) if algorithm_id else AlgorithmType.SADEH_1994_ACTILIFE
+                    except ValueError:
+                        algorithm_type_for_metrics = AlgorithmType.SADEH_1994_ACTILIFE
+
                     # Run sleep scoring algorithm using DI pattern
                     sadeh_results = sleep_algorithm.score_array(axis_y_values)
 
@@ -616,6 +622,7 @@ class ExportManager:
                         x_data=unix_timestamps,
                         file_path=filename,
                         nwt_sensor_results=nwt_sensor_results,  # REAL NWT sensor data
+                        algorithm_type=algorithm_type_for_metrics,
                     )
 
                     if period_metrics:
@@ -667,7 +674,7 @@ class ExportManager:
                             metrics.overlapping_nonwear_minutes_sensor = period_metrics.get("Overlapping Nonwear Minutes (Sensor)")
 
                             # Store calculated values back to database for future exports
-                            self.db_manager.save_sleep_metrics(metrics, is_autosave=False)
+                            self.db_manager.save_sleep_metrics(metrics)
                             logger.debug("Calculated and saved metrics for %s on %s", filename, metrics.analysis_date)
 
             except Exception as e:

@@ -147,7 +147,7 @@ class MessageType(StrEnum):
 class WindowTitle(StrEnum):
     """Window and dialog titles."""
 
-    MAIN_WINDOW = "Sleep Research Analysis Tool - Activity Data Visualization"
+    MAIN_WINDOW = "Sleep Scoring App - Activity Data Visualization"
     EXPORT_DIALOG = "Export Sleep Scoring Data"
     FOLDER_LOADED = "Folder Loaded"
     NO_FILES_FOUND = "No Files Found"

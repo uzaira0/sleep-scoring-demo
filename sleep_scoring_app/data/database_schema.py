@@ -86,7 +86,6 @@ class DatabaseSchemaManager:
         # Legacy table creation (only used by Migration001 to avoid circular dependency)
         # Validate table names
         sleep_table = self._validate_table_name(DatabaseTable.SLEEP_METRICS)
-        autosave_table = self._validate_table_name(DatabaseTable.AUTOSAVE_METRICS)
         raw_activity_table = self._validate_table_name(DatabaseTable.RAW_ACTIVITY_DATA)
         file_registry_table = self._validate_table_name(DatabaseTable.FILE_REGISTRY)
         nonwear_sensor_table = self._validate_table_name(DatabaseTable.NONWEAR_SENSOR_PERIODS)
@@ -103,9 +102,6 @@ class DatabaseSchemaManager:
         self._create_main_table(conn, sleep_table)
         self._create_indexes(conn, sleep_table)
 
-        # Create autosave table only if autosave is enabled
-        if DataConfig.ENABLE_AUTOSAVE:
-            self._create_autosave_table(conn, autosave_table)
         self._create_raw_activity_table(conn, raw_activity_table)
         self._create_file_registry_table(conn, file_registry_table)
         self._create_raw_activity_indexes(conn, raw_activity_table, file_registry_table)
@@ -201,20 +197,6 @@ class DatabaseSchemaManager:
             CREATE INDEX IF NOT EXISTS idx_participant_key_date
             ON {table_name}({self._validate_column_name(DatabaseColumn.PARTICIPANT_KEY)},
                             {self._validate_column_name(DatabaseColumn.ANALYSIS_DATE)})
-        """)
-
-    def _create_autosave_table(self, conn: sqlite3.Connection, table_name: str) -> None:
-        """Create autosave table for temporary storage."""
-        conn.execute(f"""
-            CREATE TABLE IF NOT EXISTS {table_name} (
-                {self._validate_column_name(DatabaseColumn.ID)} INTEGER PRIMARY KEY AUTOINCREMENT,
-                {self._validate_column_name(DatabaseColumn.FILENAME)} TEXT NOT NULL,
-                {self._validate_column_name(DatabaseColumn.ANALYSIS_DATE)} TEXT NOT NULL,
-                {self._validate_column_name(DatabaseColumn.SLEEP_DATA)} TEXT NOT NULL,
-                {self._validate_column_name(DatabaseColumn.CREATED_AT)} TEXT DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE({self._validate_column_name(DatabaseColumn.FILENAME)},
-                      {self._validate_column_name(DatabaseColumn.ANALYSIS_DATE)})
-            )
         """)
 
     def _create_file_registry_table(self, conn: sqlite3.Connection, table_name: str) -> None:

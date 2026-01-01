@@ -35,7 +35,6 @@ from sleep_scoring_app.core.constants import NonwearAlgorithm
 from sleep_scoring_app.core.pipeline.types import AlgorithmDataRequirement
 
 from .choi import ChoiAlgorithm
-from .van_hees import VanHeesNonwearAlgorithm
 
 if TYPE_CHECKING:
     from sleep_scoring_app.utils.config import AppConfig
@@ -96,19 +95,8 @@ class NonwearAlgorithmFactory:
             },
             data_requirement=AlgorithmDataRequirement.EPOCH_DATA,
         ),
-        NonwearAlgorithm.VAN_HEES_2023: _AlgorithmEntry(
-            algorithm_class=VanHeesNonwearAlgorithm,
-            display_name="van Hees (2023)",
-            params={
-                "sd_criterion": 0.013,
-                "range_criterion": 0.15,
-                "medium_epoch_sec": 900,
-                "sample_freq": 100.0,
-            },
-            data_requirement=AlgorithmDataRequirement.RAW_DATA,
-        ),
-        # Future algorithms:
-        # NonwearAlgorithm.VANHEES_2013: _AlgorithmEntry(VanHeesAlgorithm, 'van Hees (2013)', {}),
+        # NOTE: Raw data algorithms (van Hees, etc.) have been removed.
+        # Nonwear detection from raw accelerometer data will be done via rpy2 calling GGIR.
     }
 
     @classmethod

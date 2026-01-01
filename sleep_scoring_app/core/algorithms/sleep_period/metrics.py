@@ -4,6 +4,27 @@ Tudor-Locke sleep quality metrics calculation.
 This module provides comprehensive sleep quality metrics for detected sleep periods,
 matching the actigraph.sleepr R package implementation.
 
+Terminology Glossary:
+    The codebase uses specific terms that have distinct meanings:
+
+    Period Boundaries (in SleepPeriod dataclass):
+        - onset_timestamp: Unix timestamp of the detected sleep period start
+        - offset_timestamp: Unix timestamp of the detected sleep period end
+
+    Tudor-Locke Metrics (in SleepPeriodMetrics):
+        - in_bed_time: First minute of the sleep period (same as onset)
+        - out_bed_time: Last minute of the sleep period (same as offset)
+        - sleep_onset: First epoch actually scored as sleep within the period
+        - sleep_offset: Last epoch actually scored as sleep within the period
+
+    Algorithm Parameters (in onset/offset detection):
+        - sleep_start_marker: User-provided or diary-derived approximate sleep start
+        - sleep_end_marker: User-provided or diary-derived approximate sleep end
+        These are HINTS for algorithms, not the detected boundaries.
+
+    Note: "onset/offset" refers to detected/calculated boundaries.
+          "sleep_start/sleep_end_marker" refers to user-provided reference points.
+
 Reference:
     Tudor-Locke C, et al. (2014). Fully automated waist-worn accelerometer algorithm
     for detecting children's sleep-period time. Applied Physiology, Nutrition, and

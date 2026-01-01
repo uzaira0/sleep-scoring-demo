@@ -44,6 +44,8 @@ class FileService:
     def _init_state(self, db_manager: DatabaseManager) -> None:
         """Initialize service state and sub-services."""
         self.main_48h_data = None
+        # NOTE: unified_48h_data REMOVED - Redux store is single source of truth
+        # ActivityDataConnector loads data and dispatches to store
         self.main_48h_data_cache = BoundedCache(max_size=10, max_memory_mb=100)
         self.nonwear_service = NonwearDataService(db_manager)
         self.nonwear_data_factory = NonwearDataFactory(self.nonwear_service)
@@ -80,24 +82,76 @@ class FileService:
         current_date_48h_cache: BoundedCache,
         selected_file: str | None,
     ) -> tuple | None:
-        """Pure data loading logic for current date."""
+        """
+        Pure data loading logic for current date.
+
+        Uses unified loading to get ALL columns in ONE query,
+        ensuring timestamps are aligned across all activity columns.
+        """
         if not available_dates or current_date_index < 0 or current_date_index >= len(available_dates):
             return None
 
         current_date = available_dates[current_date_index]
         filename = Path(selected_file).name if selected_file else None
 
-        # Check cache
+        # Check cache - now caches unified data
         cache_key = current_date.strftime("%Y-%m-%d")
         cached_data = current_date_48h_cache.get(cache_key)
 
         if cached_data is None:
-            timestamps_48h, activity_data_48h = self.data_manager.load_real_data(current_date, 48, filename)
-            if not timestamps_48h:
-                return None
-            current_date_48h_cache.put(cache_key, (timestamps_48h, activity_data_48h), estimate_object_size_mb((timestamps_48h, activity_data_48h)))
+            # Load ALL columns in ONE query - this is the SINGLE SOURCE OF TRUTH
+            unified_data = self.data_manager._loading_service.load_unified_activity_data(filename, current_date, 48)
+
+            if not unified_data or not unified_data.get("timestamps"):
+                # Fall back to old method if unified loading fails
+                logger.warning("Unified load failed, falling back to single column load")
+                # NOTE: unified_48h_data no longer used - store is single source of truth
+                timestamps_48h, activity_data_48h = self.data_manager.load_real_data(current_date, 48, filename)
+                if not timestamps_48h:
+                    return None
+                current_date_48h_cache.put(
+                    cache_key, (timestamps_48h, activity_data_48h), estimate_object_size_mb((timestamps_48h, activity_data_48h))
+                )
+            else:
+                # Store unified data - all columns share same timestamps
+                current_date_48h_cache.put(cache_key, unified_data, estimate_object_size_mb(unified_data))
+                # NOTE: unified_48h_data no longer set - ActivityDataConnector dispatches to store
+
+                timestamps_48h = unified_data["timestamps"]
+                # Use preferred activity column for display
+                preferred_col = self.data_manager.preferred_activity_column
+                if preferred_col.value == "vector_magnitude":
+                    activity_data_48h = unified_data["vector_magnitude"]
+                elif preferred_col.value == "axis_x":
+                    activity_data_48h = unified_data["axis_x"]
+                elif preferred_col.value == "axis_z":
+                    activity_data_48h = unified_data["axis_z"]
+                else:  # axis_y (default)
+                    activity_data_48h = unified_data["axis_y"]
+
+                logger.info(
+                    "Loaded unified data: %d rows, display=%s, axis_y available for Sadeh",
+                    len(timestamps_48h),
+                    preferred_col.value,
+                )
+        # Check if cached data is unified (dict) or legacy (tuple)
+        elif isinstance(cached_data, dict):
+            unified_data = cached_data
+            # NOTE: unified_48h_data no longer set - store is single source of truth
+            timestamps_48h = unified_data["timestamps"]
+            preferred_col = self.data_manager.preferred_activity_column
+            if preferred_col.value == "vector_magnitude":
+                activity_data_48h = unified_data["vector_magnitude"]
+            elif preferred_col.value == "axis_x":
+                activity_data_48h = unified_data["axis_x"]
+            elif preferred_col.value == "axis_z":
+                activity_data_48h = unified_data["axis_z"]
+            else:
+                activity_data_48h = unified_data["axis_y"]
         else:
+            # Legacy tuple format - no unified data available
             timestamps_48h, activity_data_48h = cached_data
+            # NOTE: unified_48h_data no longer used - store is single source of truth
 
         # Store as main dataset
         self.main_48h_data = (timestamps_48h, activity_data_48h)

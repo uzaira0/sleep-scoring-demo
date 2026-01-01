@@ -134,6 +134,9 @@ class AutosaveCoordinator:
         # Track last known config hash for change detection
         self._last_config_hash: int | None = None
 
+        # Reusable session state manager for JSON backups (avoid creating new instance each time)
+        self._session_manager: Any = None
+
         logger.info("AutosaveCoordinator initialized with %dms debounce", self.config.debounce_ms)
 
     def _on_state_change(self, old_state: UIState, new_state: UIState) -> None:
@@ -235,8 +238,9 @@ class AutosaveCoordinator:
             if PendingChangeType.CONFIG in self._pending_changes:
                 self._save_config(state)
 
-            # Backup all settings to JSON
-            self._backup_settings_to_json()
+            # Backup settings to JSON ONLY when config or window state changed (not markers)
+            if PendingChangeType.CONFIG in self._pending_changes or PendingChangeType.WINDOW_STATE in self._pending_changes:
+                self._backup_settings_to_json()
 
             # Clear pending changes
             self._pending_changes.clear()
@@ -346,11 +350,12 @@ class AutosaveCoordinator:
         """Backup all QSettings to JSON file for portability."""
         try:
             logger.info("Starting settings backup to JSON")
-            from sleep_scoring_app.ui.managers.session_state_manager import SessionStateManager
+            from sleep_scoring_app.ui.coordinators.session_state_manager import SessionStateManager
 
-            # Use a temporary instance just for backup - it reads all QSettings keys
-            session_manager = SessionStateManager()
-            result = session_manager.backup_to_json()
+            # Reuse session manager instance (lazy initialization)
+            if self._session_manager is None:
+                self._session_manager = SessionStateManager()
+            result = self._session_manager.backup_to_json()
             if result:
                 logger.info("Settings backup completed: %s", result)
             else:

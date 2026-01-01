@@ -279,9 +279,10 @@ class CacheService:
                 except AttributeError:
                     logger.debug("Plot widget has no _algorithm_cache to clear")
 
-                # Clear main 48h algorithm results
+                # Clear main 48h algorithm results and timestamps
                 plot_widget.main_48h_sadeh_results = None
-                logger.debug("Cleared plot widget main_48h_sadeh_results")
+                plot_widget.main_48h_sadeh_timestamps = None  # CRITICAL: Clear alongside results
+                logger.debug("Cleared plot widget main_48h_sadeh_results and timestamps")
 
                 # Clear main 48h axis_y data and timestamps
                 plot_widget.main_48h_axis_y_data = None

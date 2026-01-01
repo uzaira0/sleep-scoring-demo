@@ -42,7 +42,7 @@ def create_splash_screen() -> QSplashScreen:
 
     # Add loading message
     splash.showMessage(
-        "Sleep Research Analysis Tool\n\nLoading application...", Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignBottom, Qt.GlobalColor.white
+        "Sleep Scoring App\n\nLoading application...", Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignBottom, Qt.GlobalColor.white
     )
 
     return splash
@@ -70,7 +70,7 @@ def main() -> None:
 
     # Update splash message
     splash.showMessage(
-        "Sleep Research Analysis Tool\n\nInitializing database...", Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignBottom, Qt.GlobalColor.white
+        "Sleep Scoring App\n\nInitializing database...", Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignBottom, Qt.GlobalColor.white
     )
     app.processEvents()
 

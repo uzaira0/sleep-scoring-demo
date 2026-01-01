@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 class SleepMetricsRepository(BaseRepository):
     """Repository for sleep metrics operations."""
 
-    def save_sleep_metrics(self, sleep_metrics: SleepMetrics, is_autosave: bool = False) -> bool:
+    def save_sleep_metrics(self, sleep_metrics: SleepMetrics) -> bool:
         """Save sleep metrics to database with validation."""
         if not isinstance(sleep_metrics, SleepMetrics):
             msg = "sleep_metrics must be SleepMetrics instance"
@@ -48,10 +48,6 @@ class SleepMetricsRepository(BaseRepository):
         InputValidator.validate_string(sleep_metrics.analysis_date, min_length=1, name="analysis_date")
 
         try:
-            if is_autosave:
-                if not DataConfig.ENABLE_AUTOSAVE:
-                    return True
-                return self._save_autosave_metrics(sleep_metrics)
             return self._save_permanent_metrics(sleep_metrics)
 
         except (DatabaseError, ValidationError):
@@ -274,34 +270,6 @@ class SleepMetricsRepository(BaseRepository):
 
         return column.default_value
 
-    def _save_autosave_metrics(self, metrics: SleepMetrics) -> bool:
-        """Save to autosave table for temporary storage with validation."""
-        table_name = self._validate_table_name(DatabaseTable.AUTOSAVE_METRICS)
-        export_data = metrics.to_export_dict()
-        self._validate_export_data(export_data)
-
-        try:
-            sleep_data = json.dumps(export_data, ensure_ascii=False)
-        except (TypeError, ValueError) as e:
-            msg = f"Cannot serialize metrics to JSON: {e}"
-            raise ValidationError(msg, ErrorCodes.INVALID_INPUT) from e
-
-        with self._get_connection() as conn:
-            conn.execute(
-                f"""
-                INSERT OR REPLACE INTO {table_name}
-                ({self._validate_column_name(DatabaseColumn.FILENAME)},
-                 {self._validate_column_name(DatabaseColumn.ANALYSIS_DATE)},
-                 {self._validate_column_name(DatabaseColumn.SLEEP_DATA)})
-                VALUES (?, ?, ?)
-            """,
-                (metrics.filename, metrics.analysis_date, sleep_data),
-            )
-
-            conn.commit()
-            logger.info("Saved autosave metrics for %s", metrics.filename)
-            return True
-
     def load_sleep_metrics_by_participant_key(self, participant_key: str, analysis_date: str | None = None) -> list[SleepMetrics]:
         """Load sleep metrics by PARTICIPANT_KEY with validation."""
         InputValidator.validate_string(participant_key, min_length=1, name="participant_key")
@@ -478,6 +446,8 @@ class SleepMetricsRepository(BaseRepository):
             sadeh_offset=safe_get(DatabaseColumn.SADEH_OFFSET),
             overlapping_nonwear_minutes_algorithm=safe_get(DatabaseColumn.OVERLAPPING_NONWEAR_MINUTES_ALGORITHM),
             overlapping_nonwear_minutes_sensor=safe_get(DatabaseColumn.OVERLAPPING_NONWEAR_MINUTES_SENSOR),
+            sleep_algorithm_name=safe_get(DatabaseColumn.ALGORITHM_TYPE),
+            sleep_period_detector_id=safe_get(DatabaseColumn.ONSET_OFFSET_RULE),
             created_at=safe_get(DatabaseColumn.CREATED_AT) or "",
             updated_at=safe_get(DatabaseColumn.UPDATED_AT) or "",
         )
@@ -520,41 +490,6 @@ class SleepMetricsRepository(BaseRepository):
                 logger.debug("period_metrics_json column not yet available: %s", e)
             else:
                 logger.warning("Error loading period metrics: %s", e)
-
-    def load_autosave_metrics(self, filename: str, analysis_date: str) -> SleepMetrics | None:
-        """Load autosaved metrics for specific file and date with validation."""
-        if not FeatureFlags.ENABLE_AUTOSAVE:
-            return None
-
-        InputValidator.validate_string(filename, min_length=1, name="filename")
-        InputValidator.validate_string(analysis_date, min_length=1, name="analysis_date")
-
-        table_name = self._validate_table_name(DatabaseTable.AUTOSAVE_METRICS)
-
-        with self._get_connection() as conn:
-            cursor = conn.execute(
-                f"""
-                SELECT {self._validate_column_name(DatabaseColumn.SLEEP_DATA)}
-                FROM {table_name}
-                WHERE {self._validate_column_name(DatabaseColumn.FILENAME)} = ?
-                AND {self._validate_column_name(DatabaseColumn.ANALYSIS_DATE)} = ?
-            """,
-                (filename, analysis_date),
-            )
-
-            row = cursor.fetchone()
-            if row:
-                try:
-                    data = json.loads(row[0])
-                    self._validate_export_data(data)
-                    return self._dict_to_sleep_metrics(data)
-                except json.JSONDecodeError as e:
-                    logger.warning("Invalid JSON in autosave data: %s", e)
-                    return None
-                except ValidationError as e:
-                    logger.warning("Invalid autosave data: %s", e)
-                    return None
-            return None
 
     def _dict_to_sleep_metrics(self, data: dict[str, Any]) -> SleepMetrics:
         """Convert dictionary data to SleepMetrics object with validation."""
@@ -621,6 +556,8 @@ class SleepMetricsRepository(BaseRepository):
             sadeh_offset=data.get("Sadeh Algorithm Value at Sleep Offset"),
             overlapping_nonwear_minutes_algorithm=data.get("Overlapping Nonwear Minutes (Algorithm)"),
             overlapping_nonwear_minutes_sensor=data.get("Overlapping Nonwear Minutes (Sensor)"),
+            sleep_algorithm_name=data.get("Sleep Algorithm"),
+            sleep_period_detector_id=data.get("Onset/Offset Rule"),
             updated_at=data.get("Saved At", ""),
         )
 
@@ -661,43 +598,14 @@ class SleepMetricsRepository(BaseRepository):
             msg = f"Failed to delete sleep metrics: {e}"
             raise DatabaseError(msg, ErrorCodes.DB_DELETE_FAILED) from e
 
-    def cleanup_old_autosaves(self, days_old: int = 7) -> int:
-        """Remove autosave entries older than specified days with validation."""
-        from datetime import timedelta
-
-        days_old = InputValidator.validate_integer(days_old, min_val=1, max_val=365, name="days_old")
-        table_name = self._validate_table_name(DatabaseTable.AUTOSAVE_METRICS)
-        cutoff_timestamp = (datetime.now() - timedelta(days=days_old)).isoformat()
-
-        with self._get_connection() as conn:
-            cursor = conn.execute(
-                f"""
-                DELETE FROM {table_name}
-                WHERE {self._validate_column_name(DatabaseColumn.CREATED_AT)} < ?
-                """,
-                (cutoff_timestamp,),
-            )
-
-            deleted_count = cursor.rowcount
-            conn.commit()
-            logger.info("Cleaned up %s old autosave entries", deleted_count)
-            return deleted_count
-
     def get_database_stats(self) -> dict[str, int]:
         """Get database statistics with validation (includes sleep and nonwear markers)."""
         sleep_table = self._validate_table_name(DatabaseTable.SLEEP_METRICS)
-        autosave_table = self._validate_table_name(DatabaseTable.AUTOSAVE_METRICS)
         nonwear_table = self._validate_table_name(DatabaseTable.MANUAL_NWT_MARKERS)
 
         with self._get_connection() as conn:
             cursor = conn.execute(f"SELECT COUNT(*) FROM {sleep_table}")
             total_records = cursor.fetchone()[0]
-
-            if DataConfig.ENABLE_AUTOSAVE:
-                cursor = conn.execute(f"SELECT COUNT(*) FROM {autosave_table}")
-                autosave_records = cursor.fetchone()[0]
-            else:
-                autosave_records = 0
 
             # Count nonwear markers
             try:
@@ -714,7 +622,6 @@ class SleepMetricsRepository(BaseRepository):
 
             return {
                 "total_records": total_records,
-                "autosave_records": autosave_records,
                 "nonwear_records": nonwear_records,
                 "unique_files": unique_files,
             }

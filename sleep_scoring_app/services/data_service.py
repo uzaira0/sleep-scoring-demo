@@ -106,6 +106,17 @@ class DataManager:
         """Unified method to load axis_y (vertical) data specifically for Sadeh algorithm."""
         return self._loading_service.load_axis_y_data_for_sadeh(filename, target_date, hours)
 
+    def load_axis_y_aligned(self, filename: str, target_date: datetime, hours: int = 48):
+        """
+        Load axis_y data as an aligned immutable container.
+
+        This is the SINGLE SOURCE OF TRUTH for axis_y loading that guarantees
+        timestamps and activity values are ALWAYS aligned and cannot get out of sync.
+
+        Delegates to DataLoadingService.load_axis_y_aligned().
+        """
+        return self._loading_service.load_axis_y_aligned(filename, target_date, hours)
+
     # ==================== Data Transformation & Filtering ====================
     # Delegated to DataQueryService
 
@@ -133,6 +144,7 @@ class DataManager:
         x_data,
         file_path=None,
         nwt_sensor_results=None,
+        algorithm_type=None,
     ) -> dict[str, Any] | None:
         """Calculate sleep metrics for a specific sleep period."""
         participant_info = self.extract_enhanced_participant_info(file_path)
@@ -145,6 +157,7 @@ class DataManager:
             participant_info,
             file_path,
             nwt_sensor_results,
+            algorithm_type,
         )
 
     def calculate_sleep_metrics_for_period_object(
@@ -156,6 +169,7 @@ class DataManager:
         x_data,
         file_path=None,
         nwt_sensor_results=None,
+        algorithm_type=None,
     ) -> SleepMetrics | None:
         """Calculate sleep metrics for a SleepPeriod and return as SleepMetrics object."""
         participant_info = self.extract_enhanced_participant_info(file_path)
@@ -168,6 +182,7 @@ class DataManager:
             participant_info,
             file_path,
             nwt_sensor_results,
+            algorithm_type,
         )
 
     def calculate_sleep_metrics_for_all_periods(
@@ -179,6 +194,7 @@ class DataManager:
         x_data,
         file_path=None,
         nwt_sensor_results=None,
+        algorithm_type=None,
     ) -> list[dict[str, Any]]:
         """Calculate sleep metrics for all complete sleep periods."""
         participant_info = self.extract_enhanced_participant_info(file_path)
@@ -191,6 +207,7 @@ class DataManager:
             participant_info,
             file_path,
             nwt_sensor_results,
+            algorithm_type,
         )
 
     # ==================== Database Queries ====================

@@ -584,7 +584,6 @@ class SleepMetrics:
             ExportColumn.SLEEP_DATE: self.analysis_date,
             ExportColumn.ONSET_DATE: self.analysis_date,
             ExportColumn.SLEEP_ALGORITHM: self.algorithm_type.value if self.algorithm_type else None,
-            ExportColumn.SLEEP_ALGORITHM_NAME: self.sleep_algorithm_name,
             ExportColumn.ONSET_OFFSET_RULE: self.sleep_period_detector_id,
             ExportColumn.ONSET_TIME: self.onset_time,
             ExportColumn.OFFSET_TIME: self.offset_time,

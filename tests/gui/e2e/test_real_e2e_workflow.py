@@ -76,15 +76,17 @@ def temp_data_folder(tmp_path):
             base = 10 + np.random.randint(0, 30)
         activity.append(max(0, base))
 
-    df = pd.DataFrame({
-        "Date": [ts.strftime("%m/%d/%Y") for ts in timestamps],
-        "Time": [ts.strftime("%H:%M:%S") for ts in timestamps],
-        "Axis1": activity,
-        "Axis2": [int(a * 0.8) for a in activity],
-        "Axis3": [int(a * 0.5) for a in activity],
-        "Vector Magnitude": [int(np.sqrt(a**2 + (a*0.8)**2 + (a*0.5)**2)) for a in activity],
-        "Steps": [np.random.randint(0, 20) if a > 50 else 0 for a in activity],
-    })
+    df = pd.DataFrame(
+        {
+            "Date": [ts.strftime("%m/%d/%Y") for ts in timestamps],
+            "Time": [ts.strftime("%H:%M:%S") for ts in timestamps],
+            "Axis1": activity,
+            "Axis2": [int(a * 0.8) for a in activity],
+            "Axis3": [int(a * 0.5) for a in activity],
+            "Vector Magnitude": [int(np.sqrt(a**2 + (a * 0.8) ** 2 + (a * 0.5) ** 2)) for a in activity],
+            "Steps": [np.random.randint(0, 20) if a > 50 else 0 for a in activity],
+        }
+    )
 
     # Save test file
     test_file = data_folder / "4000 T1 (2021-04-20)60sec.csv"
@@ -97,11 +99,11 @@ def temp_data_folder(tmp_path):
 def temp_db(tmp_path):
     """Create a temporary database for testing."""
     import sleep_scoring_app.data.database as db_module
+
     db_module._database_initialized = False
 
     db_path = tmp_path / "test_sleep_scoring.db"
-    db_manager = DatabaseManager(db_path=str(db_path))
-    yield db_manager
+    return DatabaseManager(db_path=str(db_path))
     # Cleanup - DatabaseManager doesn't need explicit close
 
 
@@ -126,19 +128,21 @@ def real_main_window(qtbot, temp_db, temp_config, tmp_path):
     from sleep_scoring_app.utils.config import ConfigManager
 
     # Patch DatabaseManager and ConfigManager to use our temp instances
-    with patch.object(DatabaseManager, '__init__', lambda self, path=None: None):
-        with patch.object(ConfigManager, '__init__', lambda self: None):
+    with patch.object(DatabaseManager, "__init__", lambda self, path=None: None):
+        with patch.object(ConfigManager, "__init__", lambda self: None):
             window = SleepScoringMainWindow.__new__(SleepScoringMainWindow)
 
             # Manually initialize with our temp objects
             from PyQt6.QtWidgets import QMainWindow
+
             QMainWindow.__init__(window)
 
-            window.setWindowTitle("Sleep Research Analysis Tool - TEST")
+            window.setWindowTitle("Sleep Scoring App - TEST")
             window.setGeometry(100, 100, 1280, 720)
 
             # Initialize Redux store
             from sleep_scoring_app.ui.store import UIStore
+
             window.store = UIStore()
 
             # Use temp database
@@ -154,11 +158,11 @@ def real_main_window(qtbot, temp_db, temp_config, tmp_path):
             window.store.initialize_from_config(temp_config)
 
             # Initialize services
-            from sleep_scoring_app.services.unified_data_service import UnifiedDataService
             from sleep_scoring_app.services.export_service import ExportManager
-            from sleep_scoring_app.services.nonwear_service import NonwearDataService
             from sleep_scoring_app.services.import_service import ImportService
             from sleep_scoring_app.services.memory_service import BoundedCache
+            from sleep_scoring_app.services.nonwear_service import NonwearDataService
+            from sleep_scoring_app.services.unified_data_service import UnifiedDataService
 
             window.data_service = UnifiedDataService(temp_db, window.store)
             window.data_manager = window.data_service.data_manager
@@ -196,13 +200,13 @@ class TestWindowInitialization:
     def test_window_creates_successfully(self, real_main_window):
         """Test that MainWindow can be instantiated."""
         assert real_main_window is not None
-        assert real_main_window.windowTitle() == "Sleep Research Analysis Tool - TEST"
+        assert real_main_window.windowTitle() == "Sleep Scoring App - TEST"
 
     def test_window_has_redux_store(self, real_main_window):
         """Test that window has Redux store initialized."""
         assert real_main_window.store is not None
-        assert hasattr(real_main_window.store, 'state')
-        assert hasattr(real_main_window.store, 'dispatch')
+        assert hasattr(real_main_window.store, "state")
+        assert hasattr(real_main_window.store, "dispatch")
 
     def test_window_has_database_manager(self, real_main_window):
         """Test that window has database manager."""
@@ -403,11 +407,11 @@ class TestSignalSlotConnections:
 
     def test_loading_progress_signal_exists(self, real_main_window):
         """Test that loading progress signal is defined."""
-        assert hasattr(real_main_window, 'loading_progress')
+        assert hasattr(real_main_window, "loading_progress")
 
     def test_loading_complete_signal_exists(self, real_main_window):
         """Test that loading complete signal is defined."""
-        assert hasattr(real_main_window, 'loading_complete')
+        assert hasattr(real_main_window, "loading_complete")
 
 
 # ============================================================================
@@ -513,9 +517,7 @@ class TestStoreConnectors:
         from sleep_scoring_app.ui.store import Actions
 
         # Set available dates first
-        real_main_window.store.dispatch(
-            Actions.dates_loaded(("2021-04-20", "2021-04-21", "2021-04-22"))
-        )
+        real_main_window.store.dispatch(Actions.dates_loaded(("2021-04-20", "2021-04-21", "2021-04-22")))
 
         # Now select a date
         real_main_window.store.dispatch(Actions.date_selected(1))
@@ -525,24 +527,23 @@ class TestStoreConnectors:
 
     def test_algorithm_selection_via_study_settings(self, real_main_window):
         """Test that algorithm selection works through study settings action."""
-        from sleep_scoring_app.ui.store import Actions
         from sleep_scoring_app.core.constants import AlgorithmType, SleepPeriodDetectorType
+        from sleep_scoring_app.ui.store import Actions
 
         # Update study settings which includes algorithm (takes a dict)
         real_main_window.store.dispatch(
-            Actions.study_settings_changed({
-                "sleep_algorithm_id": AlgorithmType.COLE_KRIPKE_1992_ACTILIFE,
-                "onset_offset_rule_id": SleepPeriodDetectorType.CONSECUTIVE_ONSET3S_OFFSET5S,
-                "night_start_hour": 22,
-                "night_end_hour": 7,
-            })
+            Actions.study_settings_changed(
+                {
+                    "sleep_algorithm_id": AlgorithmType.COLE_KRIPKE_1992_ACTILIFE,
+                    "onset_offset_rule_id": SleepPeriodDetectorType.CONSECUTIVE_ONSET3S_OFFSET5S,
+                    "night_start_hour": 22,
+                    "night_end_hour": 7,
+                }
+            )
         )
 
         # State should reflect change
-        assert (
-            real_main_window.store.state.sleep_algorithm_id
-            == AlgorithmType.COLE_KRIPKE_1992_ACTILIFE
-        )
+        assert real_main_window.store.state.sleep_algorithm_id == AlgorithmType.COLE_KRIPKE_1992_ACTILIFE
 
 
 # ============================================================================
@@ -674,4 +675,5 @@ def cleanup_after_test():
     yield
     # Force garbage collection
     import gc
+
     gc.collect()

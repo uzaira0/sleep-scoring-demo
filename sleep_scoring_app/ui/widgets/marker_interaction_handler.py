@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import QTimer
 
-from sleep_scoring_app.core.constants import MarkerCategory
+from sleep_scoring_app.core.constants import MarkerCategory, MarkerEndpoint, SleepMarkerEndpoint
 
 if TYPE_CHECKING:
     import pyqtgraph as pg
@@ -77,7 +77,8 @@ class MarkerInteractionHandler:
                 self.plot_widget.setFocus()
 
     def on_marker_dragged(self, line: pg.InfiniteLine) -> None:
-        """Handle marker drag in progress with real-time feedback.
+        """
+        Handle marker drag in progress with real-time feedback.
 
         All updates are synchronous for immediate visual feedback.
         """
@@ -99,7 +100,7 @@ class MarkerInteractionHandler:
             return
 
         line._last_drag_idx = new_idx
-        snapped_ts = self.plot_widget._cached_unix_timestamps[new_idx]
+        snapped_ts = self.plot_widget.x_data[new_idx]
 
         if hasattr(line, "period") and line.period:  # KEEP: Duck typing for pyqtgraph line attributes
             renderer: PlotMarkerRenderer = self.plot_widget.marker_renderer
@@ -110,9 +111,9 @@ class MarkerInteractionHandler:
                 renderer.select_marker_set_by_period(line.period)
 
             # Update marker position during drag (swap logic is handled on drop only)
-            if line.marker_type == "onset":
+            if line.marker_type == SleepMarkerEndpoint.ONSET:
                 line.period.onset_timestamp = snapped_ts
-            elif line.marker_type == "offset":
+            elif line.marker_type == SleepMarkerEndpoint.OFFSET:
                 line.period.offset_timestamp = snapped_ts
 
             # Update classifications
@@ -137,7 +138,7 @@ class MarkerInteractionHandler:
         if self.plot_widget.get_active_marker_category() != MarkerCategory.SLEEP:
             # Revert to original position
             if hasattr(line, "period") and line.period:  # KEEP: Duck typing plot/marker attributes
-                original_pos = line.period.onset_timestamp if line.marker_type == "onset" else line.period.offset_timestamp
+                original_pos = line.period.onset_timestamp if line.marker_type == SleepMarkerEndpoint.ONSET else line.period.offset_timestamp
                 line.setPos(original_pos)
             logger.debug("Reverting sleep marker drag - not in SLEEP mode")
             return
@@ -154,19 +155,19 @@ class MarkerInteractionHandler:
 
             renderer: PlotMarkerRenderer = self.plot_widget.marker_renderer
 
-            if line.marker_type == "onset":
+            if line.marker_type == SleepMarkerEndpoint.ONSET:
                 line.period.onset_timestamp = snapped_pos
-            elif line.marker_type == "offset":
+            elif line.marker_type == SleepMarkerEndpoint.OFFSET:
                 line.period.offset_timestamp = snapped_pos
 
             # Validate period is still valid (onset before offset)
             if line.period.is_complete and line.period.onset_timestamp >= line.period.offset_timestamp:
                 # Invalid order - revert change
-                if line.marker_type == "onset":
+                if line.marker_type == SleepMarkerEndpoint.ONSET:
                     line.period.onset_timestamp = line.getPos()[0] + 60
-                elif line.marker_type == "offset":
+                elif line.marker_type == SleepMarkerEndpoint.OFFSET:
                     line.period.offset_timestamp = line.getPos()[0] - 60
-                line.setPos(line.period.onset_timestamp if line.marker_type == "onset" else line.period.offset_timestamp)
+                line.setPos(line.period.onset_timestamp if line.marker_type == SleepMarkerEndpoint.ONSET else line.period.offset_timestamp)
                 return
 
             # Update classifications and check for duration ties
@@ -188,7 +189,8 @@ class MarkerInteractionHandler:
     # ========== Nonwear Marker Interaction ==========
 
     def on_nonwear_marker_clicked(self, line: pg.InfiniteLine) -> None:
-        """Handle nonwear marker click to select.
+        """
+        Handle nonwear marker click to select.
 
         Mirrors on_marker_clicked (sleep) exactly for symmetry.
         """
@@ -219,7 +221,8 @@ class MarkerInteractionHandler:
                 self.plot_widget.setFocus()
 
     def on_nonwear_marker_dragged(self, line: pg.InfiniteLine) -> None:
-        """Handle nonwear marker drag in progress with real-time feedback.
+        """
+        Handle nonwear marker drag in progress with real-time feedback.
 
         Mirrors on_marker_dragged (sleep) exactly for symmetry.
         """
@@ -241,7 +244,7 @@ class MarkerInteractionHandler:
             return
 
         line._last_drag_idx = new_idx
-        snapped_ts = self.plot_widget._cached_unix_timestamps[new_idx]
+        snapped_ts = self.plot_widget.x_data[new_idx]
 
         if hasattr(line, "period") and line.period:  # KEEP: Duck typing plot/marker attributes
             from sleep_scoring_app.ui.widgets.plot_marker_renderer import PlotMarkerRenderer
@@ -256,36 +259,34 @@ class MarkerInteractionHandler:
 
             # Check for crossing and swap if needed (same as sleep)
             if line.period.is_complete:
-                if line.marker_type == "start" and snapped_ts >= line.period.end_timestamp:
+                if line.marker_type == MarkerEndpoint.START and snapped_ts >= line.period.end_timestamp:
                     # Start crossed end - swap them
                     old_end = line.period.end_timestamp
                     line.period.end_timestamp = snapped_ts
                     line.period.start_timestamp = old_end
-                    line.marker_type = "end"
+                    line.marker_type = MarkerEndpoint.END
                     # Update the OTHER line (start) to the old end position
-                    renderer.update_nonwear_marker_line_position(line.period, "start", old_end)
+                    renderer.update_nonwear_marker_line_position(line.period, MarkerEndpoint.START, old_end)
                     logger.debug("Nonwear markers swapped: start crossed end")
-                elif line.marker_type == "end" and snapped_ts <= line.period.start_timestamp:
+                elif line.marker_type == MarkerEndpoint.END and snapped_ts <= line.period.start_timestamp:
                     # End crossed start - swap them
                     old_start = line.period.start_timestamp
                     line.period.start_timestamp = snapped_ts
                     line.period.end_timestamp = old_start
-                    line.marker_type = "start"
+                    line.marker_type = MarkerEndpoint.START
                     # Update the OTHER line (end) to the old start position
-                    renderer.update_nonwear_marker_line_position(line.period, "end", old_start)
+                    renderer.update_nonwear_marker_line_position(line.period, MarkerEndpoint.END, old_start)
                     logger.debug("Nonwear markers swapped: end crossed start")
-                else:
-                    # Normal update - no crossing
-                    if line.marker_type == "start":
-                        line.period.start_timestamp = snapped_ts
-                    elif line.marker_type == "end":
-                        line.period.end_timestamp = snapped_ts
-            else:
-                # Period not complete, just update
-                if line.marker_type == "start":
+                # Normal update - no crossing
+                elif line.marker_type == MarkerEndpoint.START:
                     line.period.start_timestamp = snapped_ts
-                elif line.marker_type == "end":
+                elif line.marker_type == MarkerEndpoint.END:
                     line.period.end_timestamp = snapped_ts
+            # Period not complete, just update
+            elif line.marker_type == MarkerEndpoint.START:
+                line.period.start_timestamp = snapped_ts
+            elif line.marker_type == MarkerEndpoint.END:
+                line.period.end_timestamp = snapped_ts
 
             # Sync dispatch to Redux - tables update immediately (same as sleep)
             self.plot_widget.mark_nonwear_markers_dirty()
@@ -299,7 +300,7 @@ class MarkerInteractionHandler:
         if self.plot_widget.get_active_marker_category() != MarkerCategory.NONWEAR:
             # Revert to original position
             if hasattr(line, "period") and line.period:  # KEEP: Duck typing plot/marker attributes
-                original_pos = line.period.start_timestamp if line.marker_type == "start" else line.period.end_timestamp
+                original_pos = line.period.start_timestamp if line.marker_type == MarkerEndpoint.START else line.period.end_timestamp
                 line.setPos(original_pos)
             logger.debug("Reverting nonwear marker drag - not in NONWEAR mode")
             return
@@ -319,9 +320,9 @@ class MarkerInteractionHandler:
             original_start = line.period.start_timestamp
             original_end = line.period.end_timestamp
 
-            if line.marker_type == "start":
+            if line.marker_type == MarkerEndpoint.START:
                 line.period.start_timestamp = snapped_pos
-            elif line.marker_type == "end":
+            elif line.marker_type == MarkerEndpoint.END:
                 line.period.end_timestamp = snapped_pos
 
             # Validate period (start before end)
@@ -329,7 +330,7 @@ class MarkerInteractionHandler:
                 # Invalid order - revert
                 line.period.start_timestamp = original_start
                 line.period.end_timestamp = original_end
-                line.setPos(original_start if line.marker_type == "start" else original_end)
+                line.setPos(original_start if line.marker_type == MarkerEndpoint.START else original_end)
                 return
 
             # Validate no overlap with other periods
@@ -341,7 +342,7 @@ class MarkerInteractionHandler:
                 # Overlap detected - revert and notify user
                 line.period.start_timestamp = original_start
                 line.period.end_timestamp = original_end
-                line.setPos(original_start if line.marker_type == "start" else original_end)
+                line.setPos(original_start if line.marker_type == MarkerEndpoint.START else original_end)
                 self.plot_widget.marker_limit_exceeded.emit("Nonwear periods cannot overlap")
                 return
 
@@ -354,7 +355,8 @@ class MarkerInteractionHandler:
     # ========== Helper Methods ==========
 
     def _deselect_nonwear_markers(self) -> None:
-        """Deselect all nonwear markers (make them all unselected visually).
+        """
+        Deselect all nonwear markers (make them all unselected visually).
 
         Mirrors _deselect_sleep_markers exactly for symmetry.
         """

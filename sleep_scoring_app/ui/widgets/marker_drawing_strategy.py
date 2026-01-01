@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt
 
-from sleep_scoring_app.core.constants import MarkerCategory, UIColors
+from sleep_scoring_app.core.constants import MarkerCategory, MarkerPlacementState, UIColors
 
 if TYPE_CHECKING:
     from sleep_scoring_app.core.dataclasses import ManualNonwearPeriod, SleepPeriod
@@ -89,7 +89,7 @@ class MarkerDrawingStrategy:
             pos=timestamp,
             angle=90,  # Vertical line
             pen=pg.mkPen(color, width=line_width, style=pg.QtCore.Qt.PenStyle.SolidLine),
-            movable=(marker_type != "incomplete"),  # Incomplete markers not draggable
+            movable=(marker_type != MarkerPlacementState.INCOMPLETE),  # Incomplete markers not draggable
             bounds=[self.plot_widget.data_start_time, self.plot_widget.data_end_time],
             label=label,
             labelOpts={
@@ -105,7 +105,7 @@ class MarkerDrawingStrategy:
         line.setHoverPen(pg.mkPen(UIColors.HOVERED_MARKER, width=line_width + 1, style=pg.QtCore.Qt.PenStyle.SolidLine))
 
         # Store period and marker type on line for drag handling
-        if marker_type != "incomplete":
+        if marker_type != MarkerPlacementState.INCOMPLETE:
             line.period = period
             line.marker_type = marker_type
 
@@ -145,7 +145,7 @@ class MarkerDrawingStrategy:
             pos=timestamp,
             angle=90,  # Vertical line
             pen=pg.mkPen(color, width=line_width, style=Qt.PenStyle.DashLine),
-            movable=(marker_type != "incomplete"),
+            movable=(marker_type != MarkerPlacementState.INCOMPLETE),
             bounds=[self.plot_widget.data_start_time, self.plot_widget.data_end_time],
             label=label,
             labelOpts={
@@ -161,7 +161,7 @@ class MarkerDrawingStrategy:
         line.setHoverPen(pg.mkPen(UIColors.HOVERED_MARKER, width=line_width + 1, style=Qt.PenStyle.DashLine))
 
         # Store period and marker type on line for drag handling
-        if marker_type != "incomplete":
+        if marker_type != MarkerPlacementState.INCOMPLETE:
             line.period = period
             line.marker_type = marker_type
             line.marker_category = MarkerCategory.NONWEAR

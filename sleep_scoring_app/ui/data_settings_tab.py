@@ -1245,28 +1245,28 @@ class DataSettingsTab(QWidget):
         """
         Clear all activity data from the database.
 
-        Uses Redux store dispatch instead of direct MainWindow access.
+        Architecture: Widget dispatches action → Effect handler performs side effect.
         """
-        try:
-            from sleep_scoring_app.ui.store import Actions
+        from PyQt6.QtWidgets import QMessageBox
 
-            # Clear data in database via services interface
-            self.services.db_manager.clear_activity_data()
+        # Confirmation dialog (consistent with other clear buttons)
+        reply = QMessageBox.question(
+            self,
+            "Clear Activity Data",
+            "Are you sure you want to clear ALL activity data?\n\n"
+            "This will remove all imported data, sleep markers, and metrics.\n"
+            "This action cannot be undone!",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
 
-            # Dispatch refresh action - FileListConnector will handle the reload
-            self.store.dispatch(Actions.refresh_files_requested())
+        if reply != QMessageBox.StandardButton.Yes:
+            return
 
-            # Dispatch state reset - connectors handle UI updates
-            self.store.dispatch(Actions.file_selected(None))
-            self.store.dispatch(Actions.dates_loaded([]))
+        from sleep_scoring_app.ui.store import Actions
 
-            # Note: Connectors handle plot clearing and status bar updates
-
-            self._show_activity_status("Activity data cleared successfully")
-            logger.info("Activity data cleared from database")
-        except Exception as e:
-            logger.exception("Failed to clear activity data")
-            self._show_activity_status(f"Error clearing data: {e}", error=True)
+        # Dispatch action - effect handler will perform the actual clearing and refresh
+        self.store.dispatch(Actions.clear_activity_data_requested())
 
     def _clear_nwt_data(self) -> None:
         """Clear all imported NWT sensor data from database."""

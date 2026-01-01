@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt
 
-from sleep_scoring_app.core.constants import UIColors
+from sleep_scoring_app.core.constants import MarkerEndpoint, MarkerPlacementState, SleepMarkerEndpoint, UIColors
 from sleep_scoring_app.core.dataclasses import (
     DailyNonwearMarkers,
     DailySleepMarkers,
@@ -167,7 +167,7 @@ class PlotMarkerRenderer:
         line = self.drawing_strategy.create_marker_line_no_add(timestamp, color, label, period, marker_type, is_selected)
 
         # Connect drag events for complete markers
-        if marker_type != "incomplete":
+        if marker_type != MarkerPlacementState.INCOMPLETE:
             line.sigPositionChangeFinished.connect(partial(self._on_marker_drag_finished_wrapper, line))
             line.sigPositionChanged.connect(partial(self._on_marker_dragged_wrapper, line))
             line.sigClicked.connect(partial(self._on_marker_clicked_wrapper, line))
@@ -189,7 +189,7 @@ class PlotMarkerRenderer:
         line = self.drawing_strategy.create_marker_line_no_add(timestamp, color, label, period, marker_type, is_selected)
 
         # Connect drag events for complete markers
-        if marker_type != "incomplete":
+        if marker_type != MarkerPlacementState.INCOMPLETE:
             line.sigPositionChangeFinished.connect(partial(self._on_marker_drag_finished_wrapper, line))
             line.sigPositionChanged.connect(partial(self._on_marker_dragged_wrapper, line))
             line.sigClicked.connect(partial(self._on_marker_clicked_wrapper, line))
@@ -220,8 +220,10 @@ class PlotMarkerRenderer:
             offset_label = f"Nap {nap_number} Offset"
 
         # Create markers (but don't add to plot yet)
-        onset_line = self.create_marker_line_no_add(period.onset_timestamp, onset_color, onset_label, period, "onset", is_selected)
-        offset_line = self.create_marker_line_no_add(period.offset_timestamp, offset_color, offset_label, period, "offset", is_selected)
+        onset_line = self.create_marker_line_no_add(period.onset_timestamp, onset_color, onset_label, period, SleepMarkerEndpoint.ONSET, is_selected)
+        offset_line = self.create_marker_line_no_add(
+            period.offset_timestamp, offset_color, offset_label, period, SleepMarkerEndpoint.OFFSET, is_selected
+        )
 
         return [onset_line, offset_line]
 
@@ -247,11 +249,11 @@ class PlotMarkerRenderer:
             offset_label = f"Nap {nap_number} Offset"
 
         # Draw onset marker
-        onset_line = self.create_marker_line(period.onset_timestamp, onset_color, onset_label, period, "onset", is_selected)
+        onset_line = self.create_marker_line(period.onset_timestamp, onset_color, onset_label, period, SleepMarkerEndpoint.ONSET, is_selected)
         self.marker_lines.append(onset_line)
 
         # Draw offset marker
-        offset_line = self.create_marker_line(period.offset_timestamp, offset_color, offset_label, period, "offset", is_selected)
+        offset_line = self.create_marker_line(period.offset_timestamp, offset_color, offset_label, period, SleepMarkerEndpoint.OFFSET, is_selected)
         self.marker_lines.append(offset_line)
 
     def draw_incomplete_marker(self, period: SleepPeriod) -> None:
@@ -271,7 +273,7 @@ class PlotMarkerRenderer:
             UIColors.INCOMPLETE_MARKER,  # Gray color for incomplete
             label,
             None,
-            "incomplete",
+            MarkerPlacementState.INCOMPLETE,
         )
         self.marker_lines.append(line)
 
@@ -459,11 +461,11 @@ class PlotMarkerRenderer:
                 # Get colors based on selection state
                 custom_colors = getattr(self.parent, "custom_colors", {})
                 if is_selected:
-                    if line.marker_type == "onset":
+                    if line.marker_type == SleepMarkerEndpoint.ONSET:
                         new_color = custom_colors.get("selected_onset", UIColors.SELECTED_MARKER_ONSET)
                     else:
                         new_color = custom_colors.get("selected_offset", UIColors.SELECTED_MARKER_OFFSET)
-                elif line.marker_type == "onset":
+                elif line.marker_type == SleepMarkerEndpoint.ONSET:
                     new_color = custom_colors.get("unselected_onset", UIColors.UNSELECTED_MARKER_ONSET)
                 else:
                     new_color = custom_colors.get("unselected_offset", UIColors.UNSELECTED_MARKER_OFFSET)
@@ -489,13 +491,13 @@ class PlotMarkerRenderer:
 
                 # Update label text
                 if is_main_sleep:
-                    if line.marker_type == "onset":
+                    if line.marker_type == SleepMarkerEndpoint.ONSET:
                         new_label = "Main Sleep Onset"
                     else:
                         new_label = "Main Sleep Offset"
                 else:
                     nap_number = self.get_nap_number(line.period)
-                    if line.marker_type == "onset":
+                    if line.marker_type == SleepMarkerEndpoint.ONSET:
                         new_label = f"Nap {nap_number} Onset"
                     else:
                         new_label = f"Nap {nap_number} Offset"
@@ -805,9 +807,9 @@ class PlotMarkerRenderer:
             return
 
         # Get current timestamp
-        if marker_type == "onset":
+        if marker_type == SleepMarkerEndpoint.ONSET:
             current_timestamp = selected_period.onset_timestamp
-        elif marker_type == "offset":
+        elif marker_type == SleepMarkerEndpoint.OFFSET:
             current_timestamp = selected_period.offset_timestamp
         else:
             return
@@ -820,12 +822,12 @@ class PlotMarkerRenderer:
             return
 
         # Update the timestamp
-        if marker_type == "onset":
+        if marker_type == SleepMarkerEndpoint.ONSET:
             if new_timestamp < selected_period.offset_timestamp:
                 selected_period.onset_timestamp = new_timestamp
             else:
                 return
-        elif marker_type == "offset":
+        elif marker_type == SleepMarkerEndpoint.OFFSET:
             if new_timestamp > selected_period.onset_timestamp:
                 selected_period.offset_timestamp = new_timestamp
             else:
@@ -854,7 +856,7 @@ class PlotMarkerRenderer:
         line = self.drawing_strategy.create_nonwear_marker_line(timestamp, color, label, period, marker_type, is_selected)
 
         # Connect drag events for complete markers
-        if marker_type != "incomplete":
+        if marker_type != MarkerPlacementState.INCOMPLETE:
             line.sigPositionChangeFinished.connect(partial(self._on_nonwear_marker_drag_finished_wrapper, line))
             line.sigPositionChanged.connect(partial(self._on_nonwear_marker_dragged_wrapper, line))
             line.sigClicked.connect(partial(self._on_nonwear_marker_clicked_wrapper, line))
@@ -888,11 +890,11 @@ class PlotMarkerRenderer:
         end_label = f"NW {period.marker_index} End"
 
         # Draw start marker
-        start_line = self.create_nonwear_marker_line(period.start_timestamp, start_color, start_label, period, "start", is_selected)
+        start_line = self.create_nonwear_marker_line(period.start_timestamp, start_color, start_label, period, MarkerEndpoint.START, is_selected)
         self.nonwear_marker_lines.append(start_line)
 
         # Draw end marker
-        end_line = self.create_nonwear_marker_line(period.end_timestamp, end_color, end_label, period, "end", is_selected)
+        end_line = self.create_nonwear_marker_line(period.end_timestamp, end_color, end_label, period, MarkerEndpoint.END, is_selected)
         self.nonwear_marker_lines.append(end_line)
 
     def draw_incomplete_nonwear_marker(self, period: ManualNonwearPeriod) -> None:
@@ -904,7 +906,7 @@ class PlotMarkerRenderer:
             UIColors.INCOMPLETE_MANUAL_NWT,
             label,
             None,
-            "incomplete",
+            MarkerPlacementState.INCOMPLETE,
         )
         self.nonwear_marker_lines.append(line)
 
@@ -1015,7 +1017,7 @@ class PlotMarkerRenderer:
                 is_selected = line.period.marker_index == self.selected_nonwear_marker_index
 
                 start_color, end_color = self._get_nonwear_marker_colors(is_selected)
-                if line.marker_type == "start":
+                if line.marker_type == MarkerEndpoint.START:
                     new_color = start_color
                 else:
                     new_color = end_color
@@ -1084,9 +1086,9 @@ class PlotMarkerRenderer:
             return
 
         # Get current timestamp
-        if marker_type == "start":
+        if marker_type == MarkerEndpoint.START:
             current_timestamp = selected_period.start_timestamp
-        elif marker_type == "end":
+        elif marker_type == MarkerEndpoint.END:
             current_timestamp = selected_period.end_timestamp
         else:
             return
@@ -1103,12 +1105,12 @@ class PlotMarkerRenderer:
         original_end = selected_period.end_timestamp
 
         # Update the timestamp
-        if marker_type == "start":
+        if marker_type == MarkerEndpoint.START:
             if new_timestamp < selected_period.end_timestamp:
                 selected_period.start_timestamp = new_timestamp
             else:
                 return
-        elif marker_type == "end":
+        elif marker_type == MarkerEndpoint.END:
             if new_timestamp > selected_period.start_timestamp:
                 selected_period.end_timestamp = new_timestamp
             else:

@@ -11,7 +11,6 @@ class DatabaseTable(StrEnum):
     """Database table names."""
 
     SLEEP_METRICS = "sleep_metrics"
-    AUTOSAVE_METRICS = "autosave_metrics"
     RAW_ACTIVITY_DATA = "raw_activity_data"
     FILE_REGISTRY = "file_registry"
     NONWEAR_SENSOR_PERIODS = "nonwear_sensor_periods"

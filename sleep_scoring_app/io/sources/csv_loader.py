@@ -139,7 +139,8 @@ class CSVDataSourceLoader:
         # Load CSV/Excel file
         try:
             if file_path.suffix.lower() == ".csv":
-                df = pd.read_csv(file_path, skiprows=skip_rows)
+                # Use skipinitialspace to handle CSVs with spaces after commas
+                df = pd.read_csv(file_path, skiprows=skip_rows, skipinitialspace=True)
             elif file_path.suffix.lower() in {".xlsx", ".xls"}:
                 df = pd.read_excel(file_path, skiprows=skip_rows)
             else:
@@ -155,6 +156,9 @@ class CSVDataSourceLoader:
         if df.empty:
             msg = f"No data in file: {file_path}"
             raise ValueError(msg)
+
+        # Strip whitespace from column names (handles trailing spaces and any missed leading spaces)
+        df.columns = df.columns.str.strip()
 
         # Detect or use custom column mapping
         if custom_columns:

@@ -219,6 +219,8 @@ class DateDropdownConnector:
             if not dates:
                 logger.info("DATE DROPDOWN CONNECTOR: No dates in state, disabling dropdown")
                 dropdown.addItem("No dates available")
+                # Center the "No dates available" item as well
+                dropdown.setItemData(0, Qt.AlignmentFlag.AlignCenter, Qt.ItemDataRole.TextAlignmentRole)
                 dropdown.setEnabled(False)
                 return
 
@@ -298,6 +300,9 @@ class DateDropdownConnector:
                     # Reset to explicit black color (None doesn't work properly on Windows)
                     dropdown.setItemData(i, default_color, Qt.ItemDataRole.ForegroundRole)
 
+                # Center-align each dropdown list item (CSS text-align doesn't work for QListView)
+                dropdown.setItemData(i, Qt.AlignmentFlag.AlignCenter, Qt.ItemDataRole.TextAlignmentRole)
+
             # Update line edit color for current selection (preserves original stylesheet)
             line_edit = dropdown.lineEdit()
             if line_edit:
@@ -314,6 +319,8 @@ class DateDropdownConnector:
                         palette = line_edit.palette()
                         palette.setColor(QPalette.ColorRole.Text, default_color)
                         line_edit.setPalette(palette)
+                    # Force immediate repaint to show color change
+                    line_edit.update()
 
         except Exception as e:
             logger.debug(f"CONNECTOR: Error updating visuals: {e}")
@@ -448,7 +455,16 @@ class FileTableConnector:
             # Use QTimer to avoid dispatch-in-dispatch error
             from PyQt6.QtCore import QTimer
 
-            QTimer.singleShot(0, lambda: self.main_window.data_service.load_available_files(preserve_selection=True, load_completion_counts=True))
+            def refresh_files():
+                # Service is headless - provide callback to dispatch to store
+                from sleep_scoring_app.ui.store import Actions
+
+                def on_files_loaded(files):
+                    self.main_window.store.dispatch(Actions.files_loaded(files))
+
+                self.main_window.data_service.load_available_files(load_completion_counts=True, on_files_loaded=on_files_loaded)
+
+            QTimer.singleShot(0, refresh_files)
 
     def disconnect(self) -> None:
         """Cleanup subscription."""
@@ -903,6 +919,235 @@ class DiaryTableConnector:
         self._unsubscribe()
 
 
+class PlotDataConnector:
+    """
+    Connects the PlotWidget to activity data in the Redux store.
+
+    ARCHITECTURE FIX: PlotWidget receives data FROM store, not from MainWindow.
+    - Subscribes to activity_timestamps changes in store
+    - Updates PlotWidget with data from store
+    - No caching in PlotWidget - store is single source of truth
+    """
+
+    def __init__(self, store: UIStore, main_window: MainWindowProtocol) -> None:
+        self.store = store
+        self.main_window = main_window
+        self._unsubscribe = store.subscribe(self._on_state_change)
+
+        logger.info("PLOT DATA CONNECTOR: Initialized")
+
+    def _on_state_change(self, old_state: UIState, new_state: UIState) -> None:
+        """React to activity data changes by updating plot widget."""
+        # Check if activity data changed
+        data_changed = old_state.activity_timestamps != new_state.activity_timestamps
+
+        if data_changed and new_state.activity_timestamps:
+            logger.info(f"PLOT DATA CONNECTOR: Activity data changed. timestamps={len(new_state.activity_timestamps)}, updating plot")
+            self._update_plot(new_state)
+
+    def _update_plot(self, state: UIState) -> None:
+        """Update plot widget with data from store."""
+        pw = self.main_window.plot_widget
+        if not pw:
+            logger.warning("PLOT DATA CONNECTOR: No plot widget available")
+            return
+
+        # Convert tuples back to lists for widget compatibility
+        timestamps = list(state.activity_timestamps)
+        axis_y = list(state.axis_y_data)
+        vector_magnitude = list(state.vector_magnitude_data)
+
+        if not timestamps:
+            logger.warning("PLOT DATA CONNECTOR: No timestamps in state")
+            return
+
+        # Determine which column to display based on preference
+        preferred = state.preferred_display_column
+        if preferred == "vector_magnitude" and vector_magnitude:
+            display_data = vector_magnitude
+            column_type = "VECTOR_MAGNITUDE"
+        else:  # axis_y (default)
+            display_data = axis_y
+            column_type = "AXIS_Y"
+
+        logger.info(f"PLOT DATA CONNECTOR: Updating plot with {len(timestamps)} points, display_column={preferred}, column_type={column_type}")
+
+        # Get current date for display
+        current_date = None
+        if 0 <= state.current_date_index < len(state.available_dates):
+            from datetime import date
+
+            current_date = date.fromisoformat(state.available_dates[state.current_date_index])
+
+        # Call the plot update method FIRST
+        # (it will clear algorithm data, which is fine - we set axis_y after)
+        pw.set_data_and_restrictions(
+            timestamps=timestamps,
+            activity_data=display_data,
+            view_hours=state.view_mode_hours,  # Use actual view mode from store
+            skip_nonwear_plotting=True,  # Skip algorithms for now - we'll set axis_y and trigger manually
+            filename=state.current_file,
+            activity_column_type=column_type,
+            current_date=current_date,
+        )
+
+        # CRITICAL: Store axis_y data AFTER set_data_and_restrictions
+        # (set_data_and_restrictions clears main_48h_axis_y_data, so we must set it after)
+        pw.main_48h_axis_y_data = axis_y
+        pw.main_48h_axis_y_timestamps = timestamps  # SAME timestamps - no alignment bug
+
+        # Load nonwear data for plot (Choi algorithm, sensor data)
+        # This was previously called by load_current_date() after updating plot
+        self.main_window.load_nonwear_data_for_plot()
+
+        # Now run algorithms with the axis_y data properly set
+        pw.plot_algorithms()
+
+    def disconnect(self) -> None:
+        """Cleanup subscription."""
+        self._unsubscribe()
+
+
+class ActivityDataConnector:
+    """
+    Connects activity data loading to the Redux store.
+
+    ARCHITECTURE FIX: This connector is the SOLE AUTHORITY for loading activity data.
+    - Subscribes to file/date selection changes
+    - Calls data service DIRECTLY (not through MainWindow)
+    - Dispatches ALL columns to store (timestamps, axis_x, axis_y, axis_z, vector_magnitude)
+    - Store becomes single source of truth for activity data
+
+    This eliminates the data alignment bug where timestamps and sadeh results had different lengths.
+    """
+
+    def __init__(self, store: UIStore, main_window: MainWindowProtocol) -> None:
+        self.store = store
+        self.main_window = main_window
+        self._last_date_str: str | None = None
+        self._last_file: str | None = None
+        self._unsubscribe = store.subscribe(self._on_state_change)
+
+        logger.info("ACTIVITY DATA CONNECTOR: Initialized")
+
+    def _on_state_change(self, old_state: UIState, new_state: UIState) -> None:
+        """React to file/date/config changes by loading activity data."""
+        # Calculate current date string
+        current_date_str = None
+        if 0 <= new_state.current_date_index < len(new_state.available_dates):
+            current_date_str = new_state.available_dates[new_state.current_date_index]
+
+        # Check what changed
+        file_changed = new_state.current_file != self._last_file
+        date_changed = current_date_str != self._last_date_str
+        config_changed = (
+            old_state.auto_calibrate_enabled != new_state.auto_calibrate_enabled
+            or old_state.impute_gaps_enabled != new_state.impute_gaps_enabled
+            or old_state.preferred_display_column != new_state.preferred_display_column
+        )
+
+        should_reload = (file_changed or date_changed or config_changed) and new_state.current_file and current_date_str
+
+        if should_reload:
+            logger.info(
+                f"ACTIVITY DATA CONNECTOR: Loading data. file_changed={file_changed}, "
+                f"date_changed={date_changed}, config_changed={config_changed}, "
+                f"file={new_state.current_file}, date={current_date_str}"
+            )
+            self._last_file = new_state.current_file
+            self._last_date_str = current_date_str
+            self._load_activity_data(new_state)
+
+    def _load_activity_data(self, state: UIState) -> None:
+        """
+        Load unified activity data and dispatch to store.
+
+        Calls data service DIRECTLY - no MainWindow intermediary.
+        """
+        from datetime import date
+
+        from sleep_scoring_app.ui.store import Actions
+
+        if not state.current_file or state.current_date_index < 0:
+            logger.warning("ACTIVITY DATA CONNECTOR: Cannot load - no file or date selected")
+            return
+
+        if state.current_date_index >= len(state.available_dates):
+            logger.warning("ACTIVITY DATA CONNECTOR: Date index out of range")
+            return
+
+        date_str = state.available_dates[state.current_date_index]
+        target_date = date.fromisoformat(date_str)
+
+        try:
+            # Call data service DIRECTLY (not through MainWindow)
+            data_manager = self.main_window.data_service.data_manager
+            loading_service = data_manager._loading_service
+
+            # Load ALL columns in ONE query - unified data
+            unified_data = loading_service.load_unified_activity_data(
+                state.current_file,
+                target_date,
+                hours=48,
+            )
+
+            if not unified_data or not unified_data.get("timestamps"):
+                logger.warning("ACTIVITY DATA CONNECTOR: Unified load returned no data")
+                # Dispatch empty data - use dispatch_safe (sync when possible)
+                self.store.dispatch_safe(
+                    Actions.activity_data_loaded(
+                        timestamps=[],
+                        axis_x=[],
+                        axis_y=[],
+                        axis_z=[],
+                        vector_magnitude=[],
+                    )
+                )
+                return
+
+            # Dispatch ALL columns to store - store is now single source of truth
+            timestamps = unified_data["timestamps"]
+            axis_x = unified_data.get("axis_x", [])
+            axis_y = unified_data.get("axis_y", [])
+            axis_z = unified_data.get("axis_z", [])
+            vector_magnitude = unified_data.get("vector_magnitude", [])
+
+            logger.info(
+                f"ACTIVITY DATA CONNECTOR: Loaded {len(timestamps)} rows. "
+                f"Dispatching to store: timestamps={len(timestamps)}, "
+                f"axis_x={len(axis_x)}, axis_y={len(axis_y)}, "
+                f"axis_z={len(axis_z)}, vm={len(vector_magnitude)}"
+            )
+
+            # Use dispatch_safe - sync when possible, async only if already in dispatch
+            self.store.dispatch_safe(
+                Actions.activity_data_loaded(
+                    timestamps=list(timestamps),
+                    axis_x=list(axis_x),
+                    axis_y=list(axis_y),
+                    axis_z=list(axis_z),
+                    vector_magnitude=list(vector_magnitude),
+                )
+            )
+
+        except Exception as e:
+            logger.exception(f"ACTIVITY DATA CONNECTOR: Error loading data: {e}")
+            # Dispatch empty data on error
+            self.store.dispatch_safe(
+                Actions.activity_data_loaded(
+                    timestamps=[],
+                    axis_x=[],
+                    axis_y=[],
+                    axis_z=[],
+                    vector_magnitude=[],
+                )
+            )
+
+    def disconnect(self) -> None:
+        """Cleanup subscription."""
+        self._unsubscribe()
+
+
 class NavigationConnector:
     """Connects date navigation changes to the UI loading logic."""
 
@@ -936,7 +1181,12 @@ class NavigationConnector:
             self._update_navigation(new_state)
 
     def _update_navigation(self, state: UIState) -> None:
-        """Update buttons and load data for new date index."""
+        """
+        Update UI buttons and dropdowns for new date index.
+
+        ARCHITECTURE: This connector ONLY updates UI state (buttons, dropdowns).
+        Data loading is handled by ActivityDataConnector → Store → PlotDataConnector.
+        """
         logger.info(f"NAVIGATION CONNECTOR: Updating for index {state.current_date_index} of {len(state.available_dates)} dates")
 
         # Sync UI components - Protocol guarantees these exist on AnalysisTabProtocol
@@ -953,10 +1203,8 @@ class NavigationConnector:
             tab.date_dropdown.setCurrentIndex(state.current_date_index)
             tab.date_dropdown.blockSignals(False)
 
-        # Trigger data loading - NavigationInterface guarantees load_current_date exists
+        # Clear old markers before new data loads
         if state.current_date_index != -1:
-            # FIRST: Clear old markers from widget to prevent them showing on new plot data
-            # NOTE: Do NOT clear adjacent_day_markers here - AdjacentMarkersConnector handles those
             pw = self.main_window.plot_widget
             if pw:
                 pw.clear_sleep_markers()
@@ -964,13 +1212,12 @@ class NavigationConnector:
                 pw.clear_sleep_onset_offset_markers()
                 logger.info("NAVIGATION CONNECTOR: Cleared sleep/nonwear markers before loading new date")
 
-            logger.info(f"NAVIGATION CONNECTOR: Triggering load_current_date() for index {state.current_date_index}")
-            self.main_window.load_current_date()
-            # NOTE: Marker loading is handled by MarkerLoadingCoordinator, not here
-            # Connectors should NOT dispatch actions - that's a Coordinator's job
+            # NOTE: DO NOT call load_current_date() here!
+            # ActivityDataConnector subscribes to date changes and loads data → dispatches to store
+            # PlotDataConnector subscribes to store data changes → updates plot
+            # This eliminates the duplicate data loading path that caused alignment bugs
 
             # Update activity source dropdown enabled state
-            # Protocol guarantees update_activity_source_dropdown exists on AnalysisTabProtocol
             if tab:
                 tab.update_activity_source_dropdown()
 
@@ -1107,12 +1354,24 @@ class ViewModeConnector:
         tab.view_24h_btn.blockSignals(False)
         tab.view_48h_btn.blockSignals(False)
 
-        # Update plot widget
-        if self.main_window.plot_widget:
-            self.main_window.plot_widget.current_view_hours = hours
-            # Re-load data - NavigationInterface guarantees load_current_date exists
-            logger.info(f"VIEW MODE CONNECTOR: Triggering load_current_date() for {hours}h view")
-            self.main_window.load_current_date()
+        # Update plot widget view range (data is already loaded by ActivityDataConnector)
+        pw = self.main_window.plot_widget
+        if pw and pw.timestamps:
+            pw.current_view_hours = hours
+
+            # Recalculate view bounds based on new mode
+            from datetime import date
+
+            state = self.store.state
+            current_date = None
+            if 0 <= state.current_date_index < len(state.available_dates):
+                current_date = date.fromisoformat(state.available_dates[state.current_date_index])
+
+            if current_date:
+                # Update view range on plot (this also recalculates bounds)
+                pw.update_view_range_only(hours, current_date)
+
+            logger.info(f"VIEW MODE CONNECTOR: Updated view hours to {hours}h and recalculated bounds")
 
     def disconnect(self) -> None:
         """Cleanup subscription."""
@@ -1223,10 +1482,10 @@ class AlgorithmConfigConnector:
 
         if changed:
             self._update_ui(new_state)
-            # Trigger data reload if a file is currently loaded
+            # NOTE: DO NOT call load_current_date() here!
+            # ActivityDataConnector watches for config changes and reloads data automatically
             if new_state.current_file:
-                logger.info("Algorithm config changed, reloading current date...")
-                self.main_window.load_current_date()
+                logger.info("Algorithm config changed - ActivityDataConnector will reload data")
 
     def _update_ui(self, state: UIState) -> None:
         """Update checkboxes in DataSettingsTab."""
@@ -1385,7 +1644,16 @@ class StudySettingsConnector:
                 # Update table headers to reflect new algorithm name
                 if "sleep_algorithm_id" in changed_fields:
                     if self.main_window.table_manager:
-                        self.main_window.table_manager.update_table_headers_for_algorithm()
+                        # Force update - we know the algorithm just changed
+                        self.main_window.table_manager.update_table_headers_for_algorithm(force=True)
+
+                    # Update algorithm compatibility status in status bar
+                    if self.main_window.compatibility_helper:
+                        self.main_window.compatibility_helper.on_algorithm_changed(algo_id)
+
+                # CRITICAL: Refresh marker tables with new algorithm values
+                # The table data contains algorithm scores which need recalculation
+                self._refresh_marker_tables_for_selection(selected)
 
         # 2. Paradigm Change
         # Protocol guarantees data_settings_tab exists with update_loaders_for_paradigm method
@@ -1426,6 +1694,28 @@ class StudySettingsConnector:
 
             pw.update()
             logger.info("Updated nonwear detection due to setting change")
+
+    def _refresh_marker_tables_for_selection(self, selected_period: Any | None) -> None:
+        """
+        Refresh marker tables with recalculated algorithm values.
+
+        Called after algorithm or rule changes to update the table data
+        which contains algorithm scores at each epoch.
+        """
+        from sleep_scoring_app.core.constants import MarkerCategory
+
+        # Only update tables in SLEEP mode
+        if self.store.state.marker_mode != MarkerCategory.SLEEP:
+            return
+
+        if selected_period and selected_period.is_complete:
+            # Get fresh data with new algorithm values
+            onset_data = self.main_window._get_marker_data_cached(selected_period.onset_timestamp, None)
+            offset_data = self.main_window._get_marker_data_cached(selected_period.offset_timestamp, None)
+
+            if onset_data or offset_data:
+                self.main_window.update_marker_tables(onset_data, offset_data)
+                logger.info("Refreshed marker tables with new algorithm values")
 
     def disconnect(self) -> None:
         """Cleanup subscription."""
@@ -1878,14 +2168,22 @@ class SideEffectConnector:
 
     def _on_state_change(self, old_state: UIState, new_state: UIState) -> None:
         """
-        Check if a 'Requested' action was dispatched.
-        In a real Redux middleware, we'd intercept the action.
-        Here, we check the state for 'request flags' or simply react to the intent.
+        React to pending request flags set by reducer.
+
+        Architecture: Widget dispatches action → Reducer sets pending flag →
+        Effect handler sees flag, performs side effect, clears flag.
         """
-        # For this refactor, we'll use a direct signal-to-effect approach
-        # in the individual connectors, but this class serves as the architectural
-        # home for future complex side effects.
-        pass
+        from sleep_scoring_app.ui.store import Actions
+
+        # Handle pending refresh files request
+        if new_state.pending_refresh_files and not old_state.pending_refresh_files:
+            self.handle_refresh_files()
+            self.store.dispatch(Actions.pending_request_cleared("refresh_files"))
+
+        # Handle pending clear activity request
+        if new_state.pending_clear_activity and not old_state.pending_clear_activity:
+            self.handle_clear_activity_data()
+            self.store.dispatch(Actions.pending_request_cleared("clear_activity"))
 
     def handle_refresh_files(self) -> None:
         """Orchestrate file discovery and update Store."""
@@ -1900,6 +2198,27 @@ class SideEffectConnector:
 
             self.store.dispatch(Actions.files_loaded(files))
             logger.info(f"SIDE EFFECT: Refresh complete. Found {len(files)} files.")
+
+    def handle_clear_activity_data(self) -> None:
+        """Orchestrate clearing all activity data and refreshing file list."""
+        logger.info("SIDE EFFECT: Clearing activity data...")
+        from sleep_scoring_app.ui.store import Actions
+
+        try:
+            # 1. Service clears the data
+            if self.main_window.db_manager:
+                deleted_count = self.main_window.db_manager.clear_activity_data()
+                logger.info(f"SIDE EFFECT: Cleared {deleted_count} activity records")
+
+            # 2. Reset state via store
+            self.store.dispatch(Actions.file_selected(None))
+            self.store.dispatch(Actions.dates_loaded([]))
+
+            # 3. Refresh file list
+            self.handle_refresh_files()
+
+        except Exception as e:
+            logger.exception("Failed to clear activity data: %s", e)
 
     def handle_delete_files(self, filenames: list[str]) -> None:
         """Orchestrate file deletion and refresh."""
@@ -1961,6 +2280,8 @@ class StoreConnectorManager:
             AdjacentMarkersConnector(self.store, self.main_window),
             AlgorithmConfigConnector(self.store, self.main_window),
             DiaryTableConnector(self.store, self.main_window),
+            ActivityDataConnector(self.store, self.main_window),  # CRITICAL: Loads unified data to store
+            PlotDataConnector(self.store, self.main_window),  # CRITICAL: Updates plot from store
             NavigationConnector(self.store, self.main_window),
             NavigationGuardConnector(self.store, self.main_window),  # Intercepts nav signals
             ViewModeConnector(self.store, self.main_window),

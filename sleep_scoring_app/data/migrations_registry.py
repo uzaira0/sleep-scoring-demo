@@ -59,7 +59,6 @@ class Migration001InitialSchema(Migration):
             DatabaseTable.NONWEAR_SENSOR_PERIODS,
             DatabaseTable.RAW_ACTIVITY_DATA,
             DatabaseTable.FILE_REGISTRY,
-            DatabaseTable.AUTOSAVE_METRICS,
             DatabaseTable.SLEEP_METRICS,
         ]
 

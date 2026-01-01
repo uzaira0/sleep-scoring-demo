@@ -256,27 +256,53 @@ class PlotAlgorithmManager:
         # Check if results are already cached
         if cache_key in self._algorithm_cache:
             cached_results = self._algorithm_cache[cache_key]
-            self.main_48h_sadeh_results = cached_results["sadeh"]
-            logger.debug("Using cached 48hr algorithm results for %s", cache_key)
+            cached_sadeh = cached_results["sadeh"]
+            cached_timestamps = cached_results.get("timestamps")
 
-            # CRITICAL FIX: Ensure axis_y timestamps are loaded even on cache hit
-            # Without this, _extract_view_subset_from_main_results() will fail
-            # because main_48h_axis_y_timestamps is cleared on each load_current_date
-            if self.parent.main_48h_axis_y_timestamps is None:
-                # Force load axis_y data which also sets the timestamps
-                self.parent._get_axis_y_data_for_sadeh()
-                logger.debug("Loaded axis_y timestamps on cache hit")
-
-            self._extract_view_subset_from_main_results()
-            return
+            # CRITICAL: Restore BOTH sadeh results AND timestamps from cache together
+            # This guarantees they are aligned (they were saved together from the same load)
+            if cached_timestamps is not None and len(cached_timestamps) == len(cached_sadeh):
+                self.main_48h_sadeh_results = cached_sadeh
+                # CRITICAL: Set BOTH timestamp stores to ensure consistency
+                self.parent.main_48h_axis_y_timestamps = cached_timestamps
+                self.parent.main_48h_sadeh_timestamps = cached_timestamps  # For apply_sleep_scoring_rules
+                self.main_48h_axis_y_data = cached_results.get("axis_y_data")
+                logger.debug(
+                    "Using cached 48hr algorithm results: %d sadeh, %d timestamps",
+                    len(cached_sadeh),
+                    len(cached_timestamps),
+                )
+                self._extract_view_subset_from_main_results()
+                return
+            # Cache is incomplete or corrupted - invalidate and reload
+            logger.warning(
+                "Cache incomplete (timestamps=%s, sadeh=%s) - invalidating",
+                len(cached_timestamps) if cached_timestamps else None,
+                len(cached_sadeh),
+            )
+            del self._algorithm_cache[cache_key]
 
         logger.debug("Running algorithms on 48hr main data")
 
         # Get axis_y data specifically for Sadeh algorithm
-        if self.main_48h_axis_y_data is not None:
+        # CRITICAL: Always use _get_axis_y_data_for_sadeh() which validates alignment
+        # between cached data and timestamps. Do NOT bypass with direct cache access.
+        axis_y_timestamps = self.parent.main_48h_axis_y_timestamps
+        if (
+            self.main_48h_axis_y_data is not None
+            and len(self.main_48h_axis_y_data) > 0
+            and axis_y_timestamps is not None
+            and len(axis_y_timestamps) == len(self.main_48h_axis_y_data)
+        ):
             axis_y_data = self.main_48h_axis_y_data
-            logger.debug("AXIS_Y CACHE HIT: Using cached axis_y data with %d points for Sadeh", len(axis_y_data))
+            logger.debug("AXIS_Y CACHE HIT: Using cached axis_y data with %d points (timestamps: %d)", len(axis_y_data), len(axis_y_timestamps))
         else:
+            # Cache invalid or missing - reload from unified loader
+            logger.debug(
+                "AXIS_Y CACHE MISS: data=%s, timestamps=%s - reloading",
+                len(self.main_48h_axis_y_data) if self.main_48h_axis_y_data else None,
+                len(axis_y_timestamps) if axis_y_timestamps else None,
+            )
             axis_y_data = self.parent._get_axis_y_data_for_sadeh()
             self.main_48h_axis_y_data = axis_y_data
             logger.debug("AXIS_Y CACHE MISS: Loaded fresh axis_y data with %d points for Sadeh", len(axis_y_data) if axis_y_data else 0)
@@ -311,11 +337,13 @@ class PlotAlgorithmManager:
                     len(axis_y_data),
                 )
                 self.main_48h_sadeh_results = []
+                self.parent.main_48h_sadeh_timestamps = []  # Clear alongside results
                 self._extract_view_subset_from_main_results()
                 return
         else:
             logger.error("No axis_y timestamps available - cannot run Sadeh algorithm")
             self.main_48h_sadeh_results = []
+            self.parent.main_48h_sadeh_timestamps = []  # Clear alongside results
             self._extract_view_subset_from_main_results()
             return
 
@@ -323,16 +351,23 @@ class PlotAlgorithmManager:
         algorithm = self.get_sleep_scoring_algorithm()
         logger.debug("Running sleep scoring algorithm: %s", algorithm.name)
         self.main_48h_sadeh_results = algorithm.score_array(axis_y_data, sadeh_timestamps)
+        # CRITICAL: Store sadeh timestamps WITH sadeh results - they must stay together
+        self.parent.main_48h_sadeh_timestamps = list(sadeh_timestamps)
         logger.debug("Sleep scoring algorithm returned %d results", len(self.main_48h_sadeh_results) if self.main_48h_sadeh_results else 0)
 
         self._extract_view_subset_from_main_results()
 
-        # Cache results (limit to 5)
+        # Cache results WITH timestamps and axis_y_data (limit to 5)
+        # CRITICAL: Store all three together so they stay aligned on cache restore
         if len(self._algorithm_cache) >= 5:
             oldest_key = next(iter(self._algorithm_cache))
             del self._algorithm_cache[oldest_key]
 
-        self._algorithm_cache[cache_key] = {"sadeh": self.main_48h_sadeh_results}
+        self._algorithm_cache[cache_key] = {
+            "sadeh": self.main_48h_sadeh_results,
+            "timestamps": list(sadeh_timestamps),  # Store timestamps with results
+            "axis_y_data": list(axis_y_data),  # Store axis_y_data with results
+        }
 
     def _extract_view_subset_from_main_results(self) -> None:
         """Extract the current view subset from main 48hr algorithm results."""
@@ -358,8 +393,12 @@ class PlotAlgorithmManager:
 
         # Performance optimization: Convert to unix timestamps for faster matching
         try:
-            main_ts_array = np.array([ts.timestamp() if hasattr(ts, "timestamp") else ts for ts in main_axis_y_timestamps])  # KEEP: Duck typing for datetime
-            current_ts_array = np.array([ts.timestamp() if hasattr(ts, "timestamp") else ts for ts in self.timestamps])  # KEEP: Duck typing for datetime
+            main_ts_array = np.array(
+                [ts.timestamp() if hasattr(ts, "timestamp") else ts for ts in main_axis_y_timestamps]
+            )  # KEEP: Duck typing for datetime
+            current_ts_array = np.array(
+                [ts.timestamp() if hasattr(ts, "timestamp") else ts for ts in self.timestamps]
+            )  # KEEP: Duck typing for datetime
 
             # Map indices using searchsorted (assuming main_ts_array is sorted)
             indices = np.searchsorted(main_ts_array, current_ts_array)
@@ -419,22 +458,30 @@ class PlotAlgorithmManager:
     def apply_sleep_scoring_rules(self, main_sleep_period: SleepPeriod) -> None:
         """Apply onset/offset detection rules to selected marker set using injected rule."""
         selected_period = self.parent.get_selected_marker_period()
-        if not selected_period or not selected_period.is_complete or not self.parent.sadeh_results:
-            logger.debug("apply_sleep_scoring_rules: No selected period or sadeh_results")
+        if not selected_period or not selected_period.is_complete:
+            logger.debug("apply_sleep_scoring_rules: No selected period")
             return
 
-        if not self.sadeh_results or len(self.sadeh_results) == 0:
-            logger.debug("apply_sleep_scoring_rules: sadeh_results is empty")
+        # Use MAIN 48hr data for detection, not view subset
+        # This ensures we find the correct onset/offset even if they fall outside current view
+        main_sadeh = self.main_48h_sadeh_results
+        # CRITICAL: Use main_48h_sadeh_timestamps which is set TOGETHER with sadeh_results
+        # This guarantees they are aligned, unlike main_48h_axis_y_timestamps which can change
+        main_timestamps = getattr(self.parent, "main_48h_sadeh_timestamps", None)
+
+        if not main_sadeh or len(main_sadeh) == 0:
+            logger.debug("apply_sleep_scoring_rules: main_48h_sadeh_results is empty")
             return
 
-        # CRITICAL: sadeh_results are indexed based on main_48h_axis_y_timestamps
-        # We MUST use those same timestamps for the detector, not x_data
-        axis_y_timestamps = getattr(self.parent, "main_48h_axis_y_timestamps", None)
-        if not axis_y_timestamps or len(axis_y_timestamps) != len(self.sadeh_results):
-            logger.warning(
-                "apply_sleep_scoring_rules: axis_y_timestamps mismatch - timestamps=%s, sadeh_results=%s",
-                len(axis_y_timestamps) if axis_y_timestamps else 0,
-                len(self.sadeh_results),
+        if not main_timestamps or len(main_timestamps) != len(main_sadeh):
+            # This should NEVER happen now that we store sadeh_timestamps with sadeh_results.
+            # If it does, there's a bug in the algorithm manager.
+            logger.error(
+                "CRITICAL DATA ALIGNMENT BUG: timestamp/sadeh mismatch detected! "
+                "timestamps=%s, sadeh=%s. "
+                "main_48h_sadeh_timestamps should always match main_48h_sadeh_results.",
+                len(main_timestamps) if main_timestamps else 0,
+                len(main_sadeh),
             )
             return
 
@@ -447,23 +494,23 @@ class PlotAlgorithmManager:
         sleep_start_time = datetime.fromtimestamp(selected_period.onset_timestamp)
         sleep_end_time = datetime.fromtimestamp(selected_period.offset_timestamp)
 
-        # Apply detector via protocol - use axis_y timestamps that match sadeh_results
+        # Apply detector using MAIN 48hr data (timestamps match sadeh_results)
         onset_idx, offset_idx = detector.apply_rules(
-            sleep_scores=self.sadeh_results,
+            sleep_scores=main_sadeh,
             sleep_start_marker=sleep_start_time,
             sleep_end_marker=sleep_end_time,
-            timestamps=axis_y_timestamps,
+            timestamps=main_timestamps,
         )
 
-        # Create visual markers using axis_y timestamps (they're datetime objects)
-        if onset_idx is not None and onset_idx < len(axis_y_timestamps):
-            onset_ts = axis_y_timestamps[onset_idx]
+        # Create visual markers using main timestamps (they're datetime objects)
+        if onset_idx is not None and onset_idx < len(main_timestamps):
+            onset_ts = main_timestamps[onset_idx]
             # Convert datetime to Unix timestamp for plotting
             onset_unix = onset_ts.timestamp() if hasattr(onset_ts, "timestamp") else onset_ts  # KEEP: Duck typing plot/marker attributes
             self.create_sleep_onset_marker(onset_unix, detector)
 
-        if offset_idx is not None and offset_idx < len(axis_y_timestamps):
-            offset_ts = axis_y_timestamps[offset_idx]
+        if offset_idx is not None and offset_idx < len(main_timestamps):
+            offset_ts = main_timestamps[offset_idx]
             # Convert datetime to Unix timestamp for plotting
             offset_unix = offset_ts.timestamp() if hasattr(offset_ts, "timestamp") else offset_ts  # KEEP: Duck typing plot/marker attributes
             self.create_sleep_offset_marker(offset_unix, detector)

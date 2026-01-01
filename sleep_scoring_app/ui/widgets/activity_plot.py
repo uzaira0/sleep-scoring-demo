@@ -18,9 +18,11 @@ from PyQt6.QtGui import QFont, QKeyEvent
 from sleep_scoring_app.core.constants import (
     ActivityDataPreference,
     MarkerCategory,
+    MarkerEndpoint,
     MarkerLimits,
     NonwearAlgorithm,
     NonwearDataSource,
+    SleepMarkerEndpoint,
     UIColors,
 )
 from sleep_scoring_app.core.dataclasses import (
@@ -157,7 +159,13 @@ class ActivityPlotWidget(pg.PlotWidget):
         self.main_48h_timestamps = None
         self.main_48h_activity = None
         self.main_48h_sadeh_results = None
+        # CRITICAL: Sadeh timestamps MUST be stored alongside sadeh_results
+        # This ensures apply_sleep_scoring_rules uses matching data
+        self.main_48h_sadeh_timestamps: list[datetime] | None = None
         self.main_48h_axis_y_data = None
+        # CRITICAL: axis_y timestamps must ONLY be set by _get_axis_y_data_for_sadeh()
+        # which uses AlignedActivityData to guarantee alignment with axis_y_data
+        self.main_48h_axis_y_timestamps: list[datetime] | None = None
         self._cached_48h_vm_data = None
         self.sadeh_results = None  # Current view Sadeh results
 
@@ -429,7 +437,9 @@ class ActivityPlotWidget(pg.PlotWidget):
             self.main_48h_timestamps = None
             self.main_48h_activity = None
             self.main_48h_sadeh_results = None
+            self.main_48h_sadeh_timestamps = None  # CRITICAL: Clear alongside sadeh_results
             self.main_48h_axis_y_data = None
+            self.main_48h_axis_y_timestamps = None
             self._cached_48h_vm_data = None
             self._last_mouse_pos = None
 
@@ -545,9 +555,16 @@ class ActivityPlotWidget(pg.PlotWidget):
         if view_hours == 48:
             self.main_48h_timestamps = timestamps
             self.main_48h_activity = activity_data
-            self.main_48h_axis_y_data = None  # Will be set when needed
-            self._cached_48h_vm_data = None  # Clear VM cache for fresh load
-            logger.debug("Stored 48hr main data: %d timestamps", len(timestamps) if timestamps else 0)
+            # CRITICAL: Clear ALL algorithm-related data to force fresh reload
+            self.main_48h_axis_y_data = None
+            self.main_48h_axis_y_timestamps = None
+            self.main_48h_sadeh_results = None
+            self.main_48h_sadeh_timestamps = None  # Must clear alongside sadeh_results
+            self._cached_48h_vm_data = None
+            # Also clear algorithm manager's caches
+            if hasattr(self, "algorithm_manager") and self.algorithm_manager:
+                self.algorithm_manager._algorithm_cache.clear()
+            logger.debug("Stored 48hr main data: %d timestamps, cleared all algorithm caches", len(timestamps) if timestamps else 0)
 
         # Store column type for later reference
         self.activity_column_type = activity_column_type
@@ -625,6 +642,10 @@ class ActivityPlotWidget(pg.PlotWidget):
         start_time = expected_start.timestamp()
         end_time = expected_end.timestamp()
 
+        # Update data boundaries for marker validation
+        self.data_start_time = start_time
+        self.data_end_time = end_time
+
         # Set Y-axis boundaries based on actual data within view range
         if self.activity_data and self.timestamps:
             # Find data within the view range
@@ -669,8 +690,6 @@ class ActivityPlotWidget(pg.PlotWidget):
         # ALWAYS update timestamps - different dates have different timestamp values
         # even if they have the same number of data points
         self.timestamps = timestamps
-        # Invalidate the cached unix timestamps so marker snapping uses correct values
-        self._cached_unix_timestamps = None
         if timestamps:
             self.x_data = np.array([ts.timestamp() for ts in timestamps])
         else:
@@ -718,8 +737,13 @@ class ActivityPlotWidget(pg.PlotWidget):
         if view_hours == 48:
             self.main_48h_timestamps = timestamps
             self.main_48h_activity = activity_data
-            # Also set axis_y timestamps for algorithm plotting (Sadeh needs this)
-            self.main_48h_axis_y_timestamps = timestamps
+            # CRITICAL FIX: Do NOT set axis_y timestamps here!
+            # main_48h_axis_y_timestamps must ONLY be set by the unified axis_y loader
+            # in main_window._get_axis_y_data_for_sadeh() which uses AlignedActivityData
+            # to guarantee timestamps and data are aligned.
+            # Setting it here from display data (which could be vector_magnitude) causes
+            # the 2880 vs 2460 mismatch bug where timestamps come from one source but
+            # sadeh_results come from axis_y with potentially different row counts.
         # Don't clear axis_y cache - it's independent of what we're displaying
         logger.debug("Stored 48hr reference data: %d timestamps", len(timestamps) if timestamps else 0)
 
@@ -990,13 +1014,13 @@ class ActivityPlotWidget(pg.PlotWidget):
             selected_period = self.get_selected_marker_period()
             if selected_period and selected_period.is_complete:
                 if key == Qt.Key.Key_Q:  # Move onset left
-                    self.adjust_selected_marker("onset", -60)  # -1 minute
+                    self.adjust_selected_marker(SleepMarkerEndpoint.ONSET, -60)  # -1 minute
                 elif key == Qt.Key.Key_E:  # Move onset right
-                    self.adjust_selected_marker("onset", 60)  # +1 minute
+                    self.adjust_selected_marker(SleepMarkerEndpoint.ONSET, 60)  # +1 minute
                 elif key == Qt.Key.Key_A:  # Move offset left
-                    self.adjust_selected_marker("offset", -60)  # -1 minute
+                    self.adjust_selected_marker(SleepMarkerEndpoint.OFFSET, -60)  # -1 minute
                 elif key == Qt.Key.Key_D:  # Move offset right
-                    self.adjust_selected_marker("offset", 60)  # +1 minute
+                    self.adjust_selected_marker(SleepMarkerEndpoint.OFFSET, 60)  # +1 minute
                 else:
                     super().keyPressEvent(ev)
             else:
@@ -1006,13 +1030,13 @@ class ActivityPlotWidget(pg.PlotWidget):
             selected_period = self.get_selected_nonwear_period()
             if selected_period and selected_period.is_complete:
                 if key == Qt.Key.Key_Q:  # Move start left
-                    self.adjust_selected_nonwear_marker("start", -60)  # -1 minute
+                    self.adjust_selected_nonwear_marker(MarkerEndpoint.START, -60)  # -1 minute
                 elif key == Qt.Key.Key_E:  # Move start right
-                    self.adjust_selected_nonwear_marker("start", 60)  # +1 minute
+                    self.adjust_selected_nonwear_marker(MarkerEndpoint.START, 60)  # +1 minute
                 elif key == Qt.Key.Key_A:  # Move end left
-                    self.adjust_selected_nonwear_marker("end", -60)  # -1 minute
+                    self.adjust_selected_nonwear_marker(MarkerEndpoint.END, -60)  # -1 minute
                 elif key == Qt.Key.Key_D:  # Move end right
-                    self.adjust_selected_nonwear_marker("end", 60)  # +1 minute
+                    self.adjust_selected_nonwear_marker(MarkerEndpoint.END, 60)  # +1 minute
                 else:
                     super().keyPressEvent(ev)
             else:
@@ -1027,9 +1051,9 @@ class ActivityPlotWidget(pg.PlotWidget):
             return
 
         # Get current timestamp
-        if marker_type == "onset":
+        if marker_type == SleepMarkerEndpoint.ONSET:
             current_timestamp = main_sleep.onset_timestamp
-        elif marker_type == "offset":
+        elif marker_type == SleepMarkerEndpoint.OFFSET:
             current_timestamp = main_sleep.offset_timestamp
         else:
             return
@@ -1044,13 +1068,13 @@ class ActivityPlotWidget(pg.PlotWidget):
             return
 
         # Update the timestamp
-        if marker_type == "onset":
+        if marker_type == SleepMarkerEndpoint.ONSET:
             # Ensure onset is before offset
             if new_timestamp < main_sleep.offset_timestamp:
                 main_sleep.onset_timestamp = new_timestamp
             else:
                 return
-        elif marker_type == "offset":
+        elif marker_type == SleepMarkerEndpoint.OFFSET:
             # Ensure offset is after onset
             if new_timestamp > main_sleep.onset_timestamp:
                 main_sleep.offset_timestamp = new_timestamp
@@ -1106,14 +1130,14 @@ class ActivityPlotWidget(pg.PlotWidget):
             return False
 
         # Validate the new position
-        if marker_type == "onset":
+        if marker_type == SleepMarkerEndpoint.ONSET:
             # Ensure onset would be before offset
             if target_timestamp >= period.offset_timestamp:
                 logger.warning(f"Cannot move onset to {target_timestamp} - would be after offset at {period.offset_timestamp}")
                 return False
             # Update onset timestamp
             period.onset_timestamp = target_timestamp
-        elif marker_type == "offset":
+        elif marker_type == SleepMarkerEndpoint.OFFSET:
             # Ensure offset would be after onset
             if target_timestamp <= period.onset_timestamp:
                 logger.warning(f"Cannot move offset to {target_timestamp} - would be before onset at {period.onset_timestamp}")
@@ -1187,14 +1211,14 @@ class ActivityPlotWidget(pg.PlotWidget):
             return False
 
         # Validate the new position
-        if marker_type == "start":
+        if marker_type == MarkerEndpoint.START:
             # Ensure start would be before end
             if target_timestamp >= period.end_timestamp:
                 logger.warning(f"Cannot move start to {target_timestamp} - would be after end at {period.end_timestamp}")
                 return False
             # Update start timestamp
             period.start_timestamp = target_timestamp
-        elif marker_type == "end":
+        elif marker_type == MarkerEndpoint.END:
             # Ensure end would be after start
             if target_timestamp <= period.start_timestamp:
                 logger.warning(f"Cannot move end to {target_timestamp} - would be before start at {period.start_timestamp}")
@@ -1446,45 +1470,33 @@ class ActivityPlotWidget(pg.PlotWidget):
         return onset_data, offset_data
 
     def _find_closest_data_index(self, target_timestamp: float) -> int | None:
-        """Find the data index closest to the target timestamp using binary search."""
-        if self.timestamps is None or not self.timestamps:
-            logger.warning("MARKER DRAG: No timestamps available")
+        """
+        Find the data index closest to the target timestamp using binary search.
+
+        Uses self.x_data directly - no separate cache needed since x_data is already
+        a numpy array of unix timestamps created when data is loaded.
+        """
+        if self.x_data is None or len(self.x_data) == 0:
+            logger.warning("MARKER DRAG: No x_data available")
             return None
 
-        import numpy as np
+        # Use binary search on x_data (already a numpy array of unix timestamps)
+        idx = np.searchsorted(self.x_data, target_timestamp)
 
-        # 1. Convert our datetime timestamps to unix array for comparison
-        # We cache this array if it's not already there for performance
-        if (
-            not hasattr(self, "_cached_unix_timestamps")  # KEEP: Cache existence check
-            or self._cached_unix_timestamps is None
-            or len(self._cached_unix_timestamps) != len(self.timestamps)
-        ):
-            logger.info(f"MARKER DRAG: Rebuilding timestamp cache from {len(self.timestamps)} timestamps")
-            self._cached_unix_timestamps = np.array(
-                [ts.timestamp() if hasattr(ts, "timestamp") else ts for ts in self.timestamps]
-            )  # KEEP: Duck typing for datetime
-            logger.info(f"MARKER DRAG: Cache range: {self._cached_unix_timestamps[0]} to {self._cached_unix_timestamps[-1]}")
+        # Clip to bounds
+        idx = max(0, min(idx, len(self.x_data) - 1))
 
-        # 2. Use binary search
-        idx = np.searchsorted(self._cached_unix_timestamps, target_timestamp)
-
-        # 3. Clip to bounds
-        idx = max(0, min(idx, len(self._cached_unix_timestamps) - 1))
-
-        # 4. Check if the neighbor is actually closer
+        # Check if the neighbor is actually closer
         if idx > 0:
-            diff_curr = abs(self._cached_unix_timestamps[idx] - target_timestamp)
-            diff_prev = abs(self._cached_unix_timestamps[idx - 1] - target_timestamp)
+            diff_curr = abs(self.x_data[idx] - target_timestamp)
+            diff_prev = abs(self.x_data[idx - 1] - target_timestamp)
             if diff_prev < diff_curr:
                 idx -= 1
 
-        # 5. Validation: Ensure we are within 1 minute tolerance
-        final_diff = abs(self._cached_unix_timestamps[idx] - target_timestamp)
+        # Validation: Ensure we are within 1 minute tolerance
+        final_diff = abs(self.x_data[idx] - target_timestamp)
         if final_diff > 60:
-            logger.warning(
-                f"MARKER DRAG: Target {target_timestamp} outside cache range [{self._cached_unix_timestamps[0]}, {self._cached_unix_timestamps[-1]}] (diff: {final_diff}s)"
-            )
+            logger.warning(f"MARKER DRAG: Target {target_timestamp} outside data range [{self.x_data[0]}, {self.x_data[-1]}] (diff: {final_diff}s)")
             return None
 
         return int(idx)

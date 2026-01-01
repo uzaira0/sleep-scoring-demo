@@ -96,9 +96,9 @@ class TestSadehCountScaled:
             count_cap=300.0,
         )
 
-        assert "Sadeh Score" in result.columns
+        assert "Sleep Score" in result.columns
         assert len(result) == len(sample_data)
-        assert result["Sadeh Score"].isin([0, 1]).all()
+        assert result["Sleep Score"].isin([0, 1]).all()
 
     def test_sadeh_count_scaled_vs_original(self, sample_data):
         """Test that count-scaled produces different results than original."""
@@ -120,8 +120,8 @@ class TestSadehCountScaled:
         )
 
         # Count-scaled should produce MORE sleep classifications (scaled values are lower)
-        sleep_count_original = (result_original["Sadeh Score"] == 1).sum()
-        sleep_count_scaled = (result_scaled["Sadeh Score"] == 1).sum()
+        sleep_count_original = (result_original["Sleep Score"] == 1).sum()
+        sleep_count_scaled = (result_scaled["Sleep Score"] == 1).sum()
 
         # With very high activity, scaling should increase sleep detection
         assert sleep_count_scaled >= sleep_count_original
@@ -331,16 +331,16 @@ class TestCountScaledIntegration:
 
         # Count sleep in the deep sleep period (epochs 50-150)
         deep_sleep_period = slice(50, 150)
-        original_sleep_count = (result_original["Sadeh Score"].iloc[deep_sleep_period] == 1).sum()
-        scaled_sleep_count = (result_scaled["Sadeh Score"].iloc[deep_sleep_period] == 1).sum()
+        original_sleep_count = (result_original["Sleep Score"].iloc[deep_sleep_period] == 1).sum()
+        scaled_sleep_count = (result_scaled["Sleep Score"].iloc[deep_sleep_period] == 1).sum()
 
         # Count-scaled should detect more sleep in this period
         assert scaled_sleep_count >= original_sleep_count
 
         # Wake periods should still be detected as wake
         wake_period = slice(0, 30)
-        original_wake = (result_original["Sadeh Score"].iloc[wake_period] == 0).sum()
-        scaled_wake = (result_scaled["Sadeh Score"].iloc[wake_period] == 0).sum()
+        original_wake = (result_original["Sleep Score"].iloc[wake_period] == 0).sum()
+        scaled_wake = (result_scaled["Sleep Score"].iloc[wake_period] == 0).sum()
 
         # Both should detect mostly wake
         assert original_wake > 20  # At least 20 out of 30 epochs

@@ -62,7 +62,7 @@ class TestChoiAxisSelection:
         )
 
         # Count nonwear epochs
-        nonwear_count = result["Choi Nonwear"].sum()
+        nonwear_count = result["Nonwear Score"].sum()
 
         # Should detect at least 90 minutes of nonwear (the minimum period)
         assert nonwear_count >= 90, f"Expected >= 90 nonwear minutes with VM zeros, got {nonwear_count}"
@@ -75,7 +75,7 @@ class TestChoiAxisSelection:
         )
 
         # Count nonwear epochs
-        nonwear_count = result["Choi Nonwear"].sum()
+        nonwear_count = result["Nonwear Score"].sum()
 
         # Should detect NO nonwear since axis_y has values
         assert nonwear_count == 0, f"Expected 0 nonwear minutes with axis_y activity, got {nonwear_count}"
@@ -94,8 +94,8 @@ class TestChoiAxisSelection:
             activity_column=ActivityColumn.AXIS_Y,
         )
 
-        vm_nonwear = result_vm["Choi Nonwear"].sum()
-        y_nonwear = result_y["Choi Nonwear"].sum()
+        vm_nonwear = result_vm["Nonwear Score"].sum()
+        y_nonwear = result_y["Nonwear Score"].sum()
 
         # Results MUST be different - this proves axis selection works
         assert vm_nonwear != y_nonwear, f"Axis selection should affect results! VM nonwear: {vm_nonwear}, Y nonwear: {y_nonwear}"

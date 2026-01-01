@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from PyQt6.QtGui import QColor
 
-from sleep_scoring_app.core.constants import ActivityDataPreference, TableDimensions
+from sleep_scoring_app.core.constants import ActivityDataPreference, MarkerEndpoint, SleepMarkerEndpoint, TableDimensions
 from sleep_scoring_app.utils.table_helpers import update_marker_table, update_table_sleep_algorithm_header
 
 if TYPE_CHECKING:
@@ -104,21 +104,25 @@ class MarkerTableManager:
 
         return "Sadeh"
 
-    def update_table_headers_for_algorithm(self) -> None:
+    def update_table_headers_for_algorithm(self, force: bool = False) -> None:
         """
         Update the table column headers to reflect the current sleep algorithm.
 
         Should be called when the algorithm is changed in study settings.
 
+        Args:
+            force: If True, bypass the cache check and always update headers.
+                   Use this when you know the algorithm just changed.
+
         """
         algorithm_name = self.get_current_sleep_algorithm_name()
 
-        # Only update if the algorithm name has changed
-        if algorithm_name == self._cached_algorithm_name:
+        # Only update if the algorithm name has changed (unless forced)
+        if not force and algorithm_name == self._cached_algorithm_name:
             return
 
         self._cached_algorithm_name = algorithm_name
-        logger.info("Updating table headers for algorithm: %s", algorithm_name)
+        logger.info("Updating table headers for algorithm: %s (force=%s)", algorithm_name, force)
 
         # Update onset table header via main window references
         if self.main_window.onset_table:
@@ -259,7 +263,7 @@ class MarkerTableManager:
                 return
 
             # Get the appropriate table container (stores data and visible offset)
-            if marker_type == "onset":
+            if marker_type == SleepMarkerEndpoint.ONSET:
                 table_container = getattr(self.main_window, "onset_table", None)
             else:
                 table_container = getattr(self.main_window, "offset_table", None)
@@ -319,7 +323,7 @@ class MarkerTableManager:
             if active_category == MarkerCategory.NONWEAR:
                 # Move nonwear marker
                 # Map onset/offset to start/end for nonwear markers
-                nonwear_marker_type = "start" if marker_type == "onset" else "end"
+                nonwear_marker_type = MarkerEndpoint.START if marker_type == SleepMarkerEndpoint.ONSET else MarkerEndpoint.END
 
                 selected_period = pw.marker_renderer.get_selected_nonwear_period()
                 period_slot = selected_period.marker_index if selected_period else None

@@ -316,37 +316,6 @@ class MarkerService:
             logger.exception("Failed to save nonwear markers")
             return False
 
-    def save_markers(self, sleep_metrics: SleepMetrics) -> bool:
-        """
-        Save sleep markers from SleepMetrics to database.
-
-        Legacy method for backward compatibility.
-
-        Args:
-            sleep_metrics: Sleep metrics containing markers
-
-        Returns:
-            True if save was successful
-
-        """
-        try:
-            # Update time strings from main sleep period
-            sleep_metrics.update_time_strings()
-
-            # Save to extended markers table
-            success = self._db.save_daily_sleep_markers(sleep_metrics)
-
-            if success:
-                logger.debug("Successfully saved markers for %s on %s", sleep_metrics.filename, sleep_metrics.analysis_date)
-            else:
-                logger.warning("Failed to save markers for %s on %s", sleep_metrics.filename, sleep_metrics.analysis_date)
-
-            return success
-
-        except Exception:
-            logger.exception("Error saving markers for %s on %s", sleep_metrics.filename, sleep_metrics.analysis_date)
-            return False
-
     def load(self, filename: str, sleep_date: date | str) -> DailySleepMarkers | None:
         """
         Load sleep markers from database.
@@ -426,31 +395,6 @@ class MarkerService:
         markers = DailyNonwearMarkers.from_dict(data)
         self._cache[cache_key] = markers
         return markers
-
-    def load_markers(self, filename: str, analysis_date: str) -> DailySleepMarkers:
-        """
-        Load sleep markers from database.
-
-        Legacy method for backward compatibility.
-
-        Args:
-            filename: File identifier
-            analysis_date: Analysis date string
-
-        Returns:
-            DailySleepMarkers (empty if not found)
-
-        """
-        try:
-            daily_markers = self._db.load_daily_sleep_markers(filename, analysis_date)
-            logger.debug("Loaded markers for %s on %s", filename, analysis_date)
-            return daily_markers
-
-        except Exception:
-            logger.exception("Error loading markers for %s on %s", filename, analysis_date)
-            from sleep_scoring_app.core.dataclasses import DailySleepMarkers
-
-            return DailySleepMarkers()
 
     # ==================== Coordination ====================
 
@@ -604,27 +548,6 @@ class MarkerService:
         except Exception:
             logger.exception("Error removing sleep period %d", period_index)
             return False, "Failed to remove sleep period"
-
-    def save_and_persist(self, sleep_metrics: SleepMetrics) -> tuple[bool, str]:
-        """
-        Save markers and persist to database.
-
-        Args:
-            sleep_metrics: Sleep metrics to save
-
-        Returns:
-            Tuple of (success, message)
-
-        """
-        try:
-            success = self.save_markers(sleep_metrics)
-            if success:
-                return True, "Markers saved successfully"
-            return False, "Failed to save markers to database"
-
-        except Exception:
-            logger.exception("Error in save_and_persist")
-            return False, "Error occurred while saving markers"
 
     def get_next_available_slot(self, daily_markers: DailySleepMarkers) -> int | None:
         """

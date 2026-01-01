@@ -28,12 +28,12 @@ import pytest
 from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtWidgets import QApplication, QWidget
 
+from sleep_scoring_app.core.algorithms.nonwear.choi import choi_detect_nonwear
 from sleep_scoring_app.core.algorithms.sleep_period.metrics import (
     SleepPeriodMetrics,
     TudorLockeSleepMetricsCalculator,
 )
 from sleep_scoring_app.core.algorithms.sleep_wake.sadeh import sadeh_score
-from sleep_scoring_app.core.algorithms.nonwear.choi import choi_detect_nonwear
 from sleep_scoring_app.core.algorithms.types import ActivityColumn
 from sleep_scoring_app.core.constants import (
     ActivityDataPreference,
@@ -49,7 +49,6 @@ from sleep_scoring_app.core.dataclasses import (
     SleepPeriod,
 )
 from sleep_scoring_app.data.database import DatabaseManager
-
 
 # ============================================================================
 # TEST DATA GENERATORS
@@ -86,10 +85,7 @@ def generate_realistic_activity_data(
         hour = ts.hour
 
         # Determine if this is a sleep period
-        is_sleep_time = (
-            (hour >= sleep_onset_hour) or
-            (hour < sleep_offset_hour)
-        )
+        is_sleep_time = (hour >= sleep_onset_hour) or (hour < sleep_offset_hour)
 
         if is_sleep_time:
             # Sleep period - low activity with occasional brief awakenings
@@ -109,12 +105,14 @@ def generate_realistic_activity_data(
         axis_y_values.append(axis_y)
         vector_magnitude_values.append(vm)
 
-    return pd.DataFrame({
-        "timestamp": timestamps,
-        "axis_y": axis_y_values,
-        "Axis1": axis_y_values,  # Sadeh requires capital 'A'
-        "Vector Magnitude": vector_magnitude_values,  # Choi requires this exact name
-    })
+    return pd.DataFrame(
+        {
+            "timestamp": timestamps,
+            "axis_y": axis_y_values,
+            "Axis1": axis_y_values,  # Sadeh requires capital 'A'
+            "Vector Magnitude": vector_magnitude_values,  # Choi requires this exact name
+        }
+    )
 
 
 def generate_nonwear_activity_data(
@@ -157,9 +155,7 @@ def create_test_csv_file(
 
     # Format timestamp as string for CSV
     data = data.copy()
-    data["timestamp"] = data["timestamp"].apply(
-        lambda x: x.strftime("%Y-%m-%d %H:%M:%S") if isinstance(x, datetime) else x
-    )
+    data["timestamp"] = data["timestamp"].apply(lambda x: x.strftime("%Y-%m-%d %H:%M:%S") if isinstance(x, datetime) else x)
     data.to_csv(filepath, index=False)
     return filepath
 
@@ -205,6 +201,7 @@ def nonwear_csv_file(temp_workspace) -> Path:
 def isolated_database(temp_workspace) -> DatabaseManager:
     """Create an isolated database for testing."""
     import sleep_scoring_app.data.database as db_module
+
     db_module._database_initialized = False
     return DatabaseManager(db_path=temp_workspace["db_path"])
 
@@ -233,11 +230,8 @@ class TestSadehAlgorithmExecution:
         result = sadeh_score(df)
 
         # Check that sleep is detected during night hours (22:00-06:00)
-        night_mask = (
-            (df["timestamp"].dt.hour >= 22) |
-            (df["timestamp"].dt.hour < 6)
-        )
-        night_scores = result.loc[night_mask, "Sadeh Score"]
+        night_mask = (df["timestamp"].dt.hour >= 22) | (df["timestamp"].dt.hour < 6)
+        night_scores = result.loc[night_mask, "Sleep Score"]
 
         # Majority of night epochs should be classified as sleep (1)
         sleep_percentage = (night_scores == 1).mean() * 100
@@ -252,7 +246,7 @@ class TestSadehAlgorithmExecution:
 
         # Check wake during day hours (8:00-20:00)
         day_mask = (df["timestamp"].dt.hour >= 8) & (df["timestamp"].dt.hour < 20)
-        day_scores = result.loc[day_mask, "Sadeh Score"]
+        day_scores = result.loc[day_mask, "Sleep Score"]
 
         # Majority of day epochs should be classified as wake (0)
         wake_percentage = (day_scores == 0).mean() * 100
@@ -265,24 +259,26 @@ class TestSadehAlgorithmExecution:
 
         result = sadeh_score(df)
 
-        assert "Sadeh Score" in result.columns
-        assert set(result["Sadeh Score"].unique()).issubset({0, 1})
+        assert "Sleep Score" in result.columns
+        assert set(result["Sleep Score"].unique()).issubset({0, 1})
 
     def test_sadeh_handles_high_activity_correctly(self):
         """Test Sadeh caps activity at 300 as per algorithm specification."""
         # Create data with very high activity
         start_time = datetime(2021, 4, 20, 12, 0, 0)
         timestamps = [start_time + timedelta(minutes=i) for i in range(100)]
-        df = pd.DataFrame({
-            "timestamp": timestamps,
-            "Axis1": [500] * 100,  # Above 300 cap
-        })
+        df = pd.DataFrame(
+            {
+                "timestamp": timestamps,
+                "Axis1": [500] * 100,  # Above 300 cap
+            }
+        )
 
         # Should not crash and should classify as wake
         result = sadeh_score(df)
         assert len(result) == 100
         # High activity should be classified as wake (0)
-        assert (result["Sadeh Score"] == 0).mean() > 0.8
+        assert (result["Sleep Score"] == 0).mean() > 0.8
 
 
 @pytest.mark.e2e
@@ -297,9 +293,9 @@ class TestChoiNonwearDetection:
         # Run Choi algorithm
         result = choi_detect_nonwear(df, activity_column=ActivityColumn.VECTOR_MAGNITUDE)
 
-        # Should have detected nonwear - column name is "Choi Nonwear"
-        if "Choi Nonwear" in result.columns:
-            total_nonwear_minutes = result["Choi Nonwear"].sum()
+        # Should have detected nonwear - column name is "Nonwear Score"
+        if "Nonwear Score" in result.columns:
+            total_nonwear_minutes = result["Nonwear Score"].sum()
             # We inserted 2 hours = 120 minutes of nonwear
             assert total_nonwear_minutes >= 100, f"Expected >=100 nonwear minutes, got {total_nonwear_minutes}"
 
@@ -312,8 +308,8 @@ class TestChoiNonwearDetection:
 
         # During normal sleep (low but variable activity), should not be marked nonwear
         # Since realistic data has occasional awakenings, nonwear should be minimal
-        if "Choi Nonwear" in result.columns:
-            nonwear_percentage = result["Choi Nonwear"].mean() * 100
+        if "Nonwear Score" in result.columns:
+            nonwear_percentage = result["Nonwear Score"].mean() * 100
             # Should be less than 10% nonwear in realistic data
             assert nonwear_percentage < 20, f"Too much nonwear detected: {nonwear_percentage:.1f}%"
 
@@ -398,11 +394,11 @@ class TestMetricsCalculation:
         """Test number of awakenings is counted correctly."""
         # Pattern: sleep, wake, sleep, wake, sleep = 2 awakenings
         sleep_scores = (
-            [1] * 30 +  # Sleep bout 1
-            [0] * 10 +  # Awakening 1
-            [1] * 30 +  # Sleep bout 2
-            [0] * 10 +  # Awakening 2
-            [1] * 30    # Sleep bout 3
+            [1] * 30  # Sleep bout 1
+            + [0] * 10  # Awakening 1
+            + [1] * 30  # Sleep bout 2
+            + [0] * 10  # Awakening 2
+            + [1] * 30  # Sleep bout 3
         )
         activity_counts = [float(x) for x in np.random.randint(0, 50, size=110)]
         onset_idx = 0
@@ -425,11 +421,11 @@ class TestMetricsCalculation:
         """Test average awakening length is calculated correctly."""
         # Pattern with two awakenings of 10 and 20 minutes
         sleep_scores = (
-            [1] * 30 +  # Sleep
-            [0] * 10 +  # Awakening 1 (10 min)
-            [1] * 30 +  # Sleep
-            [0] * 20 +  # Awakening 2 (20 min)
-            [1] * 30    # Sleep
+            [1] * 30  # Sleep
+            + [0] * 10  # Awakening 1 (10 min)
+            + [1] * 30  # Sleep
+            + [0] * 20  # Awakening 2 (20 min)
+            + [1] * 30  # Sleep
         )
         activity_counts = [float(x) for x in np.random.randint(0, 50, size=120)]
         onset_idx = 0
@@ -482,10 +478,12 @@ class TestRealDataLoading:
         """Test CSV data handling with minimal columns."""
         # Create a CSV with minimal columns
         filepath = temp_workspace["data"] / "minimal.csv"
-        df = pd.DataFrame({
-            "time": [datetime(2021, 4, 20, 12, i, 0) for i in range(10)],
-            "counts": [100] * 10,
-        })
+        df = pd.DataFrame(
+            {
+                "time": [datetime(2021, 4, 20, 12, i, 0) for i in range(10)],
+                "counts": [100] * 10,
+            }
+        )
         df["time"] = df["time"].apply(lambda x: x.strftime("%Y-%m-%d %H:%M:%S"))
         df.to_csv(filepath, index=False)
 
@@ -521,8 +519,8 @@ class TestDatabaseOperations:
 
     def test_save_and_load_sleep_metrics(self, isolated_database):
         """Test saving and loading sleep metrics from database."""
-        from sleep_scoring_app.core.dataclasses import ParticipantInfo, SleepMetrics
         from sleep_scoring_app.core.constants import ParticipantGroup, ParticipantTimepoint
+        from sleep_scoring_app.core.dataclasses import ParticipantInfo, SleepMetrics
 
         # Create metrics
         participant = ParticipantInfo(
@@ -571,17 +569,14 @@ class TestDatabaseOperations:
         assert result is True
 
         # Load back
-        loaded = isolated_database.load_sleep_metrics(
-            "4000 BO (2021-04-20)60sec.csv",
-            "2021-04-20"
-        )
+        loaded = isolated_database.load_sleep_metrics("4000 BO (2021-04-20)60sec.csv", "2021-04-20")
 
         assert loaded is not None
 
     def test_database_handles_multiple_dates(self, isolated_database):
         """Test saving metrics for multiple dates."""
-        from sleep_scoring_app.core.dataclasses import ParticipantInfo, SleepMetrics
         from sleep_scoring_app.core.constants import ParticipantGroup, ParticipantTimepoint
+        from sleep_scoring_app.core.dataclasses import ParticipantInfo, SleepMetrics
 
         dates = ["2021-04-20", "2021-04-21", "2021-04-22"]
 
@@ -631,10 +626,7 @@ class TestDatabaseOperations:
 
         # Verify all dates saved
         for date_str in dates:
-            loaded = isolated_database.load_sleep_metrics(
-                "4000 BO (2021-04-20)60sec.csv",
-                date_str
-            )
+            loaded = isolated_database.load_sleep_metrics("4000 BO (2021-04-20)60sec.csv", date_str)
             assert loaded is not None, f"Failed to load metrics for {date_str}"
 
 
@@ -756,8 +748,8 @@ class TestExportValidation:
 
     def test_export_onset_time_matches_marker(self, isolated_database, temp_workspace):
         """Test exported onset time exactly matches placed marker."""
-        from sleep_scoring_app.core.dataclasses import ParticipantInfo, SleepMetrics
         from sleep_scoring_app.core.constants import ParticipantGroup, ParticipantTimepoint
+        from sleep_scoring_app.core.dataclasses import ParticipantInfo, SleepMetrics
         from sleep_scoring_app.services.export_service import ExportManager
 
         # Create metrics with specific onset time
@@ -851,10 +843,12 @@ class TestErrorHandling:
         start_time = datetime(2021, 4, 20, 12, 0, 0)
         timestamps = [start_time + timedelta(minutes=i) for i in range(100)]
 
-        df = pd.DataFrame({
-            "timestamp": timestamps,
-            "axis1": [100] * 50 + [np.nan] * 50,  # Half NaN
-        })
+        df = pd.DataFrame(
+            {
+                "timestamp": timestamps,
+                "axis1": [100] * 50 + [np.nan] * 50,  # Half NaN
+            }
+        )
 
         # Should handle NaN gracefully
         try:
@@ -866,8 +860,8 @@ class TestErrorHandling:
 
     def test_database_handles_duplicate_save(self, isolated_database):
         """Test saving same date twice updates rather than duplicates."""
-        from sleep_scoring_app.core.dataclasses import ParticipantInfo, SleepMetrics
         from sleep_scoring_app.core.constants import ParticipantGroup, ParticipantTimepoint
+        from sleep_scoring_app.core.dataclasses import ParticipantInfo, SleepMetrics
 
         participant = ParticipantInfo(
             numerical_id="4000",
@@ -940,10 +934,7 @@ class TestErrorHandling:
         isolated_database.save_sleep_metrics(metrics2)
 
         # Load and verify the updated value is stored
-        loaded = isolated_database.load_sleep_metrics(
-            "4000 BO (2021-04-20)60sec.csv",
-            "2021-04-20"
-        )
+        loaded = isolated_database.load_sleep_metrics("4000 BO (2021-04-20)60sec.csv", "2021-04-20")
 
         # Should have the updated value, not a duplicate
         assert loaded is not None
@@ -965,8 +956,8 @@ class TestFullWorkflowIntegration:
         temp_workspace,
     ):
         """Test complete workflow: load data -> run algorithm -> save -> export."""
-        from sleep_scoring_app.core.dataclasses import ParticipantInfo, SleepMetrics
         from sleep_scoring_app.core.constants import ParticipantGroup, ParticipantTimepoint
+        from sleep_scoring_app.core.dataclasses import ParticipantInfo, SleepMetrics
         from sleep_scoring_app.services.export_service import ExportManager
 
         # STEP 1: Load CSV data
@@ -978,10 +969,10 @@ class TestFullWorkflowIntegration:
         # STEP 2: Run Sadeh algorithm
         sadeh_results = sadeh_score(df)
 
-        assert "Sadeh Score" in sadeh_results.columns
+        assert "Sleep Score" in sadeh_results.columns
 
         # STEP 3: Identify sleep period (find longest sleep bout)
-        sleep_epochs = sadeh_results["Sadeh Score"] == 1
+        sleep_epochs = sadeh_results["Sleep Score"] == 1
 
         # Find first major sleep period (simplified)
         # In real app, this would use sleep period detection algorithm
@@ -1015,9 +1006,9 @@ class TestFullWorkflowIntegration:
         )
 
         # STEP 5: Calculate metrics
-        sleep_scores = sadeh_results["Sadeh Score"].iloc[sleep_start_idx:sleep_end_idx+1].tolist()
-        activity = [float(x) for x in df["axis_y"].iloc[sleep_start_idx:sleep_end_idx+1].values]
-        timestamps = df["timestamp"].iloc[sleep_start_idx:sleep_end_idx+1].tolist()
+        sleep_scores = sadeh_results["Sleep Score"].iloc[sleep_start_idx : sleep_end_idx + 1].tolist()
+        activity = [float(x) for x in df["axis_y"].iloc[sleep_start_idx : sleep_end_idx + 1].values]
+        timestamps = df["timestamp"].iloc[sleep_start_idx : sleep_end_idx + 1].tolist()
 
         calculator = TudorLockeSleepMetricsCalculator()
         period_metrics = calculator.calculate_metrics(

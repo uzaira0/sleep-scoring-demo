@@ -401,7 +401,7 @@ class AppConfig:
         return ConfigBuilder()
 
 
-@dataclass
+@dataclass(frozen=True)
 class ActiLifeSadehConfig:
     """ActiLife Sadeh configuration settings."""
 

@@ -394,6 +394,7 @@ class PlotStateSerializer:
                 self.parent._algorithm_cache.clear()
 
             self.parent.main_48h_sadeh_results = None
+            self.parent.main_48h_sadeh_timestamps = None  # CRITICAL: Clear alongside results
 
             if hasattr(self.parent, "sadeh_results"):  # KEEP: Duck typing plot/marker attributes
                 self.parent.sadeh_results = None

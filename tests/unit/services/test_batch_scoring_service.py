@@ -429,7 +429,7 @@ class TestApplySleepRules:
         activity_df = pd.DataFrame(
             {
                 "datetime": timestamps,
-                "Sadeh Score": [1] * 1440,
+                "Sleep Score": [1] * 1440,
             }
         )
 
@@ -452,7 +452,7 @@ class TestApplySleepRules:
         activity_df = pd.DataFrame(
             {
                 "datetime": timestamps,
-                "Sadeh Score": [1] * 100,
+                "Sleep Score": [1] * 100,
             }
         )
 
@@ -489,8 +489,8 @@ class TestCalculateMetrics:
         activity_df = pd.DataFrame(
             {
                 "datetime": timestamps,
-                "Sadeh Score": [1] * 1440,
-                "Choi Nonwear": [0] * 1440,
+                "Sleep Score": [1] * 1440,
+                "Nonwear Score": [0] * 1440,
                 "Vector Magnitude": [50] * 1440,
             }
         )
@@ -509,7 +509,7 @@ class TestCalculateMetrics:
         daily_markers = DailySleepMarkers()  # No periods
 
         timestamps = pd.date_range("2024-01-10 00:00", periods=100, freq="min")
-        activity_df = pd.DataFrame({"datetime": timestamps, "Sadeh Score": [1] * 100})
+        activity_df = pd.DataFrame({"datetime": timestamps, "Sleep Score": [1] * 100})
 
         metrics = _calculate_metrics(daily_markers, activity_df)
 
