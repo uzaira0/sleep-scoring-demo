@@ -59,8 +59,7 @@ class DiaryIntegrationManager:
         self.navigation = navigation
         self.marker_ops = marker_ops
         self.services = services
-        self.main_window = parent
-        self.parent = parent
+        self.main_window = parent  # Keep for Qt-level access (dialogs, plot_widget)
 
         logger.info("DiaryIntegrationManager initialized with decoupled interfaces")
 
@@ -130,8 +129,8 @@ class DiaryIntegrationManager:
 
             # Check if the diary date matches the current date being viewed
             # MainWindowProtocol guarantees available_dates and current_date_index attributes exist
-            if self.parent.available_dates and self.parent.current_date_index is not None:
-                current_date = self.parent.available_dates[self.parent.current_date_index]
+            if self.navigation.available_dates and self.navigation.current_date_index is not None:
+                current_date = self.navigation.available_dates[self.navigation.current_date_index]
                 logger.info(f"Current plot date: {current_date}")
 
                 # Convert current_date to date object for comparison
@@ -153,17 +152,17 @@ class DiaryIntegrationManager:
 
                     if reply == QMessageBox.StandardButton.Yes:
                         # Check for unsaved markers before switching dates
-                        if not self.parent._check_unsaved_markers_before_navigation():
+                        if not self.main_window._check_unsaved_markers_before_navigation():
                             logger.info("User canceled date switch due to unsaved markers")
                             return  # User canceled due to unsaved markers
 
                         # Find and switch to the diary date
                         try:
-                            date_index = self.parent.available_dates.index(diary_date.date())
+                            date_index = self.navigation.available_dates.index(diary_date.date())
                             # Dispatch to store - ActivityDataConnector will handle data loading
                             from sleep_scoring_app.ui.store import Actions
 
-                            self.parent.store.dispatch(Actions.date_navigated(date_index - self.parent.current_date_index))
+                            self.store.dispatch(Actions.date_navigated(date_index - self.navigation.current_date_index))
                             # NOTE: DO NOT call load_current_date() - ActivityDataConnector handles it
                             logger.info(f"Switched to date {diary_date.date()} from diary via store dispatch")
                         except ValueError:
@@ -181,7 +180,7 @@ class DiaryIntegrationManager:
                 if not time_str or time_str in ("--:--", ""):
                     return None
 
-                timestamp = self.parent._parse_time_to_timestamp(time_str, diary_date)
+                timestamp = self.navigation._parse_time_to_timestamp(time_str, diary_date)
                 if timestamp is None:
                     return None
 
@@ -192,8 +191,8 @@ class DiaryIntegrationManager:
                 # Check if within data range - but don't reject markers outside range
                 # The diary data might be for a different day than what's currently displayed
                 # PlotWidgetProtocol guarantees data_start_time and data_end_time attributes exist (may be None)
-                data_start = self.parent.plot_widget.data_start_time
-                data_end = self.parent.plot_widget.data_end_time
+                data_start = self.main_window.plot_widget.data_start_time
+                data_end = self.main_window.plot_widget.data_end_time
 
                 # Convert to timestamps for comparison
                 data_start_ts = data_start.timestamp() if data_start else None
@@ -386,8 +385,8 @@ class DiaryIntegrationManager:
                         QMessageBox.warning(self.parent, "Invalid Time Order", "The offset time must be after the onset time.")
                         return
                     # Period is now complete, clear current_marker_being_placed if it matches
-                    if self.parent.plot_widget.current_marker_being_placed == period:
-                        self.parent.plot_widget.current_marker_being_placed = None
+                    if self.main_window.plot_widget.current_marker_being_placed == period:
+                        self.main_window.plot_widget.current_marker_being_placed = None
                         logger.info("Cleared current_marker_being_placed after completing period")
 
                 logger.info(f"Updated existing {marker_description} period in slot {period_slot}")
@@ -423,33 +422,33 @@ class DiaryIntegrationManager:
             # Apply sleep scoring rules if complete
             if period and period.is_complete:
                 # Auto-select the completed marker set FIRST
-                self.parent.plot_widget.selected_marker_set_index = period_slot
-                self.parent.plot_widget._update_marker_visual_state()  # Update visual highlighting
+                self.main_window.plot_widget.selected_marker_set_index = period_slot
+                self.main_window.plot_widget._update_marker_visual_state()  # Update visual highlighting
                 logger.info(f"Auto-selected marker set {period_slot} after diary completion")
 
                 # First redraw the markers to show them visually
                 # Set flag to prevent redraw_markers from auto-applying rules
-                self.parent.plot_widget._skip_auto_apply_rules = True
-                self.parent.plot_widget.redraw_markers()
-                self.parent.plot_widget._skip_auto_apply_rules = False
+                self.main_window.plot_widget._skip_auto_apply_rules = True
+                self.main_window.plot_widget.redraw_markers()
+                self.main_window.plot_widget._skip_auto_apply_rules = False
 
                 # Then apply sleep scoring rules (arrows) AFTER the markers are drawn
                 # This ensures the arrows are added on top of the freshly drawn markers
-                self.parent.plot_widget.apply_sleep_scoring_rules(period)
+                self.main_window.plot_widget.apply_sleep_scoring_rules(period)
                 logger.info(f"Applied sleep scoring rules for {marker_description} period")
 
                 # Update sleep scoring rules to ensure arrows are visible (protocol-guaranteed method)
-                self.parent.plot_widget._update_sleep_scoring_rules()
+                self.main_window.plot_widget._update_sleep_scoring_rules()
                 logger.info("Called _update_sleep_scoring_rules to ensure arrows are visible")
             elif period:
                 # Set as current marker being placed if incomplete
-                self.parent.plot_widget.current_marker_being_placed = period
+                self.main_window.plot_widget.current_marker_being_placed = period
                 logger.info("Set incomplete period as current marker being placed")
                 # Redraw markers for incomplete period
-                self.parent.plot_widget.redraw_markers()
+                self.main_window.plot_widget.redraw_markers()
 
             # Auto-save
-            self.parent.auto_save_current_markers()
+            self.marker_ops.auto_save_current_markers()
 
             logger.info(f"Successfully set {marker_description} marker(s) from diary column {column_type}")
 
@@ -519,7 +518,7 @@ class DiaryIntegrationManager:
                 if not time_str or time_str == "--:--":
                     return None
 
-                timestamp = self.parent._parse_time_to_timestamp(time_str, diary_date)
+                timestamp = self.navigation._parse_time_to_timestamp(time_str, diary_date)
                 if timestamp is None:
                     return None
 
@@ -529,8 +528,8 @@ class DiaryIntegrationManager:
 
                 # Check if within data range
                 # PlotWidgetProtocol guarantees data_start_time and data_end_time attributes exist (may be None)
-                data_start = self.parent.plot_widget.data_start_time
-                data_end = self.parent.plot_widget.data_end_time
+                data_start = self.main_window.plot_widget.data_start_time
+                data_end = self.main_window.plot_widget.data_end_time
 
                 # Convert to timestamps for comparison
                 data_start_ts = data_start.timestamp() if data_start else None
@@ -573,19 +572,19 @@ class DiaryIntegrationManager:
 
             # Create main sleep period if available
             if sleep_onset_ts or sleep_offset_ts:
-                period_info = self.parent._create_sleep_period_from_timestamps(sleep_onset_ts, sleep_offset_ts, is_main_sleep=True)
+                period_info = self.main_window._create_sleep_period_from_timestamps(sleep_onset_ts, sleep_offset_ts, is_main_sleep=True)
                 if period_info:
                     periods_created.append(("Main sleep", period_info))
 
             # Create nap 1 period if available
             if nap1_onset_ts or nap1_offset_ts:
-                period_info = self.parent._create_sleep_period_from_timestamps(nap1_onset_ts, nap1_offset_ts, is_main_sleep=False)
+                period_info = self.main_window._create_sleep_period_from_timestamps(nap1_onset_ts, nap1_offset_ts, is_main_sleep=False)
                 if period_info:
                     periods_created.append(("Nap 1", period_info))
 
             # Create nap 2 period if available
             if nap2_onset_ts or nap2_offset_ts:
-                period_info = self.parent._create_sleep_period_from_timestamps(nap2_onset_ts, nap2_offset_ts, is_main_sleep=False)
+                period_info = self.main_window._create_sleep_period_from_timestamps(nap2_onset_ts, nap2_offset_ts, is_main_sleep=False)
                 if period_info:
                     periods_created.append(("Nap 2", period_info))
 
@@ -598,10 +597,10 @@ class DiaryIntegrationManager:
                     markers.update_classifications()
                     # Dispatch to Redux - connector will update widget
                     self.store.dispatch(Actions.sleep_markers_changed(markers))
-                self.parent.plot_widget.redraw_markers()
+                self.main_window.plot_widget.redraw_markers()
 
                 # Auto-save
-                self.parent.auto_save_current_markers()
+                self.marker_ops.auto_save_current_markers()
 
                 # Log what was created
                 for period_name, _ in periods_created:

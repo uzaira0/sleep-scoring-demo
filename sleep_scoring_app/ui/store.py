@@ -140,6 +140,9 @@ class UIState:
     nonwear_algorithm_id: str = NonwearAlgorithm.CHOI_2011
     choi_axis: str = ActivityDataPreference.VECTOR_MAGNITUDE
 
+    # === UI Control State ===
+    ui_controls_enabled: bool = True  # Enable/disable main UI controls
+
     # === Metadata (for UI feedback) ===
     last_saved_file: str | None = None
     last_saved_date: str | None = None
@@ -202,6 +205,9 @@ class ActionType(StrEnum):
     # Study settings
     STUDY_SETTINGS_CHANGED = auto()
 
+    # UI Controls
+    UI_CONTROLS_ENABLED_CHANGED = auto()
+
     # State management
     RESET_STATE = auto()
     STATE_LOADED_FROM_SETTINGS = auto()
@@ -249,6 +255,14 @@ class Actions:
         return Action(
             type=ActionType.ALGORITHM_CHANGED,
             payload={"algorithm": algorithm},
+        )
+
+    @staticmethod
+    def ui_controls_enabled_changed(enabled: bool) -> Action:
+        """Create action for enabling/disabling main UI controls."""
+        return Action(
+            type=ActionType.UI_CONTROLS_ENABLED_CHANGED,
+            payload={"enabled": enabled},
         )
 
     @staticmethod
@@ -592,6 +606,10 @@ def ui_reducer(state: UIState, action: Action) -> UIState:
         case ActionType.AUTO_SAVE_TOGGLED:
             payload = action.payload or {}
             return replace(state, auto_save_enabled=payload.get("enabled", True))
+
+        case ActionType.UI_CONTROLS_ENABLED_CHANGED:
+            payload = action.payload or {}
+            return replace(state, ui_controls_enabled=payload.get("enabled", True))
 
         case ActionType.REFRESH_FILES_REQUESTED:
             # Set pending flag - effect handler will process and clear

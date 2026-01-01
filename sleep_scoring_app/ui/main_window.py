@@ -178,7 +178,7 @@ class SleepScoringMainWindow(QMainWindow):
 
         # Initialize coordinators
         self.import_coordinator = ImportUICoordinator(parent)
-        self.ui_state_coordinator = UIStateCoordinator(parent)
+        self.ui_state_coordinator = UIStateCoordinator(parent, store=self.store)
 
         # Initialize algorithm-data compatibility helper
         from sleep_scoring_app.ui.algorithm_compatibility_ui import AlgorithmCompatibilityUIHelper

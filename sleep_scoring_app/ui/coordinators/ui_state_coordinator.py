@@ -3,8 +3,8 @@
 UI State Coordinator.
 
 Manages UI state including enable/disable controls, status updates,
-and visibility toggles. This coordinator lives in the UI layer because
-it directly manipulates UI widgets and requires Qt access.
+and visibility toggles. This coordinator dispatches Redux actions
+for state changes - UIControlsConnector handles widget updates.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from sleep_scoring_app.ui.protocols import MainWindowProtocol
+    from sleep_scoring_app.ui.store import UIStore
 
 logger = logging.getLogger(__name__)
 
@@ -25,54 +26,44 @@ class UIStateCoordinator:
     Coordinates UI state changes across the main window.
 
     Responsibilities:
-    - Enable/disable UI controls
+    - Dispatch Redux actions for UI enable/disable state
     - Update status bar and labels
     - Manage visibility of progress components
     - Clear plot and UI state
     - Update data source status
+
+    Note: Widget enable/disable is handled by UIControlsConnector
+    subscribing to store state changes.
     """
 
-    def __init__(self, parent: MainWindowProtocol) -> None:
+    def __init__(self, parent: MainWindowProtocol, store: UIStore) -> None:
         """
         Initialize the UI state coordinator.
 
         Args:
             parent: Reference to main window for UI access
+            store: Redux store for dispatching actions
 
         """
         self.parent = parent
-        logger.info("UIStateCoordinator initialized")
+        self.store = store
+        logger.info("UIStateCoordinator initialized with Redux store")
 
     def set_ui_enabled(self, enabled: bool) -> None:
-        """Enable or disable UI controls based on folder selection status."""
-        try:
-            # File selection and navigation
-            self.parent.file_selector.setEnabled(enabled)
-            self.parent.prev_date_btn.setEnabled(enabled and self.parent.current_date_index > 0)
-            self.parent.next_date_btn.setEnabled(enabled and self.parent.current_date_index < len(self.parent.available_dates) - 1)
+        """
+        Enable or disable UI controls based on folder selection status.
 
-            # View mode buttons
-            self.parent.view_24h_btn.setEnabled(enabled)
-            self.parent.view_48h_btn.setEnabled(enabled)
+        Dispatches action to Redux store - UIControlsConnector handles widget updates.
+        """
+        from sleep_scoring_app.ui.store import Actions
 
-            # Manual time entry
-            self.parent.onset_time_input.setEnabled(enabled)
-            self.parent.offset_time_input.setEnabled(enabled)
+        # Dispatch action - UIControlsConnector will update widgets
+        self.store.dispatch(Actions.ui_controls_enabled_changed(enabled))
+        logger.info(f"Dispatched ui_controls_enabled_changed({enabled})")
 
-            # Action buttons
-            self.parent.save_markers_btn.setEnabled(enabled)
-            self.parent.no_sleep_btn.setEnabled(enabled)
-            self.parent.clear_markers_btn.setEnabled(enabled)
-            self.parent.export_btn.setEnabled(enabled)
-
-            # Plot widget
-            self.parent.plot_widget.setEnabled(enabled)
-
-            # Update folder info
-            if enabled:
-                self.update_folder_info_label()
-        except AttributeError as e:
-            logger.warning("Cannot set UI enabled state - missing widget: %s", e)
+        # Update folder info label when enabling
+        if enabled:
+            self.update_folder_info_label()
 
     def clear_plot_and_ui_state(self) -> None:
         """Clear plot and UI state when switching filters."""

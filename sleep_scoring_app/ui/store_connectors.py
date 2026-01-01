@@ -159,6 +159,81 @@ class StatusConnector:
         logger.info("STATUS CONNECTOR: Disconnected")
 
 
+class UIControlsConnector:
+    """
+    Connects UI control enable/disable state to the Redux store.
+
+    This connector handles enabling/disabling main UI controls (navigation,
+    time inputs, action buttons, plot) based on store state.
+    """
+
+    def __init__(self, store: UIStore, main_window: MainWindowProtocol) -> None:
+        self.store = store
+        self.main_window = main_window
+        self._unsubscribe = store.subscribe(self._on_state_change)
+        logger.info("UI CONTROLS CONNECTOR: Initialized")
+
+        # Initial update
+        self._update_controls(store.state)
+
+    def _on_state_change(self, old_state: UIState, new_state: UIState) -> None:
+        """React to ui_controls_enabled state changes."""
+        if old_state.ui_controls_enabled != new_state.ui_controls_enabled:
+            logger.info(f"UI CONTROLS CONNECTOR: Enabled changed to {new_state.ui_controls_enabled}")
+            self._update_controls(new_state)
+
+    def _update_controls(self, state: UIState) -> None:
+        """Enable or disable UI controls based on state."""
+        enabled = state.ui_controls_enabled
+        mw = self.main_window
+
+        try:
+            # File selection and navigation
+            if mw.file_selector:
+                mw.file_selector.setEnabled(enabled)
+            if mw.prev_date_btn:
+                # Additional navigation logic for prev/next based on date index
+                can_go_prev = enabled and state.current_date_index > 0
+                mw.prev_date_btn.setEnabled(can_go_prev)
+            if mw.next_date_btn:
+                can_go_next = enabled and state.current_date_index < len(state.available_dates) - 1
+                mw.next_date_btn.setEnabled(can_go_next)
+
+            # View mode buttons
+            if mw.view_24h_btn:
+                mw.view_24h_btn.setEnabled(enabled)
+            if mw.view_48h_btn:
+                mw.view_48h_btn.setEnabled(enabled)
+
+            # Manual time entry
+            if mw.onset_time_input:
+                mw.onset_time_input.setEnabled(enabled)
+            if mw.offset_time_input:
+                mw.offset_time_input.setEnabled(enabled)
+
+            # Action buttons
+            if mw.save_markers_btn:
+                mw.save_markers_btn.setEnabled(enabled)
+            if mw.no_sleep_btn:
+                mw.no_sleep_btn.setEnabled(enabled)
+            if mw.clear_markers_btn:
+                mw.clear_markers_btn.setEnabled(enabled)
+            if mw.export_btn:
+                mw.export_btn.setEnabled(enabled)
+
+            # Plot widget
+            if mw.plot_widget:
+                mw.plot_widget.setEnabled(enabled)
+
+        except AttributeError as e:
+            logger.warning("UI CONTROLS CONNECTOR: Missing widget - %s", e)
+
+    def disconnect(self) -> None:
+        """Cleanup subscription."""
+        self._unsubscribe()
+        logger.info("UI CONTROLS CONNECTOR: Disconnected")
+
+
 class DateDropdownConnector:
     """
     Connects the date dropdown population and color to the store.
@@ -2259,6 +2334,7 @@ class StoreConnectorManager:
             self.effects,
             SaveButtonConnector(self.store, self.main_window),
             StatusConnector(self.store, self.main_window),
+            UIControlsConnector(self.store, self.main_window),
             FileListConnector(self.store, self.main_window),
             FileManagementConnector(self.store, self.main_window),  # NEW
             MarkersConnector(self.store, self.main_window),
