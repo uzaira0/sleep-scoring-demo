@@ -341,12 +341,23 @@ class TestLoadCsvFile:
         assert all(isinstance(d, datetime) for d in dates)
 
     def test_stores_current_data(self, service: DataLoadingService, sample_csv_file: Path) -> None:
-        """Stores loaded data for subsequent operations."""
+        """Stores loaded data for subsequent operations with content verification."""
         service._load_csv_file(sample_csv_file, skip_rows=10)
 
+        # Verify data is stored
         assert service.current_data is not None
+        # Verify data has expected columns and rows
+        assert len(service.current_data) == 5  # 5 data rows in sample_csv_file
+        assert "Axis1" in service.current_data.columns
+        assert "Vector Magnitude" in service.current_data.columns
+
+        # Verify date column is identified
         assert service.current_date_col is not None
+        assert service.current_date_col == "Date"
+
+        # Verify activity column is identified
         assert service.current_activity_col is not None
+        assert "Vector Magnitude" in service.current_activity_col or "Axis1" in service.current_activity_col
 
     def test_finds_vector_magnitude_column(self, service: DataLoadingService, sample_csv_file: Path) -> None:
         """Detects vector magnitude column."""
@@ -456,10 +467,15 @@ class TestLoadUnifiedActivityData:
 
         result = service.load_unified_activity_data("test.csv", datetime(2024, 1, 15), hours=48)
 
+        # Verify result is not None and contains expected data
         assert result is not None
         assert len(result["timestamps"]) == 10
         assert len(result["axis_y"]) == 10
         assert len(result["vector_magnitude"]) == 10
+        # Verify actual values match mock data
+        assert result["timestamps"][0] == test_time
+        assert result["axis_y"][0] == 100.0
+        assert result["vector_magnitude"][0] == 120.0
 
     def test_extracts_filename_from_path(self, service: DataLoadingService, mock_db_manager: MagicMock) -> None:
         """Extracts filename when path is passed."""
@@ -504,7 +520,11 @@ class TestLoadUnifiedActivityData:
 
         result = service.load_unified_activity_data("test.csv", date(2024, 1, 15), hours=24)
 
+        # Verify result is not None and contains expected structure
         assert result is not None
+        assert "timestamps" in result
+        assert "axis_y" in result
+        assert len(result["timestamps"]) == 1
 
 
 # ============================================================================
@@ -568,14 +588,21 @@ class TestLoadCsvActivityData:
     """Tests for _load_csv_activity_data method."""
 
     def test_loads_activity_from_csv(self, service: DataLoadingService, sample_csv_file: Path) -> None:
-        """Loads activity data from stored CSV."""
+        """Loads activity data from stored CSV with content verification."""
         service._load_csv_file(sample_csv_file, skip_rows=10)
 
         result_ts, result_act = service._load_csv_activity_data(datetime(2024, 1, 15), hours=24)
 
+        # Verify both results are returned and have content
         assert result_ts is not None
         assert result_act is not None
         assert len(result_ts) == len(result_act)
+        # Verify we got some data for the date (sample file has rows for 2024-01-15)
+        assert len(result_ts) > 0
+        # Verify timestamps are datetime objects
+        assert all(isinstance(ts, datetime) for ts in result_ts)
+        # Verify activity values are numeric
+        assert all(isinstance(act, int | float) for act in result_act)
 
     def test_uses_specified_column(self, service: DataLoadingService, sample_csv_file: Path) -> None:
         """Uses specified activity column preference."""
@@ -590,8 +617,13 @@ class TestLoadCsvActivityData:
             activity_column=ActivityDataPreference.VECTOR_MAGNITUDE,
         )
 
-        # Should still work with vector magnitude
-        assert result_ts is not None or result_act is not None
+        # Should still work with vector magnitude and return valid data
+        assert result_ts is not None
+        assert result_act is not None
+        # Verify we got data for the specified date
+        assert len(result_ts) > 0
+        assert len(result_act) > 0
+        assert len(result_ts) == len(result_act)
 
     def test_returns_none_for_out_of_range(self, service: DataLoadingService, sample_csv_file: Path) -> None:
         """Returns None when date is out of data range."""
@@ -627,8 +659,13 @@ class TestLoadActivityDataOnly:
             hours=24,
         )
 
+        # Verify result is not None and contains expected data
         assert result is not None
-        assert result == (timestamps, activities)
+        result_ts, result_act = result
+        assert result_ts == timestamps
+        assert result_act == activities
+        assert len(result_ts) == 5
+        assert all(act == 100.0 for act in result_act)
 
     def test_falls_back_to_csv(self, service: DataLoadingService, mock_db_manager: MagicMock, sample_csv_file: Path) -> None:
         """Falls back to CSV when database fails with specific error types."""
@@ -645,9 +682,14 @@ class TestLoadActivityDataOnly:
             hours=24,
         )
 
-        # Should get data from CSV fallback - may be None if date is out of range
-        # The key is that it doesn't raise an exception
-        assert True  # Fallback was tried
+        # Should get data from CSV fallback for the date in the sample file
+        # Verify we got actual data, not just that it didn't raise
+        assert result is not None
+        result_ts, result_act = result
+        # Should get some data for the date (actual count depends on sample file)
+        assert len(result_ts) > 0
+        assert len(result_act) > 0
+        assert len(result_ts) == len(result_act)
 
     def test_returns_none_when_no_data(self, service: DataLoadingService, mock_db_manager: MagicMock) -> None:
         """Returns None when no data source available."""
@@ -735,7 +777,11 @@ class TestLoadAxisYAligned:
 
         result = service.load_axis_y_aligned("test.csv", date(2024, 1, 15))
 
+        # Verify result is not empty and contains expected data
         assert isinstance(result, AlignedActivityData)
+        assert not result.is_empty
+        assert len(result.timestamps) == 1
+        assert result.activity_values[0] == 100.0
 
     def test_falls_back_to_csv(self, service: DataLoadingService, mock_db_manager: MagicMock, sample_csv_file: Path) -> None:
         """Falls back to CSV when database fails."""
@@ -744,8 +790,12 @@ class TestLoadAxisYAligned:
 
         result = service.load_axis_y_aligned("test.csv", datetime(2024, 1, 15))
 
-        # Should get data from CSV or empty
+        # Should get data from CSV fallback and return valid AlignedActivityData
         assert isinstance(result, AlignedActivityData)
+        # For the sample file, we should get some data for 2024-01-15
+        assert not result.is_empty
+        # Should have at least one timestamp
+        assert len(result.timestamps) > 0
 
 
 # ============================================================================
@@ -757,14 +807,17 @@ class TestClearCurrentData:
     """Tests for clear_current_data method."""
 
     def test_clears_all_csv_state(self, service: DataLoadingService, sample_csv_file: Path) -> None:
-        """Clears all stored CSV state."""
-        # First load some data
+        """Clears all stored CSV state with verification of before/after states."""
+        # First load some data and verify it's loaded
         service._load_csv_file(sample_csv_file, skip_rows=10)
         assert service.current_data is not None
+        assert len(service.current_data) == 5  # Verify data was actually loaded
+        assert service.current_date_col == "Date"  # Verify column was identified
 
         # Clear it
         service.clear_current_data()
 
+        # Verify ALL state is cleared
         assert service.current_data is None
         assert service.current_date_col is None
         assert service.current_time_col is None

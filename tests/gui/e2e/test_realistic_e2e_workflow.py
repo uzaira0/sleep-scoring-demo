@@ -17,7 +17,7 @@ Run with:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, time
+from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import patch
@@ -26,8 +26,8 @@ import numpy as np
 import pandas as pd
 import pytest
 from PyQt6.QtCore import Qt, QTime
-from PyQt6.QtWidgets import QApplication, QTabWidget
 from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QApplication, QTabWidget
 
 if TYPE_CHECKING:
     from pytestqt.qtbot import QtBot
@@ -67,13 +67,13 @@ def _create_realistic_data(folder: Path) -> dict:
 
         # Define sleep pattern for this day (varying slightly each day)
         sleep_onset_hour = 22 + (day % 2) * 0.5  # 22:00 or 22:30
-        sleep_offset_hour = 6 + (day % 3) * 0.5   # 6:00, 6:30, or 7:00
+        sleep_offset_hour = 6 + (day % 3) * 0.5  # 6:00, 6:30, or 7:00
         expected_sleep[date_str] = (sleep_onset_hour, sleep_offset_hour)
 
         # Define nonwear for some days (90+ minutes of zeros)
         if day in [2, 5]:  # Days 3 and 6 have nonwear
             nonwear_start = 14  # 2 PM
-            nonwear_end = 16    # 4 PM (2 hours)
+            nonwear_end = 16  # 4 PM (2 hours)
             expected_nonwear[date_str] = [(nonwear_start, nonwear_end)]
         else:
             expected_nonwear[date_str] = []
@@ -89,24 +89,24 @@ def _create_realistic_data(folder: Path) -> dict:
                     activity = np.random.randint(10, 50)
                 else:
                     activity = np.random.randint(0, 10)
-            elif date_str in expected_nonwear and any(
-                start <= hour < end for start, end in expected_nonwear[date_str]
-            ):
+            elif date_str in expected_nonwear and any(start <= hour < end for start, end in expected_nonwear[date_str]):
                 # Nonwear - complete zeros (Choi algorithm requires this)
                 activity = 0
             else:
                 # Awake - high activity
                 activity = 100 + np.random.randint(-50, 150)
 
-            all_data.append({
-                "Date": ts.strftime("%m/%d/%Y"),
-                "Time": ts.strftime("%H:%M:%S"),
-                "Axis1": activity,
-                "Axis2": int(activity * 0.7),
-                "Axis3": int(activity * 0.4),
-                "Vector Magnitude": int(np.sqrt(activity**2 + (activity*0.7)**2 + (activity*0.4)**2)),
-                "Steps": np.random.randint(0, 20) if activity > 100 else 0,
-            })
+            all_data.append(
+                {
+                    "Date": ts.strftime("%m/%d/%Y"),
+                    "Time": ts.strftime("%H:%M:%S"),
+                    "Axis1": activity,
+                    "Axis2": int(activity * 0.7),
+                    "Axis3": int(activity * 0.4),
+                    "Vector Magnitude": int(np.sqrt(activity**2 + (activity * 0.7) ** 2 + (activity * 0.4) ** 2)),
+                    "Steps": np.random.randint(0, 20) if activity > 100 else 0,
+                }
+            )
 
     df = pd.DataFrame(all_data)
 
@@ -117,7 +117,6 @@ def _create_realistic_data(folder: Path) -> dict:
         filepath = folder / filename
         df.to_csv(filepath, index=False)
         files.append(filename)
-        print(f"   Created: {filename} ({len(df)} rows)")
 
     return {
         "files": files,
@@ -131,8 +130,8 @@ def _create_realistic_data(folder: Path) -> dict:
 def test_env(qtbot, tmp_path):
     """Set up test environment with realistic data."""
     import sleep_scoring_app.data.database as db_module
-    from sleep_scoring_app.utils.config import ConfigManager
     from sleep_scoring_app.core.dataclasses import AppConfig
+    from sleep_scoring_app.utils.config import ConfigManager
 
     db_module._database_initialized = False
     db_path = tmp_path / "test.db"
@@ -140,7 +139,6 @@ def test_env(qtbot, tmp_path):
     data_folder = tmp_path / "data"
     data_folder.mkdir()
 
-    print("\n[SETUP] Creating realistic test data...")
     test_metadata = _create_realistic_data(data_folder)
 
     exports_folder = tmp_path / "exports"
@@ -156,9 +154,9 @@ def test_env(qtbot, tmp_path):
     def patched_init(self, db_path_arg=None):
         original_init(self, db_path=str(db_path))
 
-    with patch.object(db_module.DatabaseManager, '__init__', patched_init):
-        with patch.object(ConfigManager, 'is_config_valid', return_value=True):
-            with patch.object(ConfigManager, 'config', config, create=True):
+    with patch.object(db_module.DatabaseManager, "__init__", patched_init):
+        with patch.object(ConfigManager, "is_config_valid", return_value=True):
+            with patch.object(ConfigManager, "config", config, create=True):
                 from sleep_scoring_app.ui.main_window import SleepScoringMainWindow
                 from sleep_scoring_app.ui.store import Actions
 
@@ -171,10 +169,6 @@ def test_env(qtbot, tmp_path):
                 window.showMaximized()
                 qtbot.waitExposed(window)
                 qtbot.wait(DELAY)
-
-                print("\n" + "=" * 80)
-                print("REALISTIC E2E TEST - VISIBLE WINDOW")
-                print("=" * 80)
 
                 yield {
                     "window": window,
@@ -217,95 +211,68 @@ class TestRealisticWorkflow:
         # ================================================================
         # PHASE 1: STUDY SETTINGS - Configure and VERIFY
         # ================================================================
-        print("\n" + "=" * 80)
-        print("PHASE 1: CONFIGURE STUDY SETTINGS AND VERIFY")
-        print("=" * 80)
 
         self._switch_tab(tab_widget, "Study", qtbot)
         study_tab = window.study_settings_tab
 
         # 1.1 Set and VERIFY Data Paradigm
-        print("\n[1.1] Setting Data Paradigm...")
         paradigm_combo = study_tab.data_paradigm_combo
         self._set_combo_by_data(paradigm_combo, StudyDataParadigm.EPOCH_BASED, qtbot)
-        assert paradigm_combo.currentData() == StudyDataParadigm.EPOCH_BASED, \
-            f"Paradigm should be EPOCH_BASED, got {paradigm_combo.currentData()}"
-        print(f"     VERIFIED: {paradigm_combo.currentText()}")
+        assert paradigm_combo.currentData() == StudyDataParadigm.EPOCH_BASED, f"Paradigm should be EPOCH_BASED, got {paradigm_combo.currentData()}"
 
         # 1.2 Set and VERIFY Sleep Algorithm - Start with Sadeh
-        print("\n[1.2] Setting Sleep Algorithm to Sadeh...")
         algo_combo = study_tab.sleep_algorithm_combo
         self._set_combo_by_data(algo_combo, AlgorithmType.SADEH_1994_ACTILIFE, qtbot)
-        assert algo_combo.currentData() == AlgorithmType.SADEH_1994_ACTILIFE, \
-            f"Algorithm should be SADEH, got {algo_combo.currentData()}"
+        assert algo_combo.currentData() == AlgorithmType.SADEH_1994_ACTILIFE, f"Algorithm should be SADEH, got {algo_combo.currentData()}"
         # Verify store was updated
-        assert window.store.state.sleep_algorithm_id == AlgorithmType.SADEH_1994_ACTILIFE.value, \
+        assert window.store.state.sleep_algorithm_id == AlgorithmType.SADEH_1994_ACTILIFE.value, (
             f"Store algorithm should be sadeh, got {window.store.state.sleep_algorithm_id}"
-        print(f"     VERIFIED in UI: {algo_combo.currentText()}")
-        print(f"     VERIFIED in Store: {window.store.state.sleep_algorithm_id}")
+        )
 
         # 1.3 Set and VERIFY Sleep Period Detector
-        print("\n[1.3] Setting Sleep Period Detector...")
         detector_combo = study_tab.sleep_period_detector_combo
         self._set_combo_by_data(detector_combo, SleepPeriodDetectorType.CONSECUTIVE_ONSET3S_OFFSET5S, qtbot)
         assert detector_combo.currentData() == SleepPeriodDetectorType.CONSECUTIVE_ONSET3S_OFFSET5S
-        print(f"     VERIFIED: {detector_combo.currentText()}")
 
         # 1.4 Set and VERIFY Night Hours
-        print("\n[1.4] Setting Night Hours (21:00 - 09:00)...")
         study_tab.night_start_time.setTime(QTime(21, 0))
         study_tab.night_end_time.setTime(QTime(9, 0))
         qtbot.wait(DELAY)
         assert study_tab.night_start_time.time().hour() == 21
         assert study_tab.night_end_time.time().hour() == 9
-        print(f"     VERIFIED: {study_tab.night_start_time.time().toString('HH:mm')} - {study_tab.night_end_time.time().toString('HH:mm')}")
 
         # 1.5 Set and VERIFY Nonwear Algorithm
-        print("\n[1.5] Setting Nonwear Algorithm...")
         nonwear_combo = study_tab.nonwear_algorithm_combo
         self._set_combo_by_data(nonwear_combo, NonwearAlgorithm.CHOI_2011, qtbot)
         assert nonwear_combo.currentData() == NonwearAlgorithm.CHOI_2011
-        print(f"     VERIFIED: {nonwear_combo.currentText()}")
 
         # 1.6 Set ID Pattern and VERIFY
-        print("\n[1.6] Setting ID Pattern...")
         study_tab.id_pattern_edit.clear()
         qtbot.keyClicks(study_tab.id_pattern_edit, r"(P\d{3})")
         qtbot.wait(DELAY)
         assert study_tab.id_pattern_edit.text() == r"(P\d{3})"
-        print(f"     VERIFIED: {study_tab.id_pattern_edit.text()}")
-
-        print("\n[OK] All Study Settings configured and VERIFIED")
 
         # ================================================================
         # PHASE 2: DATA SETTINGS - Import and VERIFY
         # ================================================================
-        print("\n" + "=" * 80)
-        print("PHASE 2: IMPORT DATA AND VERIFY")
-        print("=" * 80)
 
         self._switch_tab(tab_widget, "Data", qtbot)
         data_tab = window.data_settings_tab
 
         # 2.1 Set Device Preset
-        print("\n[2.1] Setting Device Preset to ActiGraph...")
         device_combo = data_tab.device_preset_combo
         for i in range(device_combo.count()):
             if "ActiGraph" in device_combo.itemText(i):
                 device_combo.setCurrentIndex(i)
                 break
         qtbot.wait(DELAY)
-        print(f"     Set to: {device_combo.currentText()}")
 
         # 2.2 Set Epoch Length
-        print("\n[2.2] Setting Epoch Length to 60...")
         data_tab.epoch_length_spin.setValue(60)
         qtbot.wait(DELAY)
         assert data_tab.epoch_length_spin.value() == 60
-        print(f"     VERIFIED: {data_tab.epoch_length_spin.value()}")
 
         # 2.3 Import files
-        print("\n[2.3] Importing files...")
         window.data_service.set_data_folder(str(data_folder))
         qtbot.wait(DELAY)
 
@@ -318,54 +285,40 @@ class TestRealisticWorkflow:
         qtbot.wait(DELAY)
 
         # VERIFY import
-        assert len(result.imported_files) == len(test_files), \
-            f"Should import {len(test_files)} files, got {len(result.imported_files)}"
-        print(f"     VERIFIED: {len(result.imported_files)} files imported")
+        assert len(result.imported_files) == len(test_files), f"Should import {len(test_files)} files, got {len(result.imported_files)}"
 
         # 2.4 Verify files are available
         available_files = window.data_service.find_available_files()
-        assert len(available_files) >= len(test_files), \
-            f"Should have {len(test_files)} files, got {len(available_files)}"
-        print(f"     VERIFIED: {len(available_files)} files available")
+        assert len(available_files) >= len(test_files), f"Should have {len(test_files)} files, got {len(available_files)}"
         for f in available_files:
-            print(f"       - {f.filename}")
+            pass
 
         # ================================================================
         # PHASE 3: PROCESS EACH DAY WITH MARKERS
         # ================================================================
-        print("\n" + "=" * 80)
-        print("PHASE 3: PROCESS EACH DAY - PLACE MARKERS")
-        print("=" * 80)
 
         self._switch_tab(tab_widget, "Analysis", qtbot)
 
         # Select first file
         first_file = available_files[0]
-        print(f"\n[3.0] Selecting file: {first_file.filename}")
         window.on_file_selected_from_table(first_file)
         qtbot.wait(DELAY * 2)
 
         # Verify dates loaded
         dates = window.store.state.available_dates
-        assert len(dates) >= metadata["total_days"], \
-            f"Should have {metadata['total_days']} days, got {len(dates)}"
-        print(f"     VERIFIED: {len(dates)} dates loaded")
+        assert len(dates) >= metadata["total_days"], f"Should have {metadata['total_days']} days, got {len(dates)}"
 
         # Process EACH day
         days_processed = 0
         markers_placed = 0
 
         for day_idx, date_str in enumerate(dates):
-            print(f"\n[3.{day_idx + 1}] Processing day {day_idx + 1}: {date_str}")
-
             # Navigate to this date
             window.store.dispatch(Actions.date_selected(day_idx))
             qtbot.wait(DELAY)
 
             # Verify we're on the right date
-            assert window.store.state.current_date_index == day_idx, \
-                f"Should be on date index {day_idx}"
-            print(f"     Navigated to index {day_idx}")
+            assert window.store.state.current_date_index == day_idx, f"Should be on date index {day_idx}"
 
             # Get expected sleep times for this date
             if date_str in expected_sleep:
@@ -386,8 +339,7 @@ class TestRealisticWorkflow:
                 # Calculate offset (next day, morning)
                 offset_minute = int((offset_hour % 1) * 60)
                 next_day = datetime(year, month, day) + timedelta(days=1)
-                offset_dt = datetime(next_day.year, next_day.month, next_day.day,
-                                    int(offset_hour), offset_minute, 0)
+                offset_dt = datetime(next_day.year, next_day.month, next_day.day, int(offset_hour), offset_minute, 0)
 
                 # Create sleep markers
                 markers = DailySleepMarkers()
@@ -407,106 +359,83 @@ class TestRealisticWorkflow:
                 assert current_markers.period_1 is not None, "Period 1 should exist"
                 assert current_markers.period_1.is_complete, "Period should be complete"
 
-                print(f"     PLACED sleep markers: {onset_dt.strftime('%H:%M')} - {offset_dt.strftime('%H:%M')}")
-                print(f"     VERIFIED: Period complete = {current_markers.period_1.is_complete}")
-
                 markers_placed += 1
 
             # Check for nonwear on this date
-            if date_str in expected_nonwear and expected_nonwear[date_str]:
-                print(f"     [NOTE] This day has expected nonwear periods")
+            if expected_nonwear.get(date_str):
                 for nw_start, nw_end in expected_nonwear[date_str]:
-                    print(f"       Nonwear: {int(nw_start):02d}:00 - {int(nw_end):02d}:00")
+                    pass
 
             # Save markers
             if window.analysis_tab.save_markers_btn.isEnabled():
                 qtbot.mouseClick(window.analysis_tab.save_markers_btn, Qt.MouseButton.LeftButton)
                 qtbot.wait(DELAY)
-                print(f"     SAVED markers to database")
 
             days_processed += 1
-
-        print(f"\n[OK] Processed {days_processed} days, placed {markers_placed} sleep periods")
 
         # ================================================================
         # PHASE 4: SWITCH ALGORITHMS AND VERIFY CHANGES
         # ================================================================
-        print("\n" + "=" * 80)
-        print("PHASE 4: SWITCH ALGORITHMS AND VERIFY")
-        print("=" * 80)
 
         # Go back to first date
         window.store.dispatch(Actions.date_selected(0))
         qtbot.wait(DELAY)
 
         # Current algorithm should be Sadeh
-        print(f"\n[4.1] Current algorithm: {window.store.state.sleep_algorithm_id}")
         assert "sadeh" in window.store.state.sleep_algorithm_id.lower()
 
         # Switch to Cole-Kripke
-        print("\n[4.2] Switching to Cole-Kripke...")
         self._switch_tab(tab_widget, "Study", qtbot)
         algo_combo = window.study_settings_tab.sleep_algorithm_combo
         self._set_combo_by_data(algo_combo, AlgorithmType.COLE_KRIPKE_1992_ACTILIFE, qtbot)
         qtbot.wait(DELAY * 2)
 
         # VERIFY algorithm changed in store
-        assert window.store.state.sleep_algorithm_id == AlgorithmType.COLE_KRIPKE_1992_ACTILIFE.value, \
+        assert window.store.state.sleep_algorithm_id == AlgorithmType.COLE_KRIPKE_1992_ACTILIFE.value, (
             f"Algorithm should be Cole-Kripke, got {window.store.state.sleep_algorithm_id}"
-        print(f"     VERIFIED: Algorithm is now {window.store.state.sleep_algorithm_id}")
+        )
 
         # Switch back to Analysis and verify display updated
         self._switch_tab(tab_widget, "Analysis", qtbot)
         qtbot.wait(DELAY)
 
         # Switch to different detector
-        print("\n[4.3] Switching Sleep Period Detector...")
         self._switch_tab(tab_widget, "Study", qtbot)
         detector_combo = window.study_settings_tab.sleep_period_detector_combo
 
         # Try a different detector
         self._set_combo_by_data(detector_combo, SleepPeriodDetectorType.CONSECUTIVE_ONSET5S_OFFSET10S, qtbot)
         qtbot.wait(DELAY)
-        print(f"     Changed to: {detector_combo.currentText()}")
 
         # Switch back
         self._set_combo_by_data(detector_combo, SleepPeriodDetectorType.CONSECUTIVE_ONSET3S_OFFSET5S, qtbot)
         qtbot.wait(DELAY)
-        print(f"     Restored to: {detector_combo.currentText()}")
 
         # ================================================================
         # PHASE 5: VERIFY DATE NAVIGATION
         # ================================================================
-        print("\n" + "=" * 80)
-        print("PHASE 5: VERIFY DATE NAVIGATION")
-        print("=" * 80)
 
         self._switch_tab(tab_widget, "Analysis", qtbot)
 
         # Test arrow key navigation
-        print("\n[5.1] Testing keyboard navigation...")
         window.activateWindow()
         window.setFocus()
 
         initial_idx = window.store.state.current_date_index
-        print(f"     Starting at index: {initial_idx}")
 
         # Navigate forward
         for i in range(3):
             QTest.keyClick(window, Qt.Key.Key_Right)
             qtbot.wait(DELAY)
             new_idx = window.store.state.current_date_index
-            print(f"     After Right arrow: index = {new_idx}")
 
         # Navigate backward
         for i in range(3):
             QTest.keyClick(window, Qt.Key.Key_Left)
             qtbot.wait(DELAY)
             new_idx = window.store.state.current_date_index
-            print(f"     After Left arrow: index = {new_idx}")
 
         # Test button navigation
-        print("\n[5.2] Testing button navigation...")
         next_btn = window.analysis_tab.next_date_btn
         prev_btn = window.analysis_tab.prev_date_btn
 
@@ -514,83 +443,52 @@ class TestRealisticWorkflow:
             if next_btn.isEnabled():
                 qtbot.mouseClick(next_btn, Qt.MouseButton.LeftButton)
                 qtbot.wait(DELAY)
-                print(f"     Next clicked: now at {window.store.state.current_date_index}")
 
         for i in range(2):
             if prev_btn.isEnabled():
                 qtbot.mouseClick(prev_btn, Qt.MouseButton.LeftButton)
                 qtbot.wait(DELAY)
-                print(f"     Prev clicked: now at {window.store.state.current_date_index}")
 
         # ================================================================
         # PHASE 6: EXPORT AND VERIFY DATA
         # ================================================================
-        print("\n" + "=" * 80)
-        print("PHASE 6: EXPORT AND VERIFY DATA")
-        print("=" * 80)
 
         self._switch_tab(tab_widget, "Export", qtbot)
 
         # Export
-        print("\n[6.1] Exporting data...")
         export_result = window.export_manager.export_all_sleep_data(str(exports_folder))
         qtbot.wait(DELAY)
-        print(f"     Result: {export_result}")
 
         # Find and validate export file
-        print("\n[6.2] Validating export...")
         export_files = list(exports_folder.glob("*.csv"))
         assert len(export_files) >= 1, "Should have at least 1 export file"
-        print(f"     Found {len(export_files)} export file(s)")
 
         # Read and verify export content
         export_df = pd.read_csv(export_files[0])
-        print(f"\n[6.3] Export file analysis:")
-        print(f"     Rows: {len(export_df)}")
-        print(f"     Columns: {len(export_df.columns)}")
 
         # Verify we have data for multiple days
-        assert len(export_df) >= markers_placed, \
-            f"Should have at least {markers_placed} rows, got {len(export_df)}"
-        print(f"     VERIFIED: {len(export_df)} records (expected >= {markers_placed})")
+        assert len(export_df) >= markers_placed, f"Should have at least {markers_placed} rows, got {len(export_df)}"
 
         # Check for expected columns
         expected_cols = ["Onset Time", "Offset Time", "Total Sleep Time"]
         for col in expected_cols:
             matching = [c for c in export_df.columns if col.lower() in c.lower()]
             if matching:
-                print(f"     VERIFIED column: {matching[0]}")
+                pass
 
         # Show sample data
-        print(f"\n[6.4] Sample export data:")
-        print(f"     Columns: {list(export_df.columns)[:10]}...")
         if len(export_df) > 0:
-            print(f"     First row sample:")
             for col in list(export_df.columns)[:6]:
-                print(f"       {col}: {export_df.iloc[0][col]}")
+                pass
 
         # ================================================================
         # FINAL SUMMARY
         # ================================================================
-        print("\n" + "=" * 80)
-        print("WORKFLOW COMPLETE - SUMMARY")
-        print("=" * 80)
-
-        print(f"\n  Files imported: {len(result.imported_files)}")
-        print(f"  Days processed: {days_processed}")
-        print(f"  Markers placed: {markers_placed}")
-        print(f"  Export rows: {len(export_df)}")
-        print(f"  Export columns: {len(export_df.columns)}")
-        print(f"  Final algorithm: {window.store.state.sleep_algorithm_id}")
 
         # Final assertions
         assert days_processed == len(dates), "Should process all days"
         assert markers_placed > 0, "Should place at least some markers"
         assert len(export_df) > 0, "Export should have data"
-
-        print("\n" + "=" * 80)
-        print("ALL VERIFICATIONS PASSED")
-        print("=" * 80)
 
         qtbot.wait(DELAY * 3)
 
@@ -617,4 +515,5 @@ class TestRealisticWorkflow:
 def cleanup():
     yield
     import gc
+
     gc.collect()

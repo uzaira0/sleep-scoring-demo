@@ -124,7 +124,7 @@ __all__ = [
     # I/O constants
     "ActivityColumn",
     "ActivityDataPreference",
-    # UI constants (DEPRECATED - import from sleep_scoring_app.ui.constants instead)
+    # UI constants (also available via sleep_scoring_app.ui.constants)
     "AlgorithmHelpText",
     # Algorithm constants
     "AlgorithmOutputColumn",

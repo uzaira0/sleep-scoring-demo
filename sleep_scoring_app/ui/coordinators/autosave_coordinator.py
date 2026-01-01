@@ -153,6 +153,17 @@ class AutosaveCoordinator:
         if not self.config.enabled:
             return
 
+        # Detect when auto-save is RE-ENABLED while markers are already dirty
+        # This handles: auto→manual (make changes)→auto scenario
+        auto_save_just_enabled = not old_state.auto_save_enabled and new_state.auto_save_enabled
+        if auto_save_just_enabled:
+            if new_state.sleep_markers_dirty:
+                self._pending_changes.add(PendingChangeType.SLEEP_MARKERS)
+                logger.debug("Auto-save re-enabled with dirty sleep markers, scheduling save")
+            if new_state.nonwear_markers_dirty:
+                self._pending_changes.add(PendingChangeType.NONWEAR_MARKERS)
+                logger.debug("Auto-save re-enabled with dirty nonwear markers, scheduling save")
+
         # Only autosave markers if auto_save_enabled in Redux state
         # (user can toggle via checkbox - respects their preference)
         if new_state.auto_save_enabled:

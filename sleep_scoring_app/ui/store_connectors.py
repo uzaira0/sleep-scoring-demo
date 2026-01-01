@@ -829,28 +829,23 @@ class AdjacentMarkersConnector:
     def __init__(self, store: UIStore, main_window: MainWindowProtocol) -> None:
         self.store = store
         self.main_window = main_window
-        self._last_date_index = store.state.current_date_index
+        self._pending_reload = False  # Track if we need to reload after data loads
         self._unsubscribe = store.subscribe(self._on_state_change)
 
         # Initial update
         self._update_checkbox(store.state.show_adjacent_markers)
 
     def _on_state_change(self, old_state: UIState, new_state: UIState) -> None:
-        """React to adjacent markers visibility OR date index changes."""
-        from PyQt6.QtCore import QTimer
-
+        """React to adjacent markers visibility or date changes."""
         visibility_changed = old_state.show_adjacent_markers != new_state.show_adjacent_markers
         date_changed = old_state.current_date_index != new_state.current_date_index
 
         if visibility_changed:
             self._update_checkbox(new_state.show_adjacent_markers)
             self._toggle_markers(new_state.show_adjacent_markers)
-
         elif date_changed and new_state.show_adjacent_markers:
-            # Date changed and markers are enabled - reload for new date
-            # Use QTimer.singleShot(0) to defer until after NavigationConnector updates the plot
-            logger.info(f"ADJACENT CONNECTOR: Date changed to {new_state.current_date_index}, scheduling reload")
-            QTimer.singleShot(0, lambda: self._toggle_markers(True))
+            # Date changed with checkbox checked - reload immediately (same as checkbox toggle)
+            self._toggle_markers(True)
 
     def _update_checkbox(self, enabled: bool) -> None:
         """Update checkbox state without triggering signals."""

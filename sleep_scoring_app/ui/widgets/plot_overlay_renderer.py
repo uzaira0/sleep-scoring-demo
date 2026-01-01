@@ -21,7 +21,9 @@ from PyQt6.QtCore import QTimer
 from sleep_scoring_app.core.constants import NonwearAlgorithm, NonwearDataSource, UIColors
 
 if TYPE_CHECKING:
-    from sleep_scoring_app.services.nonwear_service import NonwearPeriod
+    from sleep_scoring_app.core.dataclasses import NonwearPeriod
+    from sleep_scoring_app.ui.protocols import AppStateInterface
+    from sleep_scoring_app.ui.store import UIStore
     from sleep_scoring_app.ui.widgets.activity_plot import ActivityPlotWidget
 
 logger = logging.getLogger(__name__)
@@ -36,13 +38,44 @@ class PlotOverlayRenderer:
     - Manage Choi algorithm caching and updates
     - Create background region visualizations
     - Handle overlay color customization
+
+    Data Access (ARCHITECTURE):
+    - Uses Redux store for all application state (timestamps, sadeh_results, etc.)
+    - Visual Qt objects (regions, plot items) remain on parent widget
+    - Widget-local state (nonwear_data, caches) remain on parent until migrated to store
     """
 
-    def __init__(self, parent: ActivityPlotWidget) -> None:
-        """Initialize the plot overlay renderer."""
+    def __init__(self, parent: ActivityPlotWidget, main_window: AppStateInterface) -> None:
+        """Initialize the plot overlay renderer with store access."""
         self.parent = parent
+        self._main_window = main_window
         self._choi_cache: dict[str, dict[str, Any]] = {}
-        logger.info("PlotOverlayRenderer initialized")
+        logger.info("PlotOverlayRenderer initialized with store access")
+
+    @property
+    def store(self) -> UIStore:
+        """Get Redux store from main window."""
+        return self._main_window.store
+
+    @property
+    def _timestamps(self) -> tuple:
+        """Get timestamps from Redux store (single source of truth)."""
+        return self.store.state.activity_timestamps
+
+    @property
+    def _sadeh_results(self) -> tuple:
+        """Get Sadeh results from Redux store (single source of truth)."""
+        return self.store.state.sadeh_results
+
+    @property
+    def _axis_y_data(self) -> tuple:
+        """Get axis Y data from Redux store (single source of truth)."""
+        return self.store.state.axis_y_data
+
+    @property
+    def _current_filename(self) -> str | None:
+        """Get current filename from Redux store (single source of truth)."""
+        return self.store.state.current_file
 
     def _get_choi_activity_column(self) -> str:
         """Get the Choi activity column from config."""
@@ -168,7 +201,7 @@ class PlotOverlayRenderer:
         overlap_border,
     ) -> None:
         """Plot nonwear periods using numpy operations."""
-        n_timestamps = len(self.parent.timestamps)
+        n_timestamps = len(self._timestamps)
         if len(sensor_mask) < n_timestamps:
             sensor_mask = sensor_mask + [0] * (n_timestamps - len(sensor_mask))
         if len(choi_mask) < n_timestamps:
@@ -199,21 +232,21 @@ class PlotOverlayRenderer:
         logger.debug("Found %d %s periods", len(starts), period_type)
 
         for start_idx, end_idx in zip(starts, ends, strict=False):
-            if start_idx < len(self.parent.timestamps) and end_idx < len(self.parent.timestamps):
+            if start_idx < len(self._timestamps) and end_idx < len(self._timestamps):
                 self._create_period_region(start_idx, end_idx, brush, border)
 
     def _create_period_region(self, start_idx: int, end_idx: int, brush, border) -> None:
         """Create visualization region for a period."""
-        if start_idx is not None and start_idx < len(self.parent.timestamps) and end_idx < len(self.parent.timestamps):
-            start_ts = self.parent.timestamps[start_idx].timestamp()
-            end_ts = self.parent.timestamps[end_idx].timestamp()
+        if start_idx is not None and start_idx < len(self._timestamps) and end_idx < len(self._timestamps):
+            start_ts = self._timestamps[start_idx].timestamp()
+            end_ts = self._timestamps[end_idx].timestamp()
 
             logger.debug(
                 "Creating visual region: indices %d-%d, timestamps %s-%s",
                 start_idx,
                 end_idx,
-                self.parent.timestamps[start_idx].strftime("%H:%M"),
-                self.parent.timestamps[end_idx].strftime("%H:%M"),
+                self._timestamps[start_idx].strftime("%H:%M"),
+                self._timestamps[end_idx].strftime("%H:%M"),
             )
 
             region = self.add_background_region(start_ts, end_ts, brush, border)
@@ -223,7 +256,7 @@ class PlotOverlayRenderer:
                 "Invalid period indices: start=%s, end=%s, timestamps_length=%d",
                 start_idx,
                 end_idx,
-                len(self.parent.timestamps) if hasattr(self.parent, "timestamps") else 0,  # KEEP: Duck typing plot/marker attributes
+                len(self._timestamps) if hasattr(self.parent, "timestamps") else 0,  # KEEP: Duck typing plot/marker attributes
             )
 
     def add_background_region(
@@ -250,7 +283,7 @@ class PlotOverlayRenderer:
         """Recalculate Choi algorithm with new data while preserving Sadeh algorithm state."""
         logger.debug("Updating Choi overlay with new activity data")
 
-        if not new_activity_data or not self.parent.timestamps:
+        if not new_activity_data or not self._timestamps:
             logger.warning("Cannot update Choi overlay: missing activity data or timestamps")
             return
 
@@ -263,12 +296,13 @@ class PlotOverlayRenderer:
         try:
             from sleep_scoring_app.core.nonwear_data import ActivityDataView, NonwearData
 
-            preserved_sadeh_results = getattr(self.parent, "sadeh_results", None)
+            # Algorithm cache is widget-local (for perf), preserved across Choi updates
             preserved_algorithm_cache = getattr(self.parent, "_algorithm_cache", {}).copy()
+            # NOTE: sadeh_results lives in Redux store - independent of Choi updates, no preservation needed
 
-            current_filename = getattr(self.parent, "current_filename", "unknown")
+            current_filename = self._current_filename or "unknown"
             new_activity_view = ActivityDataView.create(
-                timestamps=list(self.parent.timestamps),
+                timestamps=list(self._timestamps),
                 counts=new_activity_data,
                 filename=current_filename,
             )
@@ -287,10 +321,7 @@ class PlotOverlayRenderer:
             self.clear_nonwear_visualizations()
             self.parent.nonwear_data = new_nonwear_data
 
-            if preserved_sadeh_results is not None:
-                self.parent.sadeh_results = preserved_sadeh_results
-                logger.debug("Preserved Sadeh results: %d entries", len(self.parent.sadeh_results))
-
+            # Restore algorithm cache (sadeh_results in store, not affected)
             self.parent._algorithm_cache = preserved_algorithm_cache
 
             logger.debug("Plotting updated Choi overlay")
@@ -313,7 +344,7 @@ class PlotOverlayRenderer:
         """Asynchronously recalculate Choi algorithm with new data."""
         logger.debug("Starting async Choi overlay update")
 
-        if not new_activity_data or not self.parent.timestamps:
+        if not new_activity_data or not self._timestamps:
             logger.warning("Cannot update Choi overlay async: missing activity data or timestamps")
             return
 
@@ -323,26 +354,31 @@ class PlotOverlayRenderer:
             logger.debug("Used cached Choi results for immediate update")
             return
 
+        # CRITICAL: Capture ALL data at scheduling time, not execution time.
+        # If user switches dates quickly, self._timestamps would change
+        # between scheduling and execution, causing data mismatch.
+        captured_timestamps = list(self._timestamps)
+        captured_filename = self._current_filename or "unknown"
+        captured_sensor_periods = []
+        if self.parent.nonwear_data:
+            captured_sensor_periods = list(self.parent.nonwear_data.sensor_periods)
+        captured_choi_column = self._get_choi_activity_column()
+
         def compute_choi_async():
             try:
                 from sleep_scoring_app.core.nonwear_data import ActivityDataView, NonwearData
 
-                current_filename = getattr(self.parent, "current_filename", "unknown")
                 new_activity_view = ActivityDataView.create(
-                    timestamps=list(self.parent.timestamps),
+                    timestamps=captured_timestamps,
                     counts=new_activity_data,
-                    filename=current_filename,
+                    filename=captured_filename,
                 )
-
-                raw_sensor_periods = []
-                if self.parent.nonwear_data:
-                    raw_sensor_periods = list(self.parent.nonwear_data.sensor_periods)
 
                 return NonwearData.create_for_activity_view(
                     activity_view=new_activity_view,
-                    raw_sensor_periods=raw_sensor_periods,
+                    raw_sensor_periods=captured_sensor_periods,
                     nonwear_service=None,
-                    choi_activity_column=self._get_choi_activity_column(),
+                    choi_activity_column=captured_choi_column,
                 )
             except Exception as e:
                 logger.exception("Error in async Choi computation: %s", e)
@@ -354,15 +390,27 @@ class PlotOverlayRenderer:
                 self.parent.error_occurred.emit("Async nonwear computation failed")
                 return
 
+            # Verify we're still on the same data before applying results
+            # If user navigated away, discard stale results
+            # Use fast comparison: check length and first/last timestamps only (O(1) not O(n))
+            current_timestamps = self._timestamps  # From Redux store
+            if current_timestamps:
+                curr_len = len(current_timestamps)
+                capt_len = len(captured_timestamps)
+                if curr_len != capt_len or (
+                    curr_len > 0 and (current_timestamps[0] != captured_timestamps[0] or current_timestamps[-1] != captured_timestamps[-1])
+                ):
+                    logger.info("Discarding stale Choi results - user navigated to different date")
+                    return
+
             try:
-                preserved_sadeh_results = getattr(self.parent, "sadeh_results", None)
+                # Algorithm cache is widget-local (for perf), preserved across Choi updates
+                # NOTE: sadeh_results lives in Redux store - independent of Choi updates
                 preserved_algorithm_cache = getattr(self.parent, "_algorithm_cache", {}).copy()
 
                 self.clear_nonwear_visualizations()
                 self.parent.nonwear_data = new_nonwear_data
 
-                if preserved_sadeh_results is not None:
-                    self.parent.sadeh_results = preserved_sadeh_results
                 self.parent._algorithm_cache = preserved_algorithm_cache
 
                 self.plot_nonwear_periods()
@@ -411,14 +459,15 @@ class PlotOverlayRenderer:
             if choi_cache_key in self._choi_cache:
                 cached_data = self._choi_cache[choi_cache_key]
 
-                preserved_sadeh_results = getattr(self.parent, "sadeh_results", None)
+                # Algorithm cache is widget-local (for perf), preserved across Choi updates
+                # NOTE: sadeh_results lives in Redux store - independent of Choi updates
                 preserved_algorithm_cache = getattr(self.parent, "_algorithm_cache", {}).copy()
 
                 from sleep_scoring_app.core.nonwear_data import ActivityDataView, NonwearData
 
-                current_filename = getattr(self.parent, "current_filename", "unknown")
+                current_filename = self._current_filename or "unknown"
                 activity_view = ActivityDataView.create(
-                    timestamps=list(self.parent.timestamps),
+                    timestamps=list(self._timestamps),
                     counts=activity_data,
                     filename=current_filename,
                 )
@@ -438,8 +487,6 @@ class PlotOverlayRenderer:
                 self.clear_nonwear_visualizations()
                 self.parent.nonwear_data = new_nonwear_data
 
-                if preserved_sadeh_results is not None:
-                    self.parent.sadeh_results = preserved_sadeh_results
                 self.parent._algorithm_cache = preserved_algorithm_cache
 
                 self.plot_nonwear_periods()
@@ -468,18 +515,18 @@ class PlotOverlayRenderer:
                 logger.debug("No nonwear data available for validation")
                 return False
 
-            if self.parent.sadeh_results:
-                if not isinstance(self.parent.sadeh_results, list):
+            if self._sadeh_results:
+                if not isinstance(self._sadeh_results, list):
                     logger.error("Sadeh results corrupted: not a list")
                     return False
-                logger.debug("Sadeh results validated: %d entries", len(self.parent.sadeh_results))
+                logger.debug("Sadeh results validated: %d entries", len(self._sadeh_results))
 
             if not self.parent.nonwear_data.choi_mask or not self.parent.nonwear_data.choi_periods:
                 logger.error("Choi overlay data incomplete")
                 return False
 
-            if self.parent.timestamps:
-                expected_length = len(self.parent.timestamps)
+            if self._timestamps:
+                expected_length = len(self._timestamps)
                 choi_mask_length = len(self.parent.nonwear_data.choi_mask)
 
                 if choi_mask_length != expected_length:
@@ -494,12 +541,12 @@ class PlotOverlayRenderer:
     def convert_choi_results_to_periods(self) -> list[NonwearPeriod]:
         """Convert dynamically generated Choi results to NonwearPeriod format."""
         periods = []
-        if not self.parent.axis_y_data or not self.parent.timestamps:
+        if not self._axis_y_data or not self._timestamps:
             return periods
 
         try:
             choi_algorithm = self.parent.create_nonwear_algorithm(NonwearAlgorithm.CHOI_2011)
-            periods = choi_algorithm.detect(activity_data=self.parent.axis_y_data, timestamps=self.parent.timestamps)
+            periods = choi_algorithm.detect(activity_data=self._axis_y_data, timestamps=self._timestamps)
         except Exception as e:
             logger.exception("Error converting Choi results to periods: %s", e)
 

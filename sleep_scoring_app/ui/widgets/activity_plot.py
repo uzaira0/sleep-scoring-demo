@@ -42,7 +42,7 @@ from sleep_scoring_app.utils.date_range import get_range_for_view_mode
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from sleep_scoring_app.services.nonwear_service import NonwearPeriod
+    from sleep_scoring_app.core.dataclasses import NonwearPeriod
     from sleep_scoring_app.ui.protocols import AppStateInterface
 
 
@@ -118,7 +118,7 @@ class ActivityPlotWidget(pg.PlotWidget):
 
         # Initialize basic components needed by other methods early
         self.marker_renderer = PlotMarkerRenderer(self)
-        self.overlay_renderer = PlotOverlayRenderer(self)
+        self.overlay_renderer = PlotOverlayRenderer(self, main_window)  # Pass main_window for store access
         self.algorithm_manager = PlotAlgorithmManager(self)
         self.state_serializer = PlotStateSerializer(self)
 

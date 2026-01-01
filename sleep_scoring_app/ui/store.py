@@ -32,7 +32,14 @@ from dataclasses import dataclass, replace
 from enum import StrEnum, auto
 from typing import TYPE_CHECKING, Any
 
-from sleep_scoring_app.core.constants import AlgorithmType, MarkerCategory
+from sleep_scoring_app.core.constants import (
+    ActivityDataPreference,
+    AlgorithmType,
+    MarkerCategory,
+    NonwearAlgorithm,
+    SleepPeriodDetectorType,
+    StudyDataParadigm,
+)
 
 if TYPE_CHECKING:
     from sleep_scoring_app.core.dataclasses import FileInfo
@@ -126,13 +133,13 @@ class UIState:
     study_participant_id_patterns: tuple[str, ...] = (r"(DEMO-\d{3})",)
     study_timepoint_pattern: str = r"(T[123])"
     study_group_pattern: str = r"(G1|DEMO)"
-    data_paradigm: str = "epoch_based"
-    sleep_algorithm_id: str = "sadeh_1994_actilife"
-    onset_offset_rule_id: str = "consecutive_3_5"
+    data_paradigm: str = StudyDataParadigm.EPOCH_BASED
+    sleep_algorithm_id: str = AlgorithmType.SADEH_1994_ACTILIFE
+    onset_offset_rule_id: str = SleepPeriodDetectorType.CONSECUTIVE_ONSET3S_OFFSET5S
     night_start_hour: int = 22
     night_end_hour: int = 7
-    nonwear_algorithm_id: str = "choi_2011"
-    choi_axis: str = "vector_magnitude"
+    nonwear_algorithm_id: str = NonwearAlgorithm.CHOI_2011
+    choi_axis: str = ActivityDataPreference.VECTOR_MAGNITUDE
 
     # === Metadata (for UI feedback) ===
     last_saved_file: str | None = None
@@ -1102,13 +1109,13 @@ class UIStore:
             "study_participant_id_patterns": tuple(getattr(config, "study_participant_id_patterns", [r"(DEMO-\d{3})"])),
             "study_timepoint_pattern": getattr(config, "study_timepoint_pattern", r"(T[123])"),
             "study_group_pattern": getattr(config, "study_group_pattern", r"(G1|DEMO)"),
-            "data_paradigm": getattr(config, "data_paradigm", "epoch_based"),
-            "sleep_algorithm_id": getattr(config, "sleep_algorithm_id", "sadeh_1994_actilife"),
-            "onset_offset_rule_id": getattr(config, "onset_offset_rule_id", "consecutive_3_5"),
+            "data_paradigm": getattr(config, "data_paradigm", StudyDataParadigm.EPOCH_BASED),
+            "sleep_algorithm_id": getattr(config, "sleep_algorithm_id", AlgorithmType.SADEH_1994_ACTILIFE),
+            "onset_offset_rule_id": getattr(config, "onset_offset_rule_id", SleepPeriodDetectorType.CONSECUTIVE_ONSET3S_OFFSET5S),
             "night_start_hour": getattr(config, "night_start_hour", 22),
             "night_end_hour": getattr(config, "night_end_hour", 7),
-            "nonwear_algorithm_id": getattr(config, "nonwear_algorithm_id", "choi_2011"),
-            "choi_axis": getattr(config, "choi_axis", "vector_magnitude"),
+            "nonwear_algorithm_id": getattr(config, "nonwear_algorithm_id", NonwearAlgorithm.CHOI_2011),
+            "choi_axis": getattr(config, "choi_axis", ActivityDataPreference.VECTOR_MAGNITUDE),
         }
         self.dispatch(Action(type=ActionType.STATE_INITIALIZED, payload=initial_state))
         logger.info("Initialized state from AppConfig: %s", initial_state)

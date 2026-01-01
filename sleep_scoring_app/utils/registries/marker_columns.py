@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from sleep_scoring_app.core.constants import DatabaseColumn, ExportColumn
+from sleep_scoring_app.core.constants import DatabaseColumn, ExportColumn, SleepPeriodDetectorType
 from sleep_scoring_app.utils.column_registry import ColumnDefinition, ColumnType, DataType
 
 
@@ -52,7 +52,7 @@ def register_marker_columns(registry) -> None:
             is_always_exported=True,
             ui_order=206,
             ui_group="Sleep Markers",
-            default_value="consecutive_3_5",
+            default_value=SleepPeriodDetectorType.CONSECUTIVE_ONSET3S_OFFSET5S,
             description="Rule used to detect sleep onset and offset (e.g., Consecutive 3/5 Minutes, Tudor-Locke)",
         ),
     )

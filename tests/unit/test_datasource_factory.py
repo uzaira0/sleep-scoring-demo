@@ -263,5 +263,5 @@ class TestDataSourceLoaderBehavior:
             loader = DataSourceFactory.create(loader_id)
             assert hasattr(loader, "supported_extensions")
             # supported_extensions can be set or frozenset
-            assert isinstance(loader.supported_extensions, (set, frozenset))
+            assert isinstance(loader.supported_extensions, set | frozenset)
             assert len(loader.supported_extensions) > 0

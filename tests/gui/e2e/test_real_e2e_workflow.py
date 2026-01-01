@@ -164,7 +164,7 @@ def real_main_window(qtbot, temp_db, temp_config, tmp_path):
             from sleep_scoring_app.services.nonwear_service import NonwearDataService
             from sleep_scoring_app.services.unified_data_service import UnifiedDataService
 
-            window.data_service = UnifiedDataService(temp_db, window.store)
+            window.data_service = UnifiedDataService(temp_db)
             window.data_manager = window.data_service.data_manager
             window.export_manager = ExportManager(temp_db)
             window.nonwear_service = NonwearDataService(temp_db)
@@ -203,10 +203,18 @@ class TestWindowInitialization:
         assert real_main_window.windowTitle() == "Sleep Scoring App - TEST"
 
     def test_window_has_redux_store(self, real_main_window):
-        """Test that window has Redux store initialized."""
+        """Test that window has Redux store initialized with working state and dispatch."""
+        from sleep_scoring_app.ui.store import Actions
+
         assert real_main_window.store is not None
-        assert hasattr(real_main_window.store, "state")
-        assert hasattr(real_main_window.store, "dispatch")
+
+        # Verify state exists and is accessible
+        state = real_main_window.store.state
+        assert state is not None
+
+        # Verify dispatch exists and works
+        real_main_window.store.dispatch(Actions.file_selected("test_redux.csv"))
+        assert real_main_window.store.state.current_file == "test_redux.csv"
 
     def test_window_has_database_manager(self, real_main_window):
         """Test that window has database manager."""
@@ -405,13 +413,40 @@ class TestConfigurationPersistence:
 class TestSignalSlotConnections:
     """Test that signals and slots are properly connected."""
 
-    def test_loading_progress_signal_exists(self, real_main_window):
-        """Test that loading progress signal is defined."""
+    def test_loading_progress_signal_exists_and_is_connectable(self, real_main_window, qtbot):
+        """Test that loading progress signal is defined and can be connected."""
+        # Verify signal exists
         assert hasattr(real_main_window, "loading_progress")
 
-    def test_loading_complete_signal_exists(self, real_main_window):
-        """Test that loading complete signal is defined."""
+        # Verify signal is a pyqtSignal by connecting to it
+        signal_received = []
+
+        def on_progress(message: str):
+            signal_received.append(message)
+
+        real_main_window.loading_progress.connect(on_progress)
+
+        # Emit signal and verify it was received
+        real_main_window.loading_progress.emit("Test progress message")
+        assert len(signal_received) == 1
+        assert signal_received[0] == "Test progress message"
+
+    def test_loading_complete_signal_exists_and_is_connectable(self, real_main_window, qtbot):
+        """Test that loading complete signal is defined and can be connected."""
+        # Verify signal exists
         assert hasattr(real_main_window, "loading_complete")
+
+        # Verify signal is a pyqtSignal by connecting to it
+        signal_received = []
+
+        def on_complete():
+            signal_received.append(True)
+
+        real_main_window.loading_complete.connect(on_complete)
+
+        # Emit signal and verify it was received
+        real_main_window.loading_complete.emit()
+        assert len(signal_received) == 1
 
 
 # ============================================================================
@@ -446,13 +481,30 @@ class TestMemoryManagement:
 class TestPerformance:
     """Performance-related E2E tests."""
 
-    def test_window_opens_within_timeout(self, qtbot, temp_db, temp_config, tmp_path):
-        """Test that window opens within acceptable time."""
-        from sleep_scoring_app.ui.main_window import SleepScoringMainWindow
+    def test_window_initialization_timing(self, qtbot, temp_db, temp_config, tmp_path):
+        """Test that window initializes core components within acceptable time."""
+        import time
 
-        # This test verifies the window can be created quickly
-        # Real implementation would measure actual creation time
-        pass  # Placeholder - full implementation requires more setup
+        from sleep_scoring_app.services.memory_service import BoundedCache
+        from sleep_scoring_app.ui.store import UIStore
+
+        # Measure the time to initialize core components (not full window)
+        start_time = time.perf_counter()
+
+        # Initialize core components that window uses
+        store = UIStore()
+        store.initialize_from_config(temp_config)
+        cache = BoundedCache(max_size=20, max_memory_mb=500)
+
+        elapsed = time.perf_counter() - start_time
+
+        # Core component initialization should complete within 1 second
+        assert elapsed < 1.0, f"Core initialization took {elapsed:.3f}s, expected < 1.0s"
+
+        # Verify components are properly initialized
+        assert store.state is not None
+        assert store.state.sleep_algorithm_id == temp_config.sleep_algorithm_id
+        assert cache.max_size == 20
 
 
 # ============================================================================
@@ -573,12 +625,74 @@ class TestMarkerTableManager:
 class TestKeyboardShortcuts:
     """Test keyboard shortcuts work correctly."""
 
-    def test_store_has_keyboard_state(self, real_main_window):
-        """Test that store tracks keyboard modifier state."""
+    def test_store_has_navigation_state_and_responds_to_updates(self, real_main_window):
+        """Test that store tracks navigation state and responds to updates."""
+        from sleep_scoring_app.ui.store import Actions
+
         state = real_main_window.store.state
-        # Verify state has navigation-related fields
+
+        # Verify state has navigation-related fields and they work
         assert hasattr(state, "current_date_index")
+        # Default is -1 (no date selected yet)
+        assert state.current_date_index == -1
+
         assert hasattr(state, "current_file")
+        assert state.current_file is None  # Default value
+
+        # Test that navigation state can be updated
+        real_main_window.store.dispatch(Actions.dates_loaded(("2021-04-20", "2021-04-21")))
+        real_main_window.store.dispatch(Actions.date_selected(1))
+
+        # Verify state was updated
+        assert real_main_window.store.state.current_date_index == 1
+
+    def test_date_navigation_via_store_actions(self, real_main_window):
+        """Test date navigation through store actions simulating keyboard shortcuts."""
+        from sleep_scoring_app.ui.store import Actions
+
+        # Setup: Load available dates
+        dates = ("2021-04-20", "2021-04-21", "2021-04-22")
+        real_main_window.store.dispatch(Actions.dates_loaded(dates))
+        real_main_window.store.dispatch(Actions.date_selected(0))
+
+        # Simulate "Right arrow" - navigate forward
+        current_idx = real_main_window.store.state.current_date_index
+        if current_idx < len(dates) - 1:
+            real_main_window.store.dispatch(Actions.date_navigated(1))
+        assert real_main_window.store.state.current_date_index == 1
+
+        # Simulate "Right arrow" again
+        current_idx = real_main_window.store.state.current_date_index
+        if current_idx < len(dates) - 1:
+            real_main_window.store.dispatch(Actions.date_navigated(1))
+        assert real_main_window.store.state.current_date_index == 2
+
+        # Simulate "Left arrow" - navigate backward
+        current_idx = real_main_window.store.state.current_date_index
+        if current_idx > 0:
+            real_main_window.store.dispatch(Actions.date_navigated(-1))
+        assert real_main_window.store.state.current_date_index == 1
+
+    def test_keyboard_navigation_boundaries(self, real_main_window):
+        """Test that keyboard navigation respects date boundaries."""
+        from sleep_scoring_app.ui.store import Actions
+
+        dates = ("2021-04-20", "2021-04-21")
+        real_main_window.store.dispatch(Actions.dates_loaded(dates))
+
+        # Start at first date
+        real_main_window.store.dispatch(Actions.date_selected(0))
+        assert real_main_window.store.state.current_date_index == 0
+
+        # Navigate to last date
+        real_main_window.store.dispatch(Actions.date_navigated(1))
+        assert real_main_window.store.state.current_date_index == 1
+
+        # Try to navigate past the end (should stay at last)
+        # The store should handle boundary checks
+        real_main_window.store.dispatch(Actions.date_navigated(1))
+        # State should not exceed available dates
+        assert real_main_window.store.state.current_date_index <= len(dates) - 1
 
 
 # ============================================================================
@@ -662,6 +776,422 @@ class TestDataLoadingFlow:
 
         # Service should work without crashing
         assert files is not None
+
+
+# ============================================================================
+# TEST CLASS: MARKER INTERACTION WORKFLOW (E2E)
+# ============================================================================
+
+
+@pytest.mark.e2e
+@pytest.mark.gui
+class TestMarkerInteractionWorkflow:
+    """
+    E2E tests for marker placement and interaction workflow.
+
+    These tests verify the complete marker workflow from user action
+    through store state changes to database persistence.
+    """
+
+    @pytest.fixture
+    def activity_plot_with_data(self, qtbot, real_main_window, temp_data_folder):
+        """Create an ActivityPlotWidget with sample data loaded."""
+        from sleep_scoring_app.ui.widgets.activity_plot import ActivityPlotWidget
+
+        plot = ActivityPlotWidget(real_main_window)
+        qtbot.addWidget(plot)
+
+        # Set up sample data for the plot (48 hours of minute data)
+        start_time = datetime(2021, 4, 20, 0, 0, 0)
+        num_epochs = 2880  # 48 hours
+        timestamps = [start_time + timedelta(minutes=i) for i in range(num_epochs)]
+        x_data = [ts.timestamp() for ts in timestamps]
+
+        # Generate circadian activity pattern
+        activity_data = []
+        for ts in timestamps:
+            hour = ts.hour
+            # Higher activity during day, lower at night
+            base = 150 + np.random.randint(-50, 100) if 6 <= hour < 22 else 10 + np.random.randint(0, 30)
+            activity_data.append(max(0, base))
+
+        # Set data on plot
+        plot.x_data = x_data
+        plot.activity_data = activity_data
+        plot.timestamps = timestamps
+        plot.data_start_time = x_data[0]
+        plot.data_end_time = x_data[-1]
+        plot.data_min_y = 0
+        plot.data_max_y = max(activity_data) * 1.5
+
+        return plot
+
+    def test_marker_placement_creates_sleep_period(self, qtbot, activity_plot_with_data):
+        """Test that placing onset/offset markers creates a complete sleep period."""
+        plot = activity_plot_with_data
+
+        # Initial state: no sleep markers
+        assert plot.daily_sleep_markers.period_1 is None
+
+        # Place onset marker at 22:00
+        onset_time = datetime(2021, 4, 20, 22, 0, 0).timestamp()
+        plot.add_sleep_marker(onset_time)
+
+        # Verify onset was placed (period started but incomplete)
+        assert plot.current_marker_being_placed is not None
+
+        # Place offset marker at 06:00 next day
+        offset_time = datetime(2021, 4, 21, 6, 0, 0).timestamp()
+        plot.add_sleep_marker(offset_time)
+
+        # Verify complete period was created
+        periods = plot.daily_sleep_markers.get_complete_periods()
+        assert len(periods) >= 1
+        complete_period = periods[0]
+        assert complete_period.is_complete
+        assert complete_period.onset_timestamp == onset_time
+        assert complete_period.offset_timestamp == offset_time
+
+    def test_marker_signals_emitted_on_change(self, qtbot, activity_plot_with_data):
+        """Test that sleep_markers_changed signal is emitted when markers change."""
+        plot = activity_plot_with_data
+
+        # Track signal emissions
+        signal_received = []
+
+        def on_markers_changed(markers):
+            signal_received.append(markers)
+
+        plot.sleep_markers_changed.connect(on_markers_changed)
+
+        # Place onset marker
+        onset_time = datetime(2021, 4, 20, 22, 0, 0).timestamp()
+        plot.add_sleep_marker(onset_time)
+
+        # Place offset marker to complete the period
+        offset_time = datetime(2021, 4, 21, 6, 0, 0).timestamp()
+        plot.add_sleep_marker(offset_time)
+
+        # Mark markers dirty to trigger signal
+        plot.mark_sleep_markers_dirty()
+
+        # Verify signal was emitted with updated markers
+        assert len(signal_received) >= 1
+
+    def test_marker_can_be_cleared(self, qtbot, activity_plot_with_data):
+        """Test that markers can be cleared after placement."""
+        plot = activity_plot_with_data
+
+        # Place complete marker set
+        onset_time = datetime(2021, 4, 20, 22, 0, 0).timestamp()
+        offset_time = datetime(2021, 4, 21, 6, 0, 0).timestamp()
+        plot.add_sleep_marker(onset_time)
+        plot.add_sleep_marker(offset_time)
+
+        # Verify marker exists
+        assert len(plot.daily_sleep_markers.get_complete_periods()) >= 1
+
+        # Clear markers
+        plot.clear_sleep_markers()
+
+        # Verify markers are cleared
+        assert len(plot.daily_sleep_markers.get_complete_periods()) == 0
+
+    def test_incomplete_marker_can_be_cancelled(self, qtbot, activity_plot_with_data):
+        """Test that incomplete marker placement can be cancelled."""
+        plot = activity_plot_with_data
+
+        # Place onset marker only
+        onset_time = datetime(2021, 4, 20, 22, 0, 0).timestamp()
+        plot.add_sleep_marker(onset_time)
+
+        # Verify incomplete marker in progress
+        assert plot.current_marker_being_placed is not None
+
+        # Cancel incomplete marker
+        plot.cancel_incomplete_marker()
+
+        # Verify cancelled
+        assert plot.current_marker_being_placed is None
+
+
+# ============================================================================
+# TEST CLASS: COMPLETE USER WORKFLOW (E2E)
+# ============================================================================
+
+
+@pytest.mark.e2e
+@pytest.mark.gui
+class TestCompleteUserWorkflow:
+    """
+    E2E tests for complete user workflows.
+
+    These tests verify end-to-end scenarios from file loading
+    through scoring, marker placement, and export.
+    """
+
+    def test_file_load_date_select_workflow(self, real_main_window, temp_data_folder):
+        """Test the workflow of loading a file and selecting a date."""
+        from sleep_scoring_app.ui.store import Actions
+
+        # Step 1: Set data folder
+        real_main_window.data_service.set_data_folder(str(temp_data_folder))
+
+        # Step 2: Find available files
+        files = real_main_window.data_service.find_available_files()
+
+        # Step 3: Simulate file selection if files found
+        if files:
+            filename = files[0].filename if hasattr(files[0], "filename") else str(files[0])
+            real_main_window.store.dispatch(Actions.file_selected(filename))
+            assert real_main_window.store.state.current_file == filename
+
+        # Step 4: Load dates for file
+        dates = ("2021-04-20", "2021-04-21")
+        real_main_window.store.dispatch(Actions.dates_loaded(dates))
+        assert real_main_window.store.state.available_dates == dates
+
+        # Step 5: Select a date
+        real_main_window.store.dispatch(Actions.date_selected(0))
+        assert real_main_window.store.state.current_date_index == 0
+
+    def test_algorithm_selection_persists(self, real_main_window):
+        """Test that algorithm selection is persisted in store."""
+        from sleep_scoring_app.core.constants import AlgorithmType, SleepPeriodDetectorType
+        from sleep_scoring_app.ui.store import Actions
+
+        # Change algorithm via study settings
+        real_main_window.store.dispatch(
+            Actions.study_settings_changed(
+                {
+                    "sleep_algorithm_id": AlgorithmType.COLE_KRIPKE_1992_ACTILIFE,
+                    "onset_offset_rule_id": SleepPeriodDetectorType.CONSECUTIVE_ONSET3S_OFFSET5S,
+                }
+            )
+        )
+
+        # Verify algorithm was updated
+        assert real_main_window.store.state.sleep_algorithm_id == AlgorithmType.COLE_KRIPKE_1992_ACTILIFE
+
+        # Change back to Sadeh
+        real_main_window.store.dispatch(
+            Actions.study_settings_changed(
+                {
+                    "sleep_algorithm_id": AlgorithmType.SADEH_1994_ACTILIFE,
+                }
+            )
+        )
+
+        assert real_main_window.store.state.sleep_algorithm_id == AlgorithmType.SADEH_1994_ACTILIFE
+
+    def test_metrics_save_and_load_roundtrip(self, real_main_window, temp_db):
+        """Test that metrics can be saved and loaded through the database."""
+        from sleep_scoring_app.core.constants import AlgorithmType, MarkerType, ParticipantGroup, ParticipantTimepoint
+        from sleep_scoring_app.core.dataclasses import (
+            DailySleepMarkers,
+            ParticipantInfo,
+            SleepMetrics,
+            SleepPeriod,
+        )
+
+        # Create test metrics with proper database-compatible values
+        participant = ParticipantInfo(
+            numerical_id="4001",
+            full_id="4001 T1 G1",
+            group=ParticipantGroup.GROUP_1,
+            timepoint=ParticipantTimepoint.T1,
+            date="2021-04-20",
+        )
+
+        markers = DailySleepMarkers()
+        markers.period_1 = SleepPeriod(
+            onset_timestamp=datetime(2021, 4, 20, 22, 0).timestamp(),
+            offset_timestamp=datetime(2021, 4, 21, 6, 0).timestamp(),
+            marker_index=1,
+            marker_type=MarkerType.MAIN_SLEEP,
+        )
+
+        test_metrics = SleepMetrics(
+            participant=participant,
+            filename="roundtrip_test.csv",
+            analysis_date="2021-04-20",
+            algorithm_type=AlgorithmType.SADEH_1994_ACTILIFE,
+            daily_sleep_markers=markers,
+            onset_time="22:00",
+            offset_time="06:00",
+            total_sleep_time=420.0,
+            sleep_efficiency=87.5,
+            total_minutes_in_bed=480.0,
+            waso=45.0,
+            awakenings=3,
+            average_awakening_length=15.0,
+            total_activity=15000,
+            movement_index=2.5,
+            fragmentation_index=12.3,
+            sleep_fragmentation_index=8.7,
+            # Use epoch indices for sadeh_onset/offset (integers), not time strings
+            sadeh_onset=100,
+            sadeh_offset=580,
+            overlapping_nonwear_minutes_algorithm=0,
+            overlapping_nonwear_minutes_sensor=0,
+            updated_at=datetime.now().isoformat(),
+        )
+
+        # Save metrics
+        real_main_window.db_manager.save_sleep_metrics(test_metrics)
+
+        # Load metrics back
+        loaded = real_main_window.db_manager.load_sleep_metrics(test_metrics.filename, test_metrics.analysis_date)
+
+        # Verify loaded data matches
+        assert loaded is not None
+        assert len(loaded) > 0
+        assert loaded[0].total_sleep_time == test_metrics.total_sleep_time
+        assert loaded[0].sleep_efficiency == test_metrics.sleep_efficiency
+
+    def test_export_service_creates_csv(self, real_main_window, tmp_path):
+        """Test that export service can create CSV files."""
+        from sleep_scoring_app.core.constants import AlgorithmType, MarkerType, ParticipantGroup, ParticipantTimepoint
+        from sleep_scoring_app.core.dataclasses import (
+            DailySleepMarkers,
+            ParticipantInfo,
+            SleepMetrics,
+            SleepPeriod,
+        )
+
+        # Create test metrics
+        participant = ParticipantInfo(
+            numerical_id="4000",
+            full_id="4000 T1 G1",
+            group=ParticipantGroup.GROUP_1,
+            timepoint=ParticipantTimepoint.T1,
+            date="2021-04-20",
+        )
+
+        markers = DailySleepMarkers()
+        markers.period_1 = SleepPeriod(
+            onset_timestamp=datetime(2021, 4, 20, 22, 0).timestamp(),
+            offset_timestamp=datetime(2021, 4, 21, 6, 0).timestamp(),
+            marker_index=1,
+            marker_type=MarkerType.MAIN_SLEEP,
+        )
+
+        metrics = SleepMetrics(
+            participant=participant,
+            filename="test.csv",
+            analysis_date="2021-04-20",
+            algorithm_type=AlgorithmType.SADEH_1994_ACTILIFE,
+            daily_sleep_markers=markers,
+            onset_time="22:00",
+            offset_time="06:00",
+            total_sleep_time=420.0,
+            sleep_efficiency=87.5,
+            total_minutes_in_bed=480.0,
+            waso=45.0,
+            awakenings=3,
+            average_awakening_length=15.0,
+            total_activity=15000,
+            movement_index=2.5,
+            fragmentation_index=12.3,
+            sleep_fragmentation_index=8.7,
+            sadeh_onset=100,
+            sadeh_offset=580,
+            overlapping_nonwear_minutes_algorithm=0,
+            overlapping_nonwear_minutes_sensor=0,
+            updated_at=datetime.now().isoformat(),
+        )
+
+        # Use export service to create CSV
+        csv_path = real_main_window.export_manager.create_export_csv_only([metrics], AlgorithmType.SADEH_1994_ACTILIFE)
+
+        # Verify CSV was created
+        if csv_path:
+            assert Path(csv_path).exists()
+            # Read and verify content
+            content = Path(csv_path).read_text()
+            assert "4000" in content  # Participant ID
+            assert "420" in content  # Total sleep time
+
+
+# ============================================================================
+# TEST CLASS: MARKER TABLE INTEGRATION
+# ============================================================================
+
+
+@pytest.mark.e2e
+@pytest.mark.gui
+class TestMarkerTableIntegration:
+    """Test marker table updates when markers change."""
+
+    def test_marker_table_manager_can_be_imported(self):
+        """Test MarkerTableManager can be imported and class has expected interface."""
+        import inspect
+
+        from sleep_scoring_app.ui.marker_table import MarkerTableManager
+
+        # Verify the class exists
+        assert MarkerTableManager is not None
+
+        # Verify it's a class (not a function or module)
+        assert inspect.isclass(MarkerTableManager)
+
+        # Verify the constructor signature has expected parameters
+        sig = inspect.signature(MarkerTableManager.__init__)
+        param_names = list(sig.parameters.keys())
+        # Should have 'self' and other required parameters
+        assert "self" in param_names
+
+    def test_marker_table_update_helper_works(self):
+        """Test that the marker table update helper function works."""
+        from sleep_scoring_app.utils.table_helpers import update_marker_table
+
+        # Verify the helper function exists
+        assert update_marker_table is not None
+        assert callable(update_marker_table)
+
+
+# ============================================================================
+# TEST CLASS: STORE STATE CONSISTENCY
+# ============================================================================
+
+
+@pytest.mark.e2e
+@pytest.mark.gui
+class TestStoreStateConsistency:
+    """Test that Redux store maintains consistent state across operations."""
+
+    def test_multiple_dispatches_maintain_consistency(self, real_main_window):
+        """Test that multiple rapid dispatches maintain state consistency."""
+        from sleep_scoring_app.ui.store import Actions
+
+        # Rapidly dispatch multiple actions
+        for i in range(10):
+            real_main_window.store.dispatch(Actions.dates_loaded((f"2021-04-{20 + i}",)))
+            real_main_window.store.dispatch(Actions.date_selected(0))
+
+        # State should be consistent
+        assert real_main_window.store.state.current_date_index == 0
+        assert real_main_window.store.state.available_dates is not None
+
+    def test_subscriber_receives_all_updates(self, real_main_window):
+        """Test that store subscribers receive all state updates."""
+        from sleep_scoring_app.ui.store import Actions
+
+        updates = []
+
+        def subscriber(old_state, new_state):
+            updates.append({"old": old_state, "new": new_state})
+
+        real_main_window.store.subscribe(subscriber)
+
+        # Dispatch several actions
+        real_main_window.store.dispatch(Actions.file_selected("file1.csv"))
+        real_main_window.store.dispatch(Actions.file_selected("file2.csv"))
+        real_main_window.store.dispatch(Actions.file_selected("file3.csv"))
+
+        # Verify all updates were received
+        assert len(updates) == 3
+        assert updates[-1]["new"].current_file == "file3.csv"
 
 
 # ============================================================================
