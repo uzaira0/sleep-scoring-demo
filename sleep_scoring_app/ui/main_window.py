@@ -11,7 +11,7 @@ import logging
 import os
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
@@ -62,6 +62,13 @@ if TYPE_CHECKING:
     from PyQt6.QtGui import QCloseEvent
 
     from sleep_scoring_app.core.dataclasses import DailySleepMarkers, FileInfo, SleepPeriod
+    from sleep_scoring_app.ui.protocols import (
+        AppStateInterface,
+        MainWindowProtocol,
+        MarkerOperationsInterface,
+        NavigationInterface,
+        ServiceContainer,
+    )
 
 # Configure logging - use WARNING for production, DEBUG if SLEEP_SCORING_DEBUG env var is set
 _log_level = logging.DEBUG if os.getenv("SLEEP_SCORING_DEBUG") else logging.WARNING
@@ -147,24 +154,31 @@ class SleepScoringMainWindow(QMainWindow):
         self.import_service = ImportService(self.db_manager)
 
         # Initialize window managers with decoupled interfaces
-        self.state_manager = WindowStateManager(store=self.store, navigation=self, marker_ops=self, app_state=self, services=self, parent=self)
+        # Cast self to protocol types - class implements all required protocol methods
+        nav = cast("NavigationInterface", self)
+        marker_ops = cast("MarkerOperationsInterface", self)
+        app_state = cast("AppStateInterface", self)
+        services = cast("ServiceContainer", self)
+        parent = cast("MainWindowProtocol", self)
+
+        self.state_manager = WindowStateManager(store=self.store, navigation=nav, marker_ops=marker_ops, app_state=app_state, services=services, parent=parent)
         self.session_manager = SessionStateManager()
-        self.nav_manager = FileNavigationManager(store=self.store, navigation=self, app_state=self, services=self, parent=self)
+        self.nav_manager = FileNavigationManager(store=self.store, navigation=nav, app_state=app_state, services=services, parent=parent)
         self.table_manager = MarkerTableManager(
             store=self.store,
-            navigation=self,
-            marker_ops=self,
-            app_state=self,
-            services=self,
-            parent=self,
+            navigation=nav,
+            marker_ops=marker_ops,
+            app_state=app_state,
+            services=services,
+            parent=parent,
             get_sleep_algorithm_name=self.get_sleep_algorithm_display_name,
         )
-        self.diary_manager = DiaryIntegrationManager(store=self.store, navigation=self, marker_ops=self, services=self, parent=self)
+        self.diary_manager = DiaryIntegrationManager(store=self.store, navigation=nav, marker_ops=marker_ops, services=services, parent=parent)
         # Note: time_manager initialized after UI setup (needs time input fields)
 
         # Initialize coordinators
-        self.import_coordinator = ImportUICoordinator(self)
-        self.ui_state_coordinator = UIStateCoordinator(self)
+        self.import_coordinator = ImportUICoordinator(parent)
+        self.ui_state_coordinator = UIStateCoordinator(parent)
 
         # Initialize algorithm-data compatibility helper
         from sleep_scoring_app.ui.algorithm_compatibility_ui import AlgorithmCompatibilityUIHelper
@@ -223,7 +237,7 @@ class SleepScoringMainWindow(QMainWindow):
         self.setup_ui()
 
         # Wire up UIStore connectors (must be after setup_ui so components exist)
-        self._store_connector_manager = connect_all_components(self.store, self)
+        self._store_connector_manager = connect_all_components(self.store, cast("MainWindowProtocol", self))
 
         # Clean up old temporary files
         self._cleanup_old_temp_files()
@@ -292,16 +306,16 @@ class SleepScoringMainWindow(QMainWindow):
 
         # Always extract just the filename - database uses filename as key
         filename = Path(value).name if value else None
-        if filename != self.store.state.current_file:
+        if filename != self.store.state.current_file and filename is not None:
             self.store.dispatch(Actions.file_selected(filename))
 
     @property
-    def available_files(self) -> list[dict]:
+    def available_files(self) -> list[FileInfo]:
         """Get available files from Redux store."""
         return list(self.store.state.available_files)
 
     @available_files.setter
-    def available_files(self, value: list[dict]) -> None:
+    def available_files(self, value: list[FileInfo]) -> None:
         """Update available files in Redux store."""
         from sleep_scoring_app.ui.store import Actions
 
@@ -387,7 +401,8 @@ class SleepScoringMainWindow(QMainWindow):
                 self.selected_file = last_file_path  # Update the path property
 
                 # CRITICAL: Load dates for the file BEFORE trying to restore date index
-                skip_rows = self.config_manager.config.skip_rows
+                cfg = self.config_manager.config
+                skip_rows = cfg.skip_rows if cfg else 0
                 new_dates = self.data_service.load_selected_file(matching_file, skip_rows)
                 if new_dates:
                     logger.info(f"MAIN WINDOW: Loaded {len(new_dates)} dates for restored file")
@@ -440,10 +455,17 @@ class SleepScoringMainWindow(QMainWindow):
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
 
         # Create tab components with decoupled interfaces
-        self.data_settings_tab = DataSettingsTab(store=self.store, app_state=self, services=self, parent=self)
-        self.study_settings_tab = StudySettingsTab(store=self.store, navigation=self, marker_ops=self, app_state=self, services=self, parent=self)
-        self.analysis_tab = AnalysisTab(store=self.store, navigation=self, marker_ops=self, app_state=self, services=self, parent=self)
-        self.export_tab = ExportTab(store=self.store, marker_ops=self, app_state=self, services=self, parent=self)
+        # Use casts to satisfy protocol type requirements
+        nav = cast("NavigationInterface", self)
+        marker_ops = cast("MarkerOperationsInterface", self)
+        app_state = cast("AppStateInterface", self)
+        services = cast("ServiceContainer", self)
+
+        # Note: Tabs use self directly for QWidget parent, but internal code may need MainWindowProtocol
+        self.data_settings_tab = DataSettingsTab(store=self.store, app_state=app_state, services=services, parent=self)  # type: ignore[arg-type]
+        self.study_settings_tab = StudySettingsTab(store=self.store, navigation=nav, marker_ops=marker_ops, app_state=app_state, services=services, parent=self)  # type: ignore[arg-type]
+        self.analysis_tab = AnalysisTab(store=self.store, navigation=nav, marker_ops=marker_ops, app_state=app_state, services=services, parent=self)  # type: ignore[arg-type]
+        self.export_tab = ExportTab(store=self.store, marker_ops=marker_ops, app_state=app_state, services=services, parent=self)  # type: ignore[arg-type]
 
         # Connect table click handlers for marker movement
         self._connect_table_click_handlers()
@@ -460,20 +482,21 @@ class SleepScoringMainWindow(QMainWindow):
         layout.addWidget(self.tab_widget)
 
         # Create status bar
-        self.status_bar = self.statusBar()
-        self.status_bar.setStyleSheet("""
-            QStatusBar {
-                background-color: #f0f0f0;
-                border-top: 1px solid #d0d0d0;
-                padding: 2px;
-            }
-        """)
+        status_bar = self.statusBar()
+        if status_bar is not None:
+            status_bar.setStyleSheet("""
+                QStatusBar {
+                    background-color: #f0f0f0;
+                    border-top: 1px solid #d0d0d0;
+                    padding: 2px;
+                }
+            """)
 
-        # Create permanent status widgets
-        self.algorithm_compat_label = QLabel("")
-        self.algorithm_compat_label.setStyleSheet("padding: 0 10px; font-weight: bold;")
-        self.algorithm_compat_label.setToolTip("Algorithm compatibility status")
-        self.status_bar.addPermanentWidget(self.algorithm_compat_label)
+            # Create permanent status widgets
+            self.algorithm_compat_label = QLabel("")
+            self.algorithm_compat_label.setStyleSheet("padding: 0 10px; font-weight: bold;")
+            self.algorithm_compat_label.setToolTip("Algorithm compatibility status")
+            status_bar.addPermanentWidget(self.algorithm_compat_label)
 
         # Create references to UI elements from tabs for backward compatibility
         self._setup_ui_references()
@@ -564,12 +587,17 @@ class SleepScoringMainWindow(QMainWindow):
 
             # Service is headless - pass required parameters explicitly
             state = self.store.state
+            current_file = state.current_file
+            if current_file is None:
+                logger.warning("MAIN WINDOW: Cannot load date - no file in state")
+                return
+
             logger.info("MAIN WINDOW: Triggering data_service.load_current_date()")
             result = self.data_service.load_current_date(
                 self.current_date_48h_cache,
                 list(state.available_dates),
                 state.current_date_index,
-                state.current_file,
+                current_file,
             )
 
             # 2. Update visuals if load was successful
@@ -633,8 +661,9 @@ class SleepScoringMainWindow(QMainWindow):
             from sleep_scoring_app.core.nonwear_data import ActivityDataView, NonwearData
 
             # Get Choi activity column from config FIRST
-            choi_column = self.config_manager.config.choi_axis
-            preferred_column = self.config_manager.config.preferred_activity_column
+            config = self.config_manager.config
+            choi_column = config.choi_axis if config else None
+            preferred_column = config.preferred_activity_column if config else None
 
             # Determine what data to use for Choi algorithm
             # If choi_column matches display column, use plot data; otherwise load specific column
@@ -686,11 +715,13 @@ class SleepScoringMainWindow(QMainWindow):
             logger.debug("Loaded %d sensor periods for %s", len(raw_sensor_periods), self.selected_file)
 
             # Create NonwearData object - now activity_view contains the correct Choi axis data
+            # Convert string column to ActivityDataPreference enum
+            choi_pref_for_nonwear = ActivityDataPreference(choi_column) if choi_column else ActivityDataPreference.VECTOR_MAGNITUDE
             nonwear_data = NonwearData.create_for_activity_view(
                 activity_view=activity_view,
                 raw_sensor_periods=raw_sensor_periods,
                 nonwear_service=self.nonwear_service,
-                choi_activity_column=choi_column,
+                choi_activity_column=choi_pref_for_nonwear,
             )
 
             # Set on plot widget
@@ -758,9 +789,10 @@ class SleepScoringMainWindow(QMainWindow):
             logger.info(f"Setting activity preferences - Preferred: {preferred}, Choi: {choi}")
 
             # Update configuration via services
-            if self.config_manager:
-                self.config_manager.config.preferred_activity_column = preferred
-                self.config_manager.config.choi_axis = choi
+            config = self.config_manager.config if self.config_manager else None
+            if config:
+                config.preferred_activity_column = preferred
+                config.choi_axis = choi
                 self.config_manager.save_config()
 
             # Update plot widget if it exists
@@ -808,7 +840,8 @@ class SleepScoringMainWindow(QMainWindow):
         logger.info(f"MAIN WINDOW: Updated selected_file to: {self.selected_file}")
 
         # 3. Load dates for this file (CRITICAL - must happen AFTER file_selected dispatch)
-        skip_rows = self.config_manager.config.skip_rows
+        config = self.config_manager.config
+        skip_rows = config.skip_rows if config else 0
         logger.info(f"MAIN WINDOW: Loading dates via data_service (skip_rows={skip_rows})")
         new_dates = self.data_service.load_selected_file(file_info, skip_rows)
 
@@ -866,11 +899,14 @@ class SleepScoringMainWindow(QMainWindow):
         logger.info(f"markers_dirty: {markers_dirty}")
 
         # Check for incomplete sleep marker being placed
-        # PlotWidgetProtocol guarantees these attributes exist
-        has_incomplete_sleep_marker = self.plot_widget.current_marker_being_placed is not None
+        # PlotWidgetProtocol guarantees these attributes exist after setup_ui()
+        plot = self.plot_widget
+        if plot is None:
+            return True  # No plot widget means no incomplete markers
+        has_incomplete_sleep_marker = plot.current_marker_being_placed is not None
 
         # Check for incomplete nonwear marker being placed
-        has_incomplete_nonwear_marker = self.plot_widget._current_nonwear_marker_being_placed is not None
+        has_incomplete_nonwear_marker = plot._current_nonwear_marker_being_placed is not None
 
         # Warn about incomplete markers separately (they will be lost)
         if has_incomplete_sleep_marker or has_incomplete_nonwear_marker:
@@ -888,11 +924,11 @@ class SleepScoringMainWindow(QMainWindow):
                 return False
             # User wants to continue, cancel the incomplete markers
             if has_incomplete_sleep_marker:
-                self.plot_widget.current_marker_being_placed = None
-                self.plot_widget.marker_renderer.redraw_markers()
+                plot.current_marker_being_placed = None
+                plot.marker_renderer.redraw_markers()
             if has_incomplete_nonwear_marker:
-                self.plot_widget._current_nonwear_marker_being_placed = None
-                self.plot_widget.marker_renderer.redraw_nonwear_markers()
+                plot._current_nonwear_marker_being_placed = None
+                plot.marker_renderer.redraw_nonwear_markers()
 
         # If there are unsaved complete markers AND autosave is disabled (manual mode), show warning dialog
         # When autosave is enabled, it will auto-save via auto_save_current_markers() below
@@ -1022,7 +1058,8 @@ class SleepScoringMainWindow(QMainWindow):
 
         """
         logger.error("Plot error: %s", error_message)
-        self.statusBar().showMessage(f"Error: {error_message}", 5000)
+        if (status_bar := self.statusBar()) is not None:
+            status_bar.showMessage(f"Error: {error_message}", 5000)
 
     def handle_marker_limit_exceeded(self, error_message: str) -> None:
         """
@@ -1223,6 +1260,9 @@ class SleepScoringMainWindow(QMainWindow):
                 self.offset_time_input.clear()
             else:
                 # Complete period with both onset and offset
+                # is_complete guarantees both timestamps are not None
+                assert sleep_period.onset_timestamp is not None
+                assert sleep_period.offset_timestamp is not None
                 start_time = datetime.fromtimestamp(sleep_period.onset_timestamp)
                 end_time = datetime.fromtimestamp(sleep_period.offset_timestamp)
 
@@ -1365,6 +1405,8 @@ class SleepScoringMainWindow(QMainWindow):
 
     def _on_onset_table_right_clicked(self, pos) -> None:
         """Handle right-click on onset table row to move onset marker."""
+        if self.onset_table is None:
+            return
         table = self.onset_table.table_widget
         item = table.itemAt(pos)
         if not item:
@@ -1377,6 +1419,8 @@ class SleepScoringMainWindow(QMainWindow):
 
     def _on_offset_table_right_clicked(self, pos) -> None:
         """Handle right-click on offset table row to move offset marker."""
+        if self.offset_table is None:
+            return
         table = self.offset_table.table_widget
         item = table.itemAt(pos)
         if not item:
@@ -1482,8 +1526,9 @@ class SleepScoringMainWindow(QMainWindow):
 
         """
         try:
-            # PlotWidgetProtocol guarantees timestamps exists
-            if not self.plot_widget.timestamps:
+            # PlotWidgetProtocol guarantees timestamps exists after setup_ui()
+            plot = self.plot_widget
+            if plot is None or not plot.timestamps:
                 return None
 
             # Parse the time string
@@ -1494,7 +1539,7 @@ class SleepScoringMainWindow(QMainWindow):
                 return None
 
             # Search through timestamps to find matching hour and minute
-            for ts in self.plot_widget.timestamps:
+            for ts in plot.timestamps:
                 if ts.hour == hour and ts.minute == minute:
                     # Convert datetime to unix timestamp
                     return ts.timestamp()
@@ -1534,23 +1579,28 @@ class SleepScoringMainWindow(QMainWindow):
 
             main_sleep = markers.get_main_sleep()
 
+            plot = self.plot_widget
+            if plot is None:
+                logger.warning("Plot widget not available for onset marker from diary")
+                return
+
             if main_sleep:
                 # Update existing period's onset
                 main_sleep.onset_timestamp = onset_timestamp
                 if not main_sleep.offset_timestamp:
                     # Period is incomplete, set it as current marker being placed
-                    self.plot_widget.current_marker_being_placed = main_sleep
+                    plot.current_marker_being_placed = main_sleep
             else:
                 # Create new incomplete period
                 new_period = SleepPeriod(onset_timestamp=onset_timestamp, offset_timestamp=None, marker_index=1)
                 markers.period_1 = new_period
-                self.plot_widget.current_marker_being_placed = new_period
+                plot.current_marker_being_placed = new_period
 
             markers.update_classifications()
 
             # Dispatch to Redux - connector will update widget
             self.store.dispatch(Actions.sleep_markers_changed(markers))
-            self.plot_widget.redraw_markers()
+            plot.redraw_markers()
 
         except Exception as e:
             logger.error(f"Error creating onset marker from diary: {e}", exc_info=True)
@@ -1574,8 +1624,13 @@ class SleepScoringMainWindow(QMainWindow):
             if markers is None:
                 markers = DailySleepMarkers()
 
+            plot = self.plot_widget
+            if plot is None:
+                logger.warning("Plot widget not available for offset marker from diary")
+                return
+
             # Check if there's an incomplete period to complete
-            current_period = self.plot_widget.current_marker_being_placed
+            current_period = plot.current_marker_being_placed
             if current_period:
                 # Complete the current period
                 current_period.offset_timestamp = offset_timestamp
@@ -1595,7 +1650,7 @@ class SleepScoringMainWindow(QMainWindow):
                         markers.period_4 = current_period
                         current_period.marker_index = 4
 
-                self.plot_widget.current_marker_being_placed = None
+                plot.current_marker_being_placed = None
             else:
                 # Check if main sleep exists and needs offset
                 main_sleep = markers.get_main_sleep()
@@ -1609,7 +1664,7 @@ class SleepScoringMainWindow(QMainWindow):
 
             # Dispatch to Redux - connector will update widget
             self.store.dispatch(Actions.sleep_markers_changed(markers))
-            self.plot_widget.redraw_markers()
+            plot.redraw_markers()
             self.auto_save_current_markers()
 
         except Exception as e:
@@ -1693,7 +1748,9 @@ class SleepScoringMainWindow(QMainWindow):
         # Handle overnight sleep (offset before onset means next day)
         if offset_timestamp <= onset_timestamp:
             next_day = base_date + timedelta(days=1)
-            offset_timestamp = self._parse_time_to_timestamp(offset_text, next_day)
+            new_offset = self._parse_time_to_timestamp(offset_text, next_day)
+            if new_offset is not None:
+                offset_timestamp = new_offset
 
         # Update the sleep period
         self._update_selected_sleep_period(onset_timestamp, offset_timestamp)
@@ -1734,8 +1791,11 @@ class SleepScoringMainWindow(QMainWindow):
 
     def _restore_field_from_marker(self, field_type: str) -> None:
         """Restore field value from current marker."""
-        # PlotWidgetProtocol guarantees get_selected_marker_period exists
-        selected_period = self.plot_widget.get_selected_marker_period()
+        # PlotWidgetProtocol guarantees get_selected_marker_period exists after setup_ui()
+        plot = self.plot_widget
+        if plot is None:
+            return
+        selected_period = plot.get_selected_marker_period()
         if not selected_period:
             return
 
@@ -1759,9 +1819,13 @@ class SleepScoringMainWindow(QMainWindow):
         if markers is None:
             return
 
+        plot = self.plot_widget
+        if plot is None:
+            return
+
         # Get the currently selected period from widget (widget owns selection state)
         # PlotWidgetProtocol guarantees get_selected_marker_period exists
-        selected_period = self.plot_widget.get_selected_marker_period()
+        selected_period = plot.get_selected_marker_period()
 
         if selected_period:
             # Update existing selected period
@@ -1770,21 +1834,24 @@ class SleepScoringMainWindow(QMainWindow):
             # Reclassify and dispatch to Redux
             markers.update_classifications()
             self.store.dispatch(Actions.sleep_markers_changed(markers))
-            self.plot_widget.redraw_markers()
+            plot.redraw_markers()
         else:
             # No selected period, create new one using the traditional method
-            self.plot_widget.sleep_markers = [onset_timestamp, offset_timestamp]
-            self.plot_widget.redraw_markers()
+            plot.sleep_markers = [onset_timestamp, offset_timestamp]
+            plot.redraw_markers()
 
     def _update_selected_sleep_period_onset(self, onset_timestamp: float) -> None:
         """Update or create sleep period with just onset."""
-        if not hasattr(self.plot_widget, "add_sleep_marker"):  # KEEP: Plot widget duck typing
+        plot = self.plot_widget
+        if plot is None:
+            return
+        if not hasattr(plot, "add_sleep_marker"):  # KEEP: Plot widget duck typing
             # Fallback to old method
-            self.plot_widget.sleep_markers = [onset_timestamp]
-            self.plot_widget.redraw_markers()
+            plot.sleep_markers = [onset_timestamp]
+            plot.redraw_markers()
         else:
             # Use new marker system
-            self.plot_widget.add_sleep_marker(onset_timestamp)
+            plot.add_sleep_marker(onset_timestamp)
 
     def save_current_markers(self) -> None:
         """Save current markers permanently."""
@@ -1832,8 +1899,9 @@ class SleepScoringMainWindow(QMainWindow):
             )
 
             # Load into plot widget
-            if hasattr(self.plot_widget, "load_daily_nonwear_markers"):  # KEEP: Plot widget duck typing
-                self.plot_widget.load_daily_nonwear_markers(daily_nonwear_markers, markers_saved=True)
+            plot = self.plot_widget
+            if plot is not None and hasattr(plot, "load_daily_nonwear_markers"):  # KEEP: Plot widget duck typing
+                plot.load_daily_nonwear_markers(daily_nonwear_markers, markers_saved=True)
                 logger.debug("Loaded nonwear markers for %s on %s", filename, current_date)
 
         except Exception as e:
@@ -1989,14 +2057,16 @@ class SleepScoringMainWindow(QMainWindow):
                 tab.include_metadata_checkbox.isChecked(),
             )
             # Save nonwear separate file option
-            if hasattr(tab, "separate_nonwear_file_checkbox"):  # KEEP: Tab duck typing
-                self.config_manager.config.export_nonwear_separate = tab.separate_nonwear_file_checkbox.isChecked()
+            config = self.config_manager.config
+            if hasattr(tab, "separate_nonwear_file_checkbox") and config is not None:  # KEEP: Tab duck typing
+                config.export_nonwear_separate = tab.separate_nonwear_file_checkbox.isChecked()
                 self.config_manager.save_config()
 
     def browse_export_output_directory(self) -> None:
         """Handle directory selection for export."""
         # Start from saved export directory, then current export path, then current working directory
-        start_dir = self.config_manager.config.export_directory or self.export_output_path or str(Path.cwd())
+        config = self.config_manager.config
+        start_dir = (config.export_directory if config else None) or self.export_output_path or str(Path.cwd())
         directory = QFileDialog.getExistingDirectory(self, "Select Output Directory", start_dir)
         if directory:
             self.export_output_path = directory
@@ -2201,8 +2271,9 @@ class SleepScoringMainWindow(QMainWindow):
             # Clear data caches
             self.current_date_48h_cache.clear()
             self.main_48h_data = None
-            if hasattr(self.plot_widget, "main_48h_axis_y_data"):  # KEEP: Plot widget duck typing
-                self.plot_widget.main_48h_axis_y_data = None
+            plot = self.plot_widget
+            if plot is not None and hasattr(plot, "main_48h_axis_y_data"):  # KEEP: Plot widget duck typing
+                plot.main_48h_axis_y_data = None
 
             # Clear available data
             self.available_files.clear()

@@ -71,9 +71,10 @@ class DragDropListWidget(QListWidget):
         self.itemDoubleClicked.connect(self._edit_item)
 
         # Track changes for validation and auto-save
-        self.model().rowsMoved.connect(self.items_changed.emit)
-        self.model().rowsInserted.connect(self.items_changed.emit)
-        self.model().rowsRemoved.connect(self.items_changed.emit)
+        if (model := self.model()) is not None:
+            model.rowsMoved.connect(self.items_changed.emit)
+            model.rowsInserted.connect(self.items_changed.emit)
+            model.rowsRemoved.connect(self.items_changed.emit)
 
     def _edit_item(self, item: QListWidgetItem) -> None:
         """Handle double-click to edit list item."""
@@ -100,7 +101,11 @@ class DragDropListWidget(QListWidget):
 
     def get_all_items(self) -> list[str]:
         """Get all items in the list as a list of strings."""
-        return [self.item(i).text() for i in range(self.count())]
+        result = []
+        for i in range(self.count()):
+            if (item := self.item(i)) is not None:
+                result.append(item.text())
+        return result
 
 
 class StudySettingsTab(QWidget):
@@ -544,6 +549,9 @@ class StudySettingsTab(QWidget):
         """Load current settings from configuration."""
         try:
             config = self.services.config_manager.config
+            if config is None:
+                logger.warning("Config not loaded, skipping settings load")
+                return
 
             # Set unknown value
             self.unknown_value_edit.setText(config.study_unknown_value)
@@ -1217,6 +1225,8 @@ class StudySettingsTab(QWidget):
 
     def _update_paradigm_info_label(self) -> None:
         """Update the paradigm info label based on current selection."""
+        if self.paradigm_info_label is None:
+            return
         paradigm = self._get_current_paradigm()
         if paradigm == StudyDataParadigm.EPOCH_BASED:
             self.paradigm_info_label.setText(ParadigmInfoText.EPOCH_BASED_INFO)
@@ -1276,12 +1286,10 @@ class StudySettingsTab(QWidget):
                 self.nonwear_algorithm_combo.addItem(algo_name, algo_id)
 
             # Try to restore previous selection if still compatible
-            restored = False
             if current_algo_id and current_algo_id in available_algorithms:
                 for i in range(self.nonwear_algorithm_combo.count()):
                     if self.nonwear_algorithm_combo.itemData(i) == current_algo_id:
                         self.nonwear_algorithm_combo.setCurrentIndex(i)
-                        restored = True
                         break
 
             # Update Choi axis visibility based on final selection

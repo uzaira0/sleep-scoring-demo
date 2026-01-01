@@ -50,9 +50,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Try to import gt3x-rs
+# Use TYPE_CHECKING to properly handle optional import for type checker
+gt3x_rs: Any = None  # Module placeholder for when not available
 try:
-    import gt3x_rs
+    import gt3x_rs as _gt3x_rs
 
+    gt3x_rs = _gt3x_rs
     GT3X_RS_AVAILABLE = True
 except ImportError:
     GT3X_RS_AVAILABLE = False

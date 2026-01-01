@@ -144,7 +144,7 @@ class GT3XDataSourceLoader:
         return "gt3x"
 
     @property
-    def supported_extensions(self) -> set[str]:
+    def supported_extensions(self) -> frozenset[str]:
         """
         Supported file extensions.
 

@@ -37,7 +37,7 @@ class InputValidator:
     def validate_file_path(
         file_path: str | Path,
         must_exist: bool = True,
-        allowed_extensions: set[str] | None = None,
+        allowed_extensions: set[str] | frozenset[str] | None = None,
     ) -> Path:
         """
         Validate file path for security and existence.

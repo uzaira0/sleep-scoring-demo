@@ -288,39 +288,42 @@ class ActivityPlotWidget(pg.PlotWidget):
         self.getAxis("bottom").setTextPen(pg.mkPen(color="#444444"))
 
         # Set to panning mode instead of rectangle selection
-        self.plotItem.getViewBox().setMouseMode(pg.ViewBox.PanMode)
+        plot_item = self.plotItem
+        if plot_item is not None:
+            if (view_box := plot_item.getViewBox()) is not None:
+                view_box.setMouseMode(pg.ViewBox.PanMode)
+                view_box.setMenuEnabled(False)
 
-        # Disable context menu to prevent unwanted interactions
-        self.plotItem.setMenuEnabled(False)
-        self.plotItem.getViewBox().setMenuEnabled(False)
+            # Disable context menu to prevent unwanted interactions
+            plot_item.setMenuEnabled(False)
 
-        # Performance optimizations for pyqtgraph
-        # Enable OpenGL for better rendering performance if available
-        try:
-            if hasattr(self.plotItem, "setUseOpenGL"):  # KEEP: Optional PyQt feature
-                self.plotItem.setUseOpenGL(True)
-        except AttributeError:
-            # OpenGL not available, continue with software rendering
-            pass
+            # Performance optimizations for pyqtgraph
+            # Enable OpenGL for better rendering performance if available
+            try:
+                if hasattr(plot_item, "setUseOpenGL"):  # KEEP: Optional PyQt feature
+                    plot_item.setUseOpenGL(True)
+            except AttributeError:
+                # OpenGL not available, continue with software rendering
+                pass
 
-        # Optimize rendering settings (check availability first)
-        try:
-            if hasattr(self.plotItem, "setDownsampling"):  # KEEP: Optional PyQt feature
-                self.plotItem.setDownsampling(mode="peak")  # Use peak downsampling for better performance
-            if hasattr(self.plotItem, "setClipToView"):  # KEEP: Optional PyQt feature
-                self.plotItem.setClipToView(True)  # Only render visible data
-            if hasattr(self.plotItem, "setAutoDownsample"):  # KEEP: Optional PyQt feature
-                self.plotItem.setAutoDownsample(True)  # Enable automatic downsampling
-        except AttributeError:
-            # These optimization methods not available in this pyqtgraph version
-            pass
+            # Optimize rendering settings (check availability first)
+            try:
+                if hasattr(plot_item, "setDownsampling"):  # KEEP: Optional PyQt feature
+                    plot_item.setDownsampling(mode="peak")  # Use peak downsampling for better performance
+                if hasattr(plot_item, "setClipToView"):  # KEEP: Optional PyQt feature
+                    plot_item.setClipToView(True)  # Only render visible data
+                if hasattr(plot_item, "setAutoDownsample"):  # KEEP: Optional PyQt feature
+                    plot_item.setAutoDownsample(True)  # Enable automatic downsampling
+            except AttributeError:
+                # These optimization methods not available in this pyqtgraph version
+                pass
 
-        # Reduce anti-aliasing for better performance (can be re-enabled if needed)
-        try:
-            if hasattr(self.plotItem, "setAntialiasing"):  # KEEP: Optional PyQt feature
-                self.plotItem.setAntialiasing(False)
-        except AttributeError:
-            pass
+            # Reduce anti-aliasing for better performance (can be re-enabled if needed)
+            try:
+                if hasattr(plot_item, "setAntialiasing"):  # KEEP: Optional PyQt feature
+                    plot_item.setAntialiasing(False)
+            except AttributeError:
+                pass
 
         # Add focus indicator for accessibility
         self.setStyleSheet("""
@@ -383,11 +386,19 @@ class ActivityPlotWidget(pg.PlotWidget):
     def _setup_event_handlers(self) -> None:
         """Setup event handlers for mouse and keyboard interaction."""
         # Get ViewBox for range control
-        self.vb = self.plotItem.getViewBox()
-        self.vb.sigRangeChanged.connect(self.enforce_range_limits)
+        plot_item = self.plotItem
+        if plot_item is None:
+            logger.warning("Cannot setup event handlers - plotItem is None")
+            return
+
+        self.vb = plot_item.getViewBox()
+        if self.vb:
+            self.vb.sigRangeChanged.connect(self.enforce_range_limits)
 
         # Connect mouse clicks
-        self.plotItem.scene().sigMouseClicked.connect(self.on_plot_clicked)
+        scene = plot_item.scene()
+        if scene:
+            scene.sigMouseClicked.connect(self.on_plot_clicked)
 
         # Connect mouse hover for tooltips with throttling
         self._mouse_move_timer = QTimer()
@@ -395,7 +406,8 @@ class ActivityPlotWidget(pg.PlotWidget):
         self._mouse_move_timer.timeout.connect(self._process_mouse_move)
         self._last_mouse_pos = None
 
-        self.plotItem.scene().sigMouseMoved.connect(self._on_mouse_move_throttled)
+        if scene:
+            scene.sigMouseMoved.connect(self._on_mouse_move_throttled)
         self.setMouseTracking(True)
 
         # Enable keyboard focus for key events
@@ -898,7 +910,7 @@ class ActivityPlotWidget(pg.PlotWidget):
 
     def enforce_range_limits(self) -> None:
         """Enforce strict pan/zoom boundaries."""
-        if self.data_start_time is None:
+        if self.data_start_time is None or self.data_end_time is None:
             return
 
         current_range = self.vb.viewRange()
@@ -911,15 +923,17 @@ class ActivityPlotWidget(pg.PlotWidget):
             return  # Invalid range structure
 
         # Calculate allowed boundaries based on display mode
+        data_start = self.data_start_time
+        data_end = self.data_end_time
         if self.current_view_hours == 24:
             # 24h mode: can only view within the 24h window
-            max_start = self.data_start_time
-            max_end = self.data_start_time + (24 * 3600)
-            max_end = min(max_end, self.data_end_time)  # Don't exceed actual data
+            max_start = data_start
+            max_end = data_start + (24 * 3600)
+            max_end = min(max_end, data_end)  # Don't exceed actual data
         else:
             # 48h mode: can view full dataset
-            max_start = self.data_start_time
-            max_end = self.data_end_time
+            max_start = data_start
+            max_end = data_end
 
         # Correct out-of-bounds X ranges
         x_min = max(x_range[0], max_start)  # Can't pan before start
@@ -1047,11 +1061,16 @@ class ActivityPlotWidget(pg.PlotWidget):
         if not main_sleep or not main_sleep.is_complete:
             return
 
-        # Get current timestamp
+        # Get current timestamp - is_complete guarantees both timestamps exist
+        onset_ts = main_sleep.onset_timestamp
+        offset_ts = main_sleep.offset_timestamp
+        if onset_ts is None or offset_ts is None:
+            return  # Should not happen due to is_complete check above
+
         if marker_type == SleepMarkerEndpoint.ONSET:
-            current_timestamp = main_sleep.onset_timestamp
+            current_timestamp = onset_ts
         elif marker_type == SleepMarkerEndpoint.OFFSET:
-            current_timestamp = main_sleep.offset_timestamp
+            current_timestamp = offset_ts
         else:
             return
 
@@ -1067,13 +1086,13 @@ class ActivityPlotWidget(pg.PlotWidget):
         # Update the timestamp
         if marker_type == SleepMarkerEndpoint.ONSET:
             # Ensure onset is before offset
-            if new_timestamp < main_sleep.offset_timestamp:
+            if new_timestamp < offset_ts:
                 main_sleep.onset_timestamp = new_timestamp
             else:
                 return
         elif marker_type == SleepMarkerEndpoint.OFFSET:
             # Ensure offset is after onset
-            if new_timestamp > main_sleep.onset_timestamp:
+            if new_timestamp > onset_ts:
                 main_sleep.offset_timestamp = new_timestamp
             else:
                 return
@@ -1126,18 +1145,24 @@ class ActivityPlotWidget(pg.PlotWidget):
             logger.warning("Cannot move marker for incomplete period")
             return False
 
+        # is_complete guarantees both timestamps are not None
+        onset_ts = period.onset_timestamp
+        offset_ts = period.offset_timestamp
+        if onset_ts is None or offset_ts is None:
+            return False  # Should not happen due to is_complete check
+
         # Validate the new position
         if marker_type == SleepMarkerEndpoint.ONSET:
             # Ensure onset would be before offset
-            if target_timestamp >= period.offset_timestamp:
-                logger.warning(f"Cannot move onset to {target_timestamp} - would be after offset at {period.offset_timestamp}")
+            if target_timestamp >= offset_ts:
+                logger.warning(f"Cannot move onset to {target_timestamp} - would be after offset at {offset_ts}")
                 return False
             # Update onset timestamp
             period.onset_timestamp = target_timestamp
         elif marker_type == SleepMarkerEndpoint.OFFSET:
             # Ensure offset would be after onset
-            if target_timestamp <= period.onset_timestamp:
-                logger.warning(f"Cannot move offset to {target_timestamp} - would be before onset at {period.onset_timestamp}")
+            if target_timestamp <= onset_ts:
+                logger.warning(f"Cannot move offset to {target_timestamp} - would be before onset at {onset_ts}")
                 return False
             # Update offset timestamp
             period.offset_timestamp = target_timestamp
@@ -1207,18 +1232,24 @@ class ActivityPlotWidget(pg.PlotWidget):
             logger.warning("Cannot move marker for incomplete nonwear period")
             return False
 
+        # Type narrowing: is_complete guarantees these are not None
+        start_ts = period.start_timestamp
+        end_ts = period.end_timestamp
+        if start_ts is None or end_ts is None:
+            return False
+
         # Validate the new position
         if marker_type == MarkerEndpoint.START:
             # Ensure start would be before end
-            if target_timestamp >= period.end_timestamp:
-                logger.warning(f"Cannot move start to {target_timestamp} - would be after end at {period.end_timestamp}")
+            if target_timestamp >= end_ts:
+                logger.warning(f"Cannot move start to {target_timestamp} - would be after end at {end_ts}")
                 return False
             # Update start timestamp
             period.start_timestamp = target_timestamp
         elif marker_type == MarkerEndpoint.END:
             # Ensure end would be after start
-            if target_timestamp <= period.start_timestamp:
-                logger.warning(f"Cannot move end to {target_timestamp} - would be before start at {period.start_timestamp}")
+            if target_timestamp <= start_ts:
+                logger.warning(f"Cannot move end to {target_timestamp} - would be before start at {start_ts}")
                 return False
             # Update end timestamp
             period.end_timestamp = target_timestamp
@@ -1258,7 +1289,8 @@ class ActivityPlotWidget(pg.PlotWidget):
 
             else:
                 # Complete the current period (add offset)
-                if timestamp <= self.current_marker_being_placed.onset_timestamp:
+                onset_ts = self.current_marker_being_placed.onset_timestamp
+                if onset_ts is None or timestamp <= onset_ts:
                     # Invalid: offset before onset, reset
                     self.current_marker_being_placed = None
                     return
@@ -1405,6 +1437,8 @@ class ActivityPlotWidget(pg.PlotWidget):
 
         first_marker_ts = main_sleep.onset_timestamp
         last_marker_ts = main_sleep.offset_timestamp
+        if first_marker_ts is None or last_marker_ts is None:
+            return [], []
 
         # Find indices for markers using optimized lookup
         first_marker_idx = self._find_closest_data_index(first_marker_ts)
@@ -1628,7 +1662,9 @@ class ActivityPlotWidget(pg.PlotWidget):
     def clear_plot(self) -> None:
         """Clear all plot data and markers."""
         # Clear the main plot
-        self.plotItem.clear()
+        plot_item = self.plotItem
+        if plot_item:
+            plot_item.clear()
 
         # Clear sleep markers (includes sleep onset/offset rule arrows)
         self.clear_sleep_markers()
@@ -1714,18 +1750,20 @@ class ActivityPlotWidget(pg.PlotWidget):
 
             else:
                 # Complete the current period (add end)
-                if timestamp <= self._current_nonwear_marker_being_placed.start_timestamp:
-                    # Invalid: end before start, reset
+                start_ts = self._current_nonwear_marker_being_placed.start_timestamp
+                if start_ts is None or timestamp <= start_ts:
+                    # Invalid: end before start or no start, reset
                     self._current_nonwear_marker_being_placed = None
                     return
 
                 self._current_nonwear_marker_being_placed.end_timestamp = timestamp
+                end_ts = self._current_nonwear_marker_being_placed.end_timestamp
 
                 # Check for overlap with existing periods
                 slot = self._current_nonwear_marker_being_placed.marker_index
-                if self._daily_nonwear_markers.check_overlap(
-                    self._current_nonwear_marker_being_placed.start_timestamp,
-                    self._current_nonwear_marker_being_placed.end_timestamp,
+                if start_ts is not None and end_ts is not None and self._daily_nonwear_markers.check_overlap(
+                    start_ts,
+                    end_ts,
                     exclude_slot=slot,
                 ):
                     self.marker_limit_exceeded.emit("Nonwear periods cannot overlap")
@@ -1823,7 +1861,9 @@ class ActivityPlotWidget(pg.PlotWidget):
             movable=False,
         )
         region.setZValue(-10)  # Behind the activity plot
-        self.plotItem.addItem(region)
+        plot_item = self.plotItem
+        if plot_item:
+            plot_item.addItem(region)
         return region
 
     # ========== Overlay Methods (delegated to PlotOverlayRenderer) ==========
@@ -1886,7 +1926,8 @@ class ActivityPlotWidget(pg.PlotWidget):
             brush=pg.mkBrush(color=color),
         )
         arrow.setZValue(10)  # Above everything else
-        self.plotItem.addItem(arrow)
+        if (plot_item := self.plotItem) is not None:
+            plot_item.addItem(arrow)
 
         # Create text label above the arrow
         time_str = datetime.fromtimestamp(timestamp).strftime("%H:%M")
@@ -1898,7 +1939,8 @@ class ActivityPlotWidget(pg.PlotWidget):
         text_item.setFont(QFont("Arial", 10, QFont.Weight.Bold))
         text_item.setPos(timestamp, self.data_max_y * position_factor)
         text_item.setZValue(10)
-        self.plotItem.addItem(text_item)
+        if (plot_item := self.plotItem) is not None:
+            plot_item.addItem(text_item)
 
         return arrow, text_item
 
@@ -1930,9 +1972,15 @@ class ActivityPlotWidget(pg.PlotWidget):
 
         # Get mouse position in data coordinates
         mouse_pos = event.scenePos()
-        if self.plotItem.sceneBoundingRect().contains(mouse_pos):
+        plot_item = self.plotItem
+        if plot_item is None:
+            return
+        view_box = plot_item.getViewBox()
+        if view_box is None:
+            return
+        if plot_item.sceneBoundingRect().contains(mouse_pos):
             # Convert to data coordinates
-            data_pos = self.plotItem.getViewBox().mapSceneToView(mouse_pos)
+            data_pos = view_box.mapSceneToView(mouse_pos)
             clicked_time = data_pos.x()
 
             # Check if click is within data boundaries (check for None first)
@@ -1952,8 +2000,9 @@ class ActivityPlotWidget(pg.PlotWidget):
         self._last_mouse_pos = pos
 
         # Throttle mouse move events to avoid excessive processing
-        if not self._mouse_move_timer.isActive():
-            self._mouse_move_timer.start(50)  # Process at most every 50ms
+        timer = self._mouse_move_timer
+        if timer is not None and not timer.isActive():
+            timer.start(50)  # Process at most every 50ms
 
     def _process_mouse_move(self) -> None:
         """Process the last mouse move position."""
@@ -1966,16 +2015,22 @@ class ActivityPlotWidget(pg.PlotWidget):
             return
 
         # Check if mouse is over the plot area
-        if self.plotItem.sceneBoundingRect().contains(pos):
+        plot_item = self.plotItem
+        if plot_item is None:
+            return
+        view_box = plot_item.getViewBox()
+        if view_box is None:
+            return
+        if plot_item.sceneBoundingRect().contains(pos):
             # Convert to data coordinates
-            data_pos = self.plotItem.getViewBox().mapSceneToView(pos)
+            data_pos = view_box.mapSceneToView(pos)
             hover_time = data_pos.x()
 
             # Check if hover is within data boundaries (check for None first)
             if self.data_start_time is not None and self.data_end_time is not None and self.data_start_time <= hover_time <= self.data_end_time:
                 # Find closest data point
                 closest_idx = self._find_closest_data_index(hover_time)
-                if closest_idx is not None and closest_idx < len(self.axis_y_data):
+                if closest_idx is not None and closest_idx < len(self.axis_y_data) and self.timestamps is not None:
                     axis_y_value = self.axis_y_data[closest_idx]
                     timestamp = self.timestamps[closest_idx]
 
@@ -2054,14 +2109,14 @@ class ActivityPlotWidget(pg.PlotWidget):
                 external_label.setVisible(False)
 
             # Clean up any existing plot TextItem if we're switching to external label
-            if self.file_info_label:
-                self.plotItem.removeItem(self.file_info_label)
+            if self.file_info_label and (plot_item := self.plotItem) is not None:
+                plot_item.removeItem(self.file_info_label)
                 self.file_info_label = None
         else:
             # Fallback to original TextItem behavior for backward compatibility
             # Remove existing label if it exists
-            if self.file_info_label:
-                self.plotItem.removeItem(self.file_info_label)
+            if self.file_info_label and (plot_item := self.plotItem) is not None:
+                plot_item.removeItem(self.file_info_label)
                 self.file_info_label = None
 
             # Create new label if we have filename
@@ -2110,4 +2165,5 @@ class ActivityPlotWidget(pg.PlotWidget):
                 self.file_info_label.setZValue(15)  # Above all other elements
 
                 # Add to plot
-                self.plotItem.addItem(self.file_info_label)
+                if (plot_item := self.plotItem) is not None:
+                    plot_item.addItem(self.file_info_label)

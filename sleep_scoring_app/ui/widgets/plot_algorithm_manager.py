@@ -100,9 +100,14 @@ class PlotAlgorithmManager:
             if config and hasattr(config, "sleep_algorithm_id") and config.sleep_algorithm_id:  # KEEP: Duck typing plot/marker attributes
                 algorithm_id = config.sleep_algorithm_id
 
-            self._sleep_scoring_algorithm = self.parent.create_sleep_algorithm(algorithm_id, config)
-            logger.debug("Created sleep scoring algorithm: %s (id: %s)", self._sleep_scoring_algorithm.name, algorithm_id)
+            algo = self.parent.create_sleep_algorithm(algorithm_id, config)
+            if algo is None:
+                raise RuntimeError(f"Failed to create sleep algorithm with id: {algorithm_id}")
+            self._sleep_scoring_algorithm = algo
+            logger.debug("Created sleep scoring algorithm: %s (id: %s)", algo.name, algorithm_id)
 
+        # _sleep_scoring_algorithm is set above, cannot be None here
+        assert self._sleep_scoring_algorithm is not None
         return self._sleep_scoring_algorithm
 
     def set_sleep_scoring_algorithm(self, algorithm: SleepScoringAlgorithm) -> None:
@@ -141,9 +146,14 @@ class PlotAlgorithmManager:
             if config and hasattr(config, "onset_offset_rule_id") and config.onset_offset_rule_id:  # KEEP: Duck typing plot/marker attributes
                 detector_id = config.onset_offset_rule_id
 
-            self._sleep_period_detector = self.parent.create_sleep_period_detector(detector_id)
-            logger.debug("Created sleep period detector: %s (id: %s)", self._sleep_period_detector.name, detector_id)
+            detector = self.parent.create_sleep_period_detector(detector_id)
+            if detector is None:
+                raise RuntimeError(f"Failed to create sleep period detector with id: {detector_id}")
+            self._sleep_period_detector = detector
+            logger.debug("Created sleep period detector: %s (id: %s)", detector.name, detector_id)
 
+        # _sleep_period_detector is set above, cannot be None here
+        assert self._sleep_period_detector is not None
         return self._sleep_period_detector
 
     def set_sleep_period_detector(self, detector: SleepPeriodDetector) -> None:
@@ -215,14 +225,16 @@ class PlotAlgorithmManager:
             return
 
         # Always use 48hr main data for algorithms if available
-        if self.main_48h_timestamps is not None and self.main_48h_activity is not None:
-            algorithm_timestamps = self.main_48h_timestamps
-            algorithm_activity = self.main_48h_activity
-            logger.debug("Using 48hr main data for algorithms: %d points", len(algorithm_timestamps))
+        main_ts = self.main_48h_timestamps
+        main_act = self.main_48h_activity
+        if main_ts is not None and main_act is not None and hasattr(main_ts, "__len__"):
+            algorithm_timestamps = main_ts
+            algorithm_activity = main_act
+            logger.debug("Using 48hr main data for algorithms: %d points", len(main_ts))
         else:
             algorithm_timestamps = self.timestamps
             algorithm_activity = self.activity_data
-            logger.debug("Using current view data for algorithms: %d points", len(algorithm_timestamps))
+            logger.debug("Using current view data for algorithms: %d points", len(algorithm_timestamps) if algorithm_timestamps else 0)
 
         # Create cache key based on main data hash for efficient caching
         column_type = getattr(self.parent, "activity_column_type", "unknown")
@@ -410,7 +422,6 @@ class PlotAlgorithmManager:
             diffs = np.abs(main_ts_array[indices] - current_ts_array)
             valid_mask = diffs <= 1.0  # 1 second tolerance
 
-            subset_results = []
             results_array = np.array(self.main_48h_sadeh_results)
 
             # Fill results
@@ -434,7 +445,11 @@ class PlotAlgorithmManager:
 
     def plot_choi_results(self, nonwear_periods) -> None:
         """Plot Choi nonwear periods as purple background regions (optimized)."""
-        if not nonwear_periods:
+        if not nonwear_periods or self.timestamps is None:
+            return
+
+        plot_item = self.plotItem
+        if plot_item is None:
             return
 
         choi_brush = tuple(map(int, UIColors.CHOI_ALGORITHM_BRUSH.split(",")))
@@ -451,7 +466,7 @@ class PlotAlgorithmManager:
                 movable=False,
             )
             region.setZValue(-10)
-            self.plotItem.addItem(region)
+            plot_item.addItem(region)
 
     # ========== Sleep Scoring Rule Methods ==========
 
@@ -491,8 +506,13 @@ class PlotAlgorithmManager:
         detector = self.get_sleep_period_detector()
 
         # Convert period timestamps to datetime objects
-        sleep_start_time = datetime.fromtimestamp(selected_period.onset_timestamp)
-        sleep_end_time = datetime.fromtimestamp(selected_period.offset_timestamp)
+        onset_ts = selected_period.onset_timestamp
+        offset_ts = selected_period.offset_timestamp
+        if onset_ts is None or offset_ts is None:
+            logger.debug("apply_sleep_scoring_rules: Missing timestamps despite is_complete")
+            return
+        sleep_start_time = datetime.fromtimestamp(onset_ts)
+        sleep_end_time = datetime.fromtimestamp(offset_ts)
 
         # Apply detector using MAIN 48hr data (timestamps match sadeh_results)
         onset_idx, offset_idx = detector.apply_rules(
@@ -532,7 +552,6 @@ class PlotAlgorithmManager:
         )
         arrow.setZValue(10)
         arrow.setVisible(True)
-        self.plotItem.addItem(arrow)
 
         time_str = datetime.fromtimestamp(timestamp).strftime("%H:%M")
 
@@ -551,7 +570,11 @@ class PlotAlgorithmManager:
         onset_text.setPos(timestamp, self.data_max_y * 0.85)
         onset_text.setZValue(10)
         onset_text.setVisible(True)
-        self.plotItem.addItem(onset_text)
+
+        plot_item = self.plotItem
+        if plot_item is not None:
+            plot_item.addItem(arrow)
+            plot_item.addItem(onset_text)
 
         self.parent.sleep_rule_markers.extend([arrow, onset_text])
 
@@ -572,7 +595,6 @@ class PlotAlgorithmManager:
         )
         arrow.setZValue(10)
         arrow.setVisible(True)
-        self.plotItem.addItem(arrow)
 
         time_str = datetime.fromtimestamp(timestamp).strftime("%H:%M")
 
@@ -591,14 +613,20 @@ class PlotAlgorithmManager:
         offset_text.setPos(timestamp, self.data_max_y * 0.85)
         offset_text.setZValue(10)
         offset_text.setVisible(True)
-        self.plotItem.addItem(offset_text)
+
+        plot_item = self.plotItem
+        if plot_item is not None:
+            plot_item.addItem(arrow)
+            plot_item.addItem(offset_text)
 
         self.parent.sleep_rule_markers.extend([arrow, offset_text])
 
     def clear_sleep_onset_offset_markers(self) -> None:
         """Clear sleep onset/offset markers from 3/5 rule."""
+        plot_item = self.plotItem
         for marker in self.parent.sleep_rule_markers:
-            self.plotItem.removeItem(marker)
+            if plot_item is not None:
+                plot_item.removeItem(marker)
         self.parent.sleep_rule_markers.clear()
 
     # ========== Cache Management ==========

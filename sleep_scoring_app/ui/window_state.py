@@ -85,6 +85,9 @@ class WindowStateManager:
         self.services = services
         self.main_window = parent
         self.parent = parent
+        # Cast parent to QWidget for dialog calls
+        from PyQt6.QtWidgets import QWidget
+        self._parent_widget: QWidget | None = parent if isinstance(parent, QWidget) else None
 
         # State tracking
         # NOTE: markers_saved is now managed EXCLUSIVELY by Redux store
@@ -120,7 +123,7 @@ class WindowStateManager:
             logger.debug("Cleared entire marker status cache")
 
         # Also invalidate the data service cache and refresh file table
-        if self.services.data_service is not None:
+        if self.services.data_service is not None and filename is not None:
             self.services.data_service.clear_file_cache(filename)
 
             # Service is headless - provide callback to dispatch to store
@@ -169,22 +172,22 @@ class WindowStateManager:
             nonwear_markers = state.current_nonwear_markers
 
             if not sleep_markers or not sleep_markers.get_complete_periods():
-                QMessageBox.warning(self.main_window, WindowTitle.NO_MARKERS, InfoMessage.NO_MARKERS_TO_SAVE)
+                QMessageBox.warning(self._parent_widget, WindowTitle.NO_MARKERS, InfoMessage.NO_MARKERS_TO_SAVE)
                 return
 
             if not self.navigation.selected_file or not self.navigation.available_dates:
-                QMessageBox.warning(self.main_window, "No File Selected", "Please select a file and date first.")
+                QMessageBox.warning(self._parent_widget, "No File Selected", "Please select a file and date first.")
                 return
 
             # Validate bounds before accessing
             date_index = self.navigation.current_date_index
             if date_index is None or date_index < 0 or date_index >= len(self.navigation.available_dates):
-                QMessageBox.warning(self.main_window, "Invalid Date", "Please select a valid date first.")
+                QMessageBox.warning(self._parent_widget, "Invalid Date", "Please select a valid date first.")
                 return
 
             main_sleep = sleep_markers.get_main_sleep()
             if not main_sleep:
-                QMessageBox.warning(self.main_window, WindowTitle.NO_MARKERS, "No complete sleep period to save.")
+                QMessageBox.warning(self._parent_widget, WindowTitle.NO_MARKERS, "No complete sleep period to save.")
                 return
 
             # 2. Use SAME save path as autosave - call BOTH sleep AND nonwear save methods
@@ -206,13 +209,12 @@ class WindowStateManager:
             date_str = current_date.strftime("%Y-%m-%d")
             filename = Path(self.navigation.selected_file).name
 
-            # Calculate TST and SE for display (from main_sleep period)
+            # Calculate TST for display (from main_sleep period)
             tst_minutes = (main_sleep.offset_timestamp - main_sleep.onset_timestamp) / 60 if main_sleep.is_complete else 0
-            se_percent = 100.0  # Simplified - full metrics calculated in autosave
 
             # Final success feedback (manual save only)
             QMessageBox.information(
-                self.main_window,
+                self._parent_widget,
                 WindowTitle.MARKERS_SAVED,
                 f"Sleep markers saved for {filename} on {date_str}\n\nSleep Period Duration: {tst_minutes:.1f} minutes",
             )
@@ -227,7 +229,7 @@ class WindowStateManager:
 
         except Exception as e:
             logger.exception(f"Error saving markers: {e}")
-            QMessageBox.critical(self.main_window, "Save Error", f"Failed to save sleep markers:\n{e!s}")
+            QMessageBox.critical(self._parent_widget, "Save Error", f"Failed to save sleep markers:\n{e!s}")
 
     def clear_current_markers(self) -> None:
         """Clear current markers from both display and database."""
@@ -244,7 +246,7 @@ class WindowStateManager:
             date_str = current_date.strftime("%Y-%m-%d")
 
         # Confirm with user
-        msg_box = QMessageBox(self.main_window)
+        msg_box = QMessageBox(self._parent_widget)
         msg_box.setIcon(QMessageBox.Icon.Warning)
         msg_box.setWindowTitle("⚠️ Clear Markers - Permanent Deletion")
         msg_box.setText(f"<b>WARNING: You are about to permanently delete all markers for {date_str if date_str else 'current date'}</b>")
@@ -321,13 +323,13 @@ class WindowStateManager:
     def mark_no_sleep_period(self) -> None:
         """Mark current date as having no sleep period."""
         if not self.navigation.selected_file or not self.navigation.available_dates:
-            QMessageBox.warning(self.main_window, "No File Selected", "Please select a file and date first.")
+            QMessageBox.warning(self._parent_widget, "No File Selected", "Please select a file and date first.")
             return
 
         # Validate bounds before accessing
         date_index = self.navigation.current_date_index
         if date_index is None or date_index < 0 or date_index >= len(self.navigation.available_dates):
-            QMessageBox.warning(self.main_window, "Invalid Date", "Please select a valid date first.")
+            QMessageBox.warning(self._parent_widget, "Invalid Date", "Please select a valid date first.")
             return
 
         # Get current date
@@ -336,7 +338,7 @@ class WindowStateManager:
 
         # Confirm with user
         reply = QMessageBox.question(
-            self.main_window,
+            self._parent_widget,
             "Mark No Sleep",
             f"Mark {date_str} as having no sleep period?\n\nThis will delete existing SLEEP markers for this date and save a record indicating no sleep occurred.\n\nNWT (nonwear) markers will be preserved.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -359,7 +361,7 @@ class WindowStateManager:
                 logger.info(f"Deleted sleep markers for {filename} on {date_str} (NWT markers preserved)")
             except Exception as e:
                 logger.exception("Error deleting existing sleep markers")
-                QMessageBox.warning(self.main_window, "Error", f"Failed to delete existing sleep markers: {e}")
+                QMessageBox.warning(self._parent_widget, "Error", f"Failed to delete existing sleep markers: {e}")
                 return
 
             # Extract participant info via services
@@ -440,16 +442,16 @@ class WindowStateManager:
                 # Final success feedback
                 logger.info(f"Marked no sleep period for {filename} on {current_date}")
                 QMessageBox.information(
-                    self.main_window,
+                    self._parent_widget,
                     "No Sleep Marked",
                     f"Successfully marked no sleep period for {filename} on {date_str}.",
                 )
             else:
-                QMessageBox.warning(self.main_window, "Save Error", "Failed to save no-sleep entry to database.")
+                QMessageBox.warning(self._parent_widget, "Save Error", "Failed to save no-sleep entry to database.")
 
         except Exception as e:
             logger.exception(f"Error marking no sleep period: {e}")
-            QMessageBox.critical(self.main_window, "Error", f"Failed to mark no sleep period: {e!s}")
+            QMessageBox.critical(self._parent_widget, "Error", f"Failed to mark no sleep period: {e!s}")
 
     def load_saved_markers(self) -> None:
         """Load saved markers for current file and date from database."""
@@ -693,7 +695,7 @@ class WindowStateManager:
 
             if total_records == 0 and autosave_records == 0 and nonwear_records == 0:
                 QMessageBox.information(
-                    self.main_window,
+                    self._parent_widget,
                     "Clear All Markers",
                     "No sleep or nonwear markers found in the database.",
                 )
@@ -710,7 +712,7 @@ class WindowStateManager:
             message += "\n"
 
             reply = QMessageBox.question(
-                self.main_window,
+                self._parent_widget,
                 "Clear All Markers",
                 message + "This action cannot be undone.\nImported raw data will be preserved.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -736,7 +738,7 @@ class WindowStateManager:
                 details += f"• Nonwear markers: {result.get('nonwear_markers_cleared', 0)}"
 
                 QMessageBox.information(
-                    self.main_window,
+                    self._parent_widget,
                     "Clear All Markers",
                     details,
                 )
@@ -756,4 +758,4 @@ class WindowStateManager:
                     pw.clear_nonwear_markers()
 
         except Exception as e:
-            QMessageBox.critical(self.main_window, "Clear All Markers", f"Failed to clear markers: {e}")
+            QMessageBox.critical(self._parent_widget, "Clear All Markers", f"Failed to clear markers: {e}")

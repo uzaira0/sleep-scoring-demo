@@ -49,7 +49,7 @@ class DiaryTableColumn(StrEnum):
 class DiaryTableManager:
     """Manages diary table operations."""
 
-    def __init__(self, store: "UIStore", data_service: "UnifiedDataProtocol", diary_manager: "DiaryIntegrationManager", diary_table_widget) -> None:
+    def __init__(self, store: "UIStore", data_service: "UnifiedDataProtocol", diary_manager: "DiaryIntegrationManager | None", diary_table_widget) -> None:
         """
         Initialize the diary table manager.
 

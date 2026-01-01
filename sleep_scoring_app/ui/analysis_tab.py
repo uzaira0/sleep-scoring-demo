@@ -760,16 +760,18 @@ class AnalysisTab(QWidget):
         row2.addSpacing(30)
 
         # Auto-save checkbox
+        config = self.services.config_manager.config
+        auto_save = config.auto_save_markers if config else False
         self.auto_save_checkbox = QCheckBox("Auto-save")
         self.auto_save_checkbox.setToolTip("Automatically save markers when navigating away")
-        self.auto_save_checkbox.setChecked(self.services.config_manager.config.auto_save_markers)
+        self.auto_save_checkbox.setChecked(auto_save)
         self.auto_save_checkbox.toggled.connect(self._on_auto_save_toggled)
         row2.addWidget(self.auto_save_checkbox)
 
         # Autosave status label (shows when last autosave occurred)
         self.autosave_status_label = QLabel("Saved at N/A")
         self.autosave_status_label.setStyleSheet("color: #333; font-size: 11px;")
-        self.autosave_status_label.setVisible(self.services.config_manager.config.auto_save_markers)
+        self.autosave_status_label.setVisible(auto_save)
         row2.addWidget(self.autosave_status_label)
 
         # Save markers button (hidden when autosave is enabled)
@@ -777,7 +779,7 @@ class AnalysisTab(QWidget):
         self.save_markers_btn.clicked.connect(self.marker_ops.save_current_markers)
         self.save_markers_btn.setToolTip(TooltipText.SAVE_MARKERS)
         self.save_markers_btn.setStyleSheet(ButtonStyle.SAVE_MARKERS)
-        self.save_markers_btn.setVisible(not self.services.config_manager.config.auto_save_markers)
+        self.save_markers_btn.setVisible(not auto_save)
         row2.addWidget(self.save_markers_btn)
 
         # No Sleep button
@@ -866,7 +868,8 @@ class AnalysisTab(QWidget):
         if self.seamless_source_switcher:
             try:
                 # Use callbacks or services instead of direct parent
-                choi_column = self.services.config_manager.config.choi_axis
+                cfg = self.services.config_manager.config
+                choi_column = cfg.choi_axis if cfg else "axis1"
                 self.app_state.set_activity_data_preferences(selected_data, choi_column)
 
                 self.seamless_source_switcher.switch_activity_source(index)
@@ -889,13 +892,14 @@ class AnalysisTab(QWidget):
 
             # Update each item's enabled state based on available columns
             model = self.activity_source_dropdown.model()
-            for i in range(self.activity_source_dropdown.count()):
-                item_data = self.activity_source_dropdown.itemData(i)
-                is_available = item_data in available_columns
-                # Enable/disable item in the model
-                item = model.item(i)
-                if item:
-                    item.setEnabled(is_available)
+            if model is not None:
+                for i in range(self.activity_source_dropdown.count()):
+                    item_data = self.activity_source_dropdown.itemData(i)
+                    is_available = item_data in available_columns
+                    # Enable/disable item in the model
+                    item = model.item(i)
+                    if item:
+                        item.setEnabled(is_available)
 
             # Find the index for the preferred column
             for i in range(self.activity_source_dropdown.count()):
@@ -1045,13 +1049,13 @@ class AnalysisTab(QWidget):
             vertical_header.setVisible(False)
 
         # Configure column widths from definitions
-        header = table.horizontalHeader()
-        header.setStretchLastSection(False)
+        if (header := table.horizontalHeader()) is not None:
+            header.setStretchLastSection(False)
 
-        for idx, col_def in enumerate(diary_columns):
-            header.setSectionResizeMode(idx, col_def.width_mode)
-            if col_def.width_hint:
-                table.setColumnWidth(idx, col_def.width_hint)
+            for idx, col_def in enumerate(diary_columns):
+                header.setSectionResizeMode(idx, col_def.width_mode)
+                if col_def.width_hint:
+                    table.setColumnWidth(idx, col_def.width_hint)
 
         # Set font
         font = table.font()
@@ -1102,9 +1106,9 @@ class AnalysisTab(QWidget):
     def save_splitter_states(self) -> tuple[bytes, bytes, bytes]:
         """Save splitter states for layout persistence."""
         return (
-            bytes(self.top_level_splitter.saveState()),
-            bytes(self.main_splitter.saveState()),
-            bytes(self.plot_and_tables_splitter.saveState()),
+            bytes(self.top_level_splitter.saveState().data()),
+            bytes(self.main_splitter.saveState().data()),
+            bytes(self.plot_and_tables_splitter.saveState().data()),
         )
 
     def restore_splitter_states(
@@ -1330,7 +1334,8 @@ class AnalysisTab(QWidget):
         """Handle onset table pop-out button click."""
         if self.onset_popout_window is None:
             # Create new pop-out window
-            self.onset_popout_window = PopOutTableWindow(parent=self.parent(), title="Sleep Onset Data - Pop Out", table_type="onset")
+            parent_widget = self.parentWidget()
+            self.onset_popout_window = PopOutTableWindow(parent=parent_widget, title="Sleep Onset Data - Pop Out", table_type="onset")
             # Connect right-click handler to main window for marker movement
             self.onset_popout_window.table.customContextMenuRequested.connect(lambda pos: self._on_popout_table_right_clicked("onset", pos))
             logger.info("Created onset pop-out window")
@@ -1345,7 +1350,8 @@ class AnalysisTab(QWidget):
         """Handle offset table pop-out button click."""
         if self.offset_popout_window is None:
             # Create new pop-out window
-            self.offset_popout_window = PopOutTableWindow(parent=self.parent(), title="Sleep Offset Data - Pop Out", table_type="offset")
+            parent_widget = self.parentWidget()
+            self.offset_popout_window = PopOutTableWindow(parent=parent_widget, title="Sleep Offset Data - Pop Out", table_type="offset")
             # Connect right-click handler to main window for marker movement
             self.offset_popout_window.table.customContextMenuRequested.connect(lambda pos: self._on_popout_table_right_clicked("offset", pos))
             logger.info("Created offset pop-out window")

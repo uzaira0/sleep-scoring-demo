@@ -272,7 +272,7 @@ class MigrationManager:
             for migration in migrations_to_rollback:
                 self.rollback_migration(conn, migration)
 
-    def get_migration_history(self, conn: sqlite3.Connection) -> list[dict[str, any]]:
+    def get_migration_history(self, conn: sqlite3.Connection) -> list[dict[str, Any]]:
         """
         Get migration history with execution details.
 

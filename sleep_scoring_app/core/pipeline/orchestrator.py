@@ -309,7 +309,8 @@ class PipelineOrchestrator:
             },
         )
 
-        logger.info(f"Pipeline completed: {result.metadata['num_epochs']} epochs, {result.metadata['sleep_percentage']:.1f}% sleep")
+        if result.metadata:
+            logger.info(f"Pipeline completed: {result.metadata['num_epochs']} epochs, {result.metadata['sleep_percentage']:.1f}% sleep")
 
         return result
 

@@ -62,7 +62,7 @@ class ExportResult:
 class ExportManager:
     """Handles all export operations."""
 
-    def __init__(self, database_manager: DatabaseManager = None) -> None:
+    def __init__(self, database_manager: DatabaseManager | None = None) -> None:
         self.db_manager = database_manager or DatabaseManager()
         self.max_backups = 10
 
@@ -494,8 +494,9 @@ class ExportManager:
                 # Load activity data ONCE per file (cache hit or miss)
                 if filename not in activity_data_cache:
                     # Find the full time range needed for all periods in this file
-                    all_starts = [datetime.fromtimestamp(p.onset_timestamp) for p in complete_periods]
-                    all_ends = [datetime.fromtimestamp(p.offset_timestamp) for p in complete_periods]
+                    # Complete periods are guaranteed to have non-None timestamps
+                    all_starts = [datetime.fromtimestamp(p.onset_timestamp) for p in complete_periods if p.onset_timestamp is not None]
+                    all_ends = [datetime.fromtimestamp(p.offset_timestamp) for p in complete_periods if p.offset_timestamp is not None]
                     earliest_start = min(all_starts) - timedelta(minutes=5)  # 5 min buffer for Sadeh
                     latest_end = max(all_ends) + timedelta(minutes=5)
 
@@ -529,6 +530,9 @@ class ExportManager:
                 # Calculate metrics for ALL periods using cached data
                 for period in complete_periods:
                     # Extract the subset of data for this period
+                    # Complete periods guaranteed to have non-None timestamps
+                    if period.onset_timestamp is None or period.offset_timestamp is None:
+                        continue
                     period_start = datetime.fromtimestamp(period.onset_timestamp) - timedelta(minutes=5)
                     period_end = datetime.fromtimestamp(period.offset_timestamp) + timedelta(minutes=5)
 
@@ -566,7 +570,7 @@ class ExportManager:
                     choi_results = []
                     if vector_magnitude:
                         # Create DataFrame for Choi algorithm
-                        df = pd.DataFrame(
+                        _ = pd.DataFrame(
                             {
                                 "datetime": timestamps,
                                 ActivityDataPreference.AXIS_Y: axis_y_values,
@@ -715,7 +719,7 @@ class ExportManager:
                     continue
 
                 # Load manual nonwear markers for this file/date
-                daily_nonwear = self.db_manager.load_manual_nonwear_markers(filename, analysis_date)
+                daily_nonwear = self.db_manager.load_manual_nonwear_markers(filename, str(analysis_date))
                 complete_periods = daily_nonwear.get_complete_periods()
 
                 if not complete_periods:
@@ -732,6 +736,9 @@ class ExportManager:
 
                 # Add each nonwear period as a row
                 for i, period in enumerate(complete_periods, start=1):
+                    # Complete periods guaranteed to have non-None timestamps
+                    if period.start_timestamp is None or period.end_timestamp is None:
+                        continue
                     start_dt = datetime.fromtimestamp(period.start_timestamp)
                     end_dt = datetime.fromtimestamp(period.end_timestamp)
                     duration = period.duration_minutes or 0.0
@@ -849,13 +856,14 @@ class ExportManager:
             # Map internal names to export column names for filtering
             available_columns = [col for col in column_selection if col in df.columns]
             if available_columns:
-                df = df[available_columns]
+                # Ensure we keep a DataFrame (not Series) by using double brackets
+                df = df[available_columns].copy()
 
         # Sanitize string columns
         for col in df.select_dtypes(include=["object"]).columns:
             df[col] = df[col].apply(self._sanitize_csv_cell)
 
-        # Write CSV atomically
+        # Write CSV atomically (df is always DataFrame due to .copy() above)
         self._atomic_csv_write(df, output_path, index=False)
         logger.info("Exported %d sleep periods to %s", len(df), output_path)
 
@@ -889,7 +897,8 @@ class ExportManager:
         if column_selection:
             available_columns = [col for col in column_selection if col in df.columns]
             if available_columns:
-                df = df[available_columns]
+                # Ensure we keep a DataFrame (not Series) by using .copy()
+                df = df[available_columns].copy()
 
         # Sanitize string columns
         for col in df.select_dtypes(include=["object"]).columns:

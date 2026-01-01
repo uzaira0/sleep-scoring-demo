@@ -106,6 +106,7 @@ class MarkerPersistence(Protocol):
         participant_id: str,
         date: datetime,
         markers: DailyMarkersProtocol,
+        **kwargs: Any,
     ) -> bool:
         """
         Save markers to persistent storage.
@@ -115,6 +116,7 @@ class MarkerPersistence(Protocol):
             participant_id: Participant identifier
             date: The date for these markers
             markers: The daily markers container to save
+            **kwargs: Additional arguments (e.g., sleep_metrics, algorithm_type)
 
         Returns:
             True if save succeeded, False otherwise

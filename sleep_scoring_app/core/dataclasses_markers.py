@@ -37,7 +37,7 @@ class SleepPeriod:
     @property
     def duration_seconds(self) -> float | None:
         """Calculate duration in seconds."""
-        if self.is_complete:
+        if self.is_complete and self.offset_timestamp is not None and self.onset_timestamp is not None:
             return self.offset_timestamp - self.onset_timestamp
         return None
 
@@ -68,7 +68,7 @@ class SleepPeriod:
 
     def to_list(self) -> list[float]:
         """Convert to list format for compatibility."""
-        if self.is_complete:
+        if self.is_complete and self.onset_timestamp is not None and self.offset_timestamp is not None:
             return [self.onset_timestamp, self.offset_timestamp]
         return []
 
@@ -145,9 +145,14 @@ class NonwearPeriod:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> NonwearPeriod:
         """Create from dictionary data."""
+        start_time = data.get(DatabaseColumn.START_TIME) or data.get("start_time")
+        end_time = data.get(DatabaseColumn.END_TIME) or data.get("end_time")
+        if start_time is None or end_time is None:
+            msg = "NonwearPeriod requires both start_time and end_time"
+            raise ValueError(msg)
         return cls(
-            start_time=data.get(DatabaseColumn.START_TIME) or data.get("start_time"),
-            end_time=data.get(DatabaseColumn.END_TIME) or data.get("end_time"),
+            start_time=start_time,
+            end_time=end_time,
             participant_id=data.get(DatabaseColumn.PARTICIPANT_ID) or data.get("participant_id", ""),
             source=NonwearDataSource(data.get(DatabaseColumn.PERIOD_TYPE) or data.get("source", NonwearDataSource.MANUAL_NWT)),
             duration_minutes=data.get(DatabaseColumn.DURATION_MINUTES) or data.get("duration_minutes"),
@@ -281,7 +286,7 @@ class ManualNonwearPeriod:
     @property
     def duration_seconds(self) -> float | None:
         """Calculate duration in seconds."""
-        if self.is_complete:
+        if self.is_complete and self.start_timestamp is not None and self.end_timestamp is not None:
             return self.end_timestamp - self.start_timestamp
         return None
 
@@ -294,7 +299,7 @@ class ManualNonwearPeriod:
 
     def to_list(self) -> list[float]:
         """Convert to list format for compatibility."""
-        if self.is_complete:
+        if self.is_complete and self.start_timestamp is not None and self.end_timestamp is not None:
             return [self.start_timestamp, self.end_timestamp]
         return []
 
@@ -439,7 +444,7 @@ class DailyNonwearMarkers:
             if exclude_slot is not None and i == exclude_slot:
                 continue
             period = self.get_period_by_slot(i)
-            if period and period.is_complete:
+            if period and period.is_complete and period.start_timestamp is not None and period.end_timestamp is not None:
                 # Check for overlap: not (new_end <= existing_start or new_start >= existing_end)
                 if not (new_end <= period.start_timestamp or new_start >= period.end_timestamp):
                     return True

@@ -403,7 +403,7 @@ class DatabaseManager:
                 return
 
             # Load manual nonwear markers
-            daily_nonwear = self.nonwear.load_manual_nonwear_markers(filename, analysis_date)
+            daily_nonwear = self.nonwear.load_manual_nonwear_markers(filename, analysis_date.strftime("%Y-%m-%d"))
             complete_periods = daily_nonwear.get_complete_periods()
 
             metric.set_dynamic_field(ExportColumn.MANUAL_NWT_COUNT, len(complete_periods))
@@ -423,8 +423,13 @@ class DatabaseManager:
 
             total_duration = 0.0
             for i, period in enumerate(complete_periods[:10], start=1):
-                start_dt = datetime.fromtimestamp(period.start_timestamp)
-                end_dt = datetime.fromtimestamp(period.end_timestamp)
+                # complete_periods guarantees start_timestamp and end_timestamp are set
+                start_ts = period.start_timestamp
+                end_ts = period.end_timestamp
+                if start_ts is None or end_ts is None:
+                    continue
+                start_dt = datetime.fromtimestamp(start_ts)
+                end_dt = datetime.fromtimestamp(end_ts)
                 duration = period.duration_minutes or 0.0
                 total_duration += duration
 

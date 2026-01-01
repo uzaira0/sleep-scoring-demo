@@ -58,6 +58,7 @@ class ExportTab(QWidget):
         self.main_window_ref = parent  # Keep reference for transition
 
         # UI members
+        self._cached_config = None
         self.summary_label = None  # Will be initialized in setup_ui
 
         self.setup_ui()
@@ -127,7 +128,8 @@ class ExportTab(QWidget):
             # Get ALL possible export columns from column registry
             exportable_columns = column_registry.get_exportable()
             self.services.selected_export_columns = [col.export_column for col in exportable_columns if col.export_column]
-            self.services.export_output_path = self.services.config_manager.config.export_directory or str(Path.cwd() / "sleep_data_exports")
+            config = self.services.config_manager.config
+            self.services.export_output_path = (config.export_directory if config else None) or str(Path.cwd() / "sleep_data_exports")
 
             # Ensure export directory exists
             Path(self.services.export_output_path).mkdir(parents=True, exist_ok=True)
@@ -256,7 +258,8 @@ class ExportTab(QWidget):
             layout.addWidget(radio)
 
         # Restore saved preference via services
-        saved_grouping = self.services.config_manager.config.export_grouping
+        config = self.services.config_manager.config
+        saved_grouping = config.export_grouping if config else 0
         if 0 <= saved_grouping <= 3:
             button = self.export_grouping_group.button(saved_grouping)
             if button:
@@ -273,7 +276,8 @@ class ExportTab(QWidget):
         layout = QVBoxLayout(group)
 
         # Initialize with saved export directory or default via services
-        saved_dir = self.services.config_manager.config.export_directory
+        config = self.services.config_manager.config
+        saved_dir = config.export_directory if config else None
         dir_display = saved_dir if saved_dir else "No directory selected"
         self.export_output_label = QLabel(dir_display)
         self.export_output_label.setStyleSheet("padding: 8px; background-color: white; border: 1px solid #ccc; border-radius: 3px;")
@@ -281,7 +285,10 @@ class ExportTab(QWidget):
 
         browse_btn = QPushButton(ButtonText.BROWSE)
         # MainWindowProtocol guarantees this method exists
-        browse_btn.clicked.connect(self.main_window_ref.browse_export_output_directory)
+        if self.main_window_ref is not None:
+            browse_fn = getattr(self.main_window_ref, "browse_export_output_directory", None)
+            if browse_fn is not None:
+                browse_btn.clicked.connect(browse_fn)
 
         browse_btn.setStyleSheet("font-weight: bold; padding: 5px 10px;")
         layout.addWidget(browse_btn)
@@ -300,26 +307,29 @@ class ExportTab(QWidget):
         group = QGroupBox("Export Options")
         layout = QVBoxLayout(group)
 
+        config = self.services.config_manager.config
+        save_fn = getattr(self.main_window_ref, "save_export_options", None) if self.main_window_ref else None
+
         self.include_headers_checkbox = QCheckBox("Include column headers")
-        self.include_headers_checkbox.setChecked(bool(self.services.config_manager.config.include_headers))
-        # MainWindowProtocol guarantees this method exists
-        self.include_headers_checkbox.stateChanged.connect(self.main_window_ref.save_export_options)
+        self.include_headers_checkbox.setChecked(bool(config.include_headers if config else True))
+        if save_fn is not None:
+            self.include_headers_checkbox.stateChanged.connect(save_fn)
         layout.addWidget(self.include_headers_checkbox)
 
         self.include_metadata_checkbox = QCheckBox("Include metadata (participant info, dates)")
-        self.include_metadata_checkbox.setChecked(bool(self.services.config_manager.config.include_metadata))
-        # MainWindowProtocol guarantees this method exists
-        self.include_metadata_checkbox.stateChanged.connect(self.main_window_ref.save_export_options)
+        self.include_metadata_checkbox.setChecked(bool(config.include_metadata if config else True))
+        if save_fn is not None:
+            self.include_metadata_checkbox.stateChanged.connect(save_fn)
         layout.addWidget(self.include_metadata_checkbox)
 
         self.separate_nonwear_file_checkbox = QCheckBox("Export nonwear markers to separate file")
-        self.separate_nonwear_file_checkbox.setChecked(bool(getattr(self.services.config_manager.config, "export_nonwear_separate", True)))
+        self.separate_nonwear_file_checkbox.setChecked(bool(getattr(config, "export_nonwear_separate", True) if config else True))
         self.separate_nonwear_file_checkbox.setToolTip(
             "When enabled, manual nonwear markers will be exported to a separate CSV file\n"
             "instead of being included as columns in the sleep data export."
         )
-        # MainWindowProtocol guarantees this method exists
-        self.separate_nonwear_file_checkbox.stateChanged.connect(self.main_window_ref.save_export_options)
+        if save_fn is not None:
+            self.separate_nonwear_file_checkbox.stateChanged.connect(save_fn)
         layout.addWidget(self.separate_nonwear_file_checkbox)
 
         # Store references in services for access

@@ -326,35 +326,45 @@ class ConfigManager:
                 # Fall back to JSON saving
                 self._save_to_json()
 
+    def _ensure_config(self) -> AppConfig:
+        """Ensure config exists, raise if not."""
+        if self.config is None:
+            msg = "Configuration not loaded"
+            raise ValueError(msg)
+        return self.config
+
     def _save_to_json(self) -> None:
         """Fallback method to save configuration to JSON (directory paths and export grouping)."""
+        config = self._ensure_config()
         try:
             # Save configuration to JSON (includes all settings)
-            config_data = self.config.to_dict()
+            config_data = config.to_dict()
 
             with open(self.config_file, "w", encoding="utf-8") as f:
                 json.dump(config_data, f, indent=2)
 
             logger.debug("Saved directory paths and export grouping to JSON file: %s", self.config_file)
-            logger.debug("  data_folder: '%s'", self.config.data_folder)
-            logger.debug("  export_directory: '%s'", self.config.export_directory)
-            logger.debug("  import_activity_directory: '%s'", self.config.import_activity_directory)
-            logger.debug("  import_nonwear_directory: '%s'", self.config.import_nonwear_directory)
-            logger.debug("  diary_import_directory: '%s'", self.config.diary_import_directory)
-            logger.debug("  actilife_import_directory: '%s'", self.config.actilife_import_directory)
-            logger.debug("  export_grouping: %s", self.config.export_grouping)
+            logger.debug("  data_folder: '%s'", config.data_folder)
+            logger.debug("  export_directory: '%s'", config.export_directory)
+            logger.debug("  import_activity_directory: '%s'", config.import_activity_directory)
+            logger.debug("  import_nonwear_directory: '%s'", config.import_nonwear_directory)
+            logger.debug("  diary_import_directory: '%s'", config.diary_import_directory)
+            logger.debug("  actilife_import_directory: '%s'", config.actilife_import_directory)
+            logger.debug("  export_grouping: %s", config.export_grouping)
 
         except Exception as e:
             logger.warning("Error saving configuration to JSON: %s", e)
 
     def update_data_folder(self, folder_path: str) -> None:
         """Update data folder setting."""
-        self.config.data_folder = folder_path
+        config = self._ensure_config()
+        config.data_folder = folder_path
         self.save_config()
 
     def update_export_directory(self, directory: str) -> None:
         """Update export directory."""
-        self.config.export_directory = directory
+        config = self._ensure_config()
+        config.export_directory = directory
         self.save_config()
 
     def update_import_settings(
@@ -365,58 +375,65 @@ class ConfigManager:
         actilife_dir: str | None = None,
     ) -> None:
         """Update import directory settings (only directories are configurable)."""
+        config = self._ensure_config()
         if activity_dir is not None:
-            self.config.import_activity_directory = activity_dir
+            config.import_activity_directory = activity_dir
             logger.debug("Updated import activity directory to: %s", activity_dir)
         if nonwear_dir is not None:
-            self.config.import_nonwear_directory = nonwear_dir
+            config.import_nonwear_directory = nonwear_dir
             logger.debug("Updated import nonwear directory to: %s", nonwear_dir)
         if diary_dir is not None:
-            self.config.diary_import_directory = diary_dir
+            config.diary_import_directory = diary_dir
             logger.debug("Updated diary import directory to: %s", diary_dir)
         if actilife_dir is not None:
-            self.config.actilife_import_directory = actilife_dir
+            config.actilife_import_directory = actilife_dir
             logger.debug("Updated actilife import directory to: %s", actilife_dir)
         self.save_config()
 
     def update_export_grouping(self, grouping_id: int) -> None:
         """Update export grouping preference."""
-        self.config.export_grouping = grouping_id
+        config = self._ensure_config()
+        config.export_grouping = grouping_id
         logger.debug("Updated export grouping to: %s", grouping_id)
         self.save_config()
 
     def update_export_options(self, include_headers: bool, include_metadata: bool) -> None:
         """Update export options (headers and metadata)."""
-        self.config.include_headers = include_headers
-        self.config.include_metadata = include_metadata
+        config = self._ensure_config()
+        config.include_headers = include_headers
+        config.include_metadata = include_metadata
         logger.debug("Updated export options: headers=%s, metadata=%s", include_headers, include_metadata)
         self.save_config()
 
     def get_export_columns(self) -> list[str]:
         """Get selected export columns or defaults if none set."""
-        if not self.config.export_columns:
+        config = self._ensure_config()
+        if not config.export_columns:
             # Return all exportable columns from column registry
             column_registry = _get_column_registry()
             exportable_columns = column_registry.get_exportable()
             return [col.export_column for col in exportable_columns if col.export_column]
-        return self.config.export_columns
+        return config.export_columns
 
     def update_skip_rows(self, value: int) -> None:
         """Update the skip rows setting for CSV import."""
-        self.config.skip_rows = value
-        self.config.import_skip_rows = value
+        config = self._ensure_config()
+        config.skip_rows = value
+        config.import_skip_rows = value
         logger.debug("Updated skip_rows to: %s", value)
         self.save_config()
 
     def update_epoch_length(self, value: int) -> None:
         """Update the epoch length setting."""
-        self.config.epoch_length = value
+        config = self._ensure_config()
+        config.epoch_length = value
         logger.debug("Updated epoch_length to: %s", value)
         self.save_config()
 
     def update_auto_save_markers(self, enabled: bool) -> None:
         """Update the auto-save markers setting."""
-        self.config.auto_save_markers = enabled
+        config = self._ensure_config()
+        config.auto_save_markers = enabled
         logger.debug("Updated auto_save_markers to: %s", enabled)
         self.save_config()
 

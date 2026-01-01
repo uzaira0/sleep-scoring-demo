@@ -173,7 +173,8 @@ class PlotMarkerRenderer:
             line.sigClicked.connect(partial(self._on_marker_clicked_wrapper, line))
 
         # Add to plot
-        self.parent.plotItem.addItem(line)
+        if (plot_item := self.parent.plotItem) is not None:
+            plot_item.addItem(line)
         return line
 
     def create_marker_line_no_add(
@@ -220,9 +221,15 @@ class PlotMarkerRenderer:
             offset_label = f"Nap {nap_number} Offset"
 
         # Create markers (but don't add to plot yet)
-        onset_line = self.create_marker_line_no_add(period.onset_timestamp, onset_color, onset_label, period, SleepMarkerEndpoint.ONSET, is_selected)
+        # Type narrowing: is_complete guarantees these are not None
+        onset_ts = period.onset_timestamp
+        offset_ts = period.offset_timestamp
+        if onset_ts is None or offset_ts is None:
+            return []
+
+        onset_line = self.create_marker_line_no_add(onset_ts, onset_color, onset_label, period, SleepMarkerEndpoint.ONSET, is_selected)
         offset_line = self.create_marker_line_no_add(
-            period.offset_timestamp, offset_color, offset_label, period, SleepMarkerEndpoint.OFFSET, is_selected
+            offset_ts, offset_color, offset_label, period, SleepMarkerEndpoint.OFFSET, is_selected
         )
 
         return [onset_line, offset_line]
@@ -248,12 +255,18 @@ class PlotMarkerRenderer:
             onset_label = f"Nap {nap_number} Onset"
             offset_label = f"Nap {nap_number} Offset"
 
+        # Type narrowing: is_complete guarantees these are not None
+        onset_ts = period.onset_timestamp
+        offset_ts = period.offset_timestamp
+        if onset_ts is None or offset_ts is None:
+            return
+
         # Draw onset marker
-        onset_line = self.create_marker_line(period.onset_timestamp, onset_color, onset_label, period, SleepMarkerEndpoint.ONSET, is_selected)
+        onset_line = self.create_marker_line(onset_ts, onset_color, onset_label, period, SleepMarkerEndpoint.ONSET, is_selected)
         self.marker_lines.append(onset_line)
 
         # Draw offset marker
-        offset_line = self.create_marker_line(period.offset_timestamp, offset_color, offset_label, period, SleepMarkerEndpoint.OFFSET, is_selected)
+        offset_line = self.create_marker_line(offset_ts, offset_color, offset_label, period, SleepMarkerEndpoint.OFFSET, is_selected)
         self.marker_lines.append(offset_line)
 
     def draw_incomplete_marker(self, period: SleepPeriod) -> None:
@@ -268,8 +281,12 @@ class PlotMarkerRenderer:
             nap_number = len(complete_naps) + 1  # This will be the next nap
             label = f"Nap {nap_number} Onset?"
 
+        onset_ts = period.onset_timestamp
+        if onset_ts is None:
+            return
+
         line = self.create_marker_line(
-            period.onset_timestamp,
+            onset_ts,
             UIColors.INCOMPLETE_MARKER,  # Gray color for incomplete
             label,
             None,
@@ -292,10 +309,11 @@ class PlotMarkerRenderer:
 
     def redraw_markers(self) -> None:
         """Redraw all sleep markers with proper colors for main sleep vs naps (optimized)."""
+        plot_item = self.parent.plotItem
         # Batch remove existing visual markers for better performance
-        if self.marker_lines:
+        if self.marker_lines and plot_item is not None:
             for line in self.marker_lines:
-                self.parent.plotItem.removeItem(line)
+                plot_item.removeItem(line)
             self.marker_lines.clear()
 
         # Get all complete periods
@@ -318,9 +336,10 @@ class PlotMarkerRenderer:
             markers_to_add.extend(period_markers)
 
         # Add all markers in batch
-        for marker in markers_to_add:
-            self.parent.plotItem.addItem(marker)
-            self.marker_lines.append(marker)
+        if plot_item is not None:
+            for marker in markers_to_add:
+                plot_item.addItem(marker)
+                self.marker_lines.append(marker)
 
         # Show incomplete marker being placed
         current_marker = self.parent.current_marker_being_placed
@@ -339,8 +358,9 @@ class PlotMarkerRenderer:
 
     def clear_sleep_markers(self) -> None:
         """Clear all sleep markers from the plot (visual only)."""
-        for line in self.marker_lines:
-            self.parent.plotItem.removeItem(line)
+        if (plot_item := self.parent.plotItem) is not None:
+            for line in self.marker_lines:
+                plot_item.removeItem(line)
         self.marker_lines.clear()
         self.daily_sleep_markers = DailySleepMarkers()
         self.parent.current_marker_being_placed = None
@@ -555,6 +575,10 @@ class PlotMarkerRenderer:
         if not self.parent.adjacent_day_marker_labels:
             self.parent.adjacent_day_marker_labels = []
 
+        plot_item = self.parent.plotItem
+        if plot_item is None:
+            return
+
         for i, marker_data in enumerate(adjacent_day_markers_data):
             logger.info(f"ADJACENT DAY MARKERS: Processing marker {i}: {marker_data}")
 
@@ -577,7 +601,7 @@ class PlotMarkerRenderer:
                     movable=False,
                 )
                 onset_line.setOpacity(0.4)
-                self.parent.plotItem.addItem(onset_line)
+                plot_item.addItem(onset_line)
                 self.parent.adjacent_day_marker_lines.append(onset_line)
 
                 # Add date label for onset
@@ -586,9 +610,10 @@ class PlotMarkerRenderer:
                     color="#000000",
                     anchor=(0.5, 0),
                 )
-                y_range = self.parent.plotItem.getViewBox().viewRange()[1]
-                onset_label.setPos(onset_time, y_range[1] * 0.9)
-                self.parent.plotItem.addItem(onset_label)
+                if (view_box := plot_item.getViewBox()) is not None:
+                    y_range = view_box.viewRange()[1]
+                    onset_label.setPos(onset_time, y_range[1] * 0.9)
+                plot_item.addItem(onset_label)
                 self.parent.adjacent_day_marker_labels.append(onset_label)
 
             # Create adjacent day offset marker if exists
@@ -604,7 +629,7 @@ class PlotMarkerRenderer:
                     movable=False,
                 )
                 offset_line.setOpacity(0.4)
-                self.parent.plotItem.addItem(offset_line)
+                plot_item.addItem(offset_line)
                 self.parent.adjacent_day_marker_lines.append(offset_line)
 
                 # Add date label for offset
@@ -613,21 +638,26 @@ class PlotMarkerRenderer:
                     color="#000000",
                     anchor=(0.5, 0),
                 )
-                y_range = self.parent.plotItem.getViewBox().viewRange()[1]
-                offset_label.setPos(offset_time, y_range[1] * 0.85)
-                self.parent.plotItem.addItem(offset_label)
+                if (view_box := plot_item.getViewBox()) is not None:
+                    y_range = view_box.viewRange()[1]
+                    offset_label.setPos(offset_time, y_range[1] * 0.85)
+                plot_item.addItem(offset_label)
                 self.parent.adjacent_day_marker_labels.append(offset_label)
 
     def clear_adjacent_day_markers(self) -> None:
         """Clear all adjacent day markers from the plot."""
+        plot_item = self.parent.plotItem
+        if plot_item is None:
+            return
+
         if self.parent.adjacent_day_marker_lines:
             for line in self.parent.adjacent_day_marker_lines:
-                self.parent.plotItem.removeItem(line)
+                plot_item.removeItem(line)
             self.parent.adjacent_day_marker_lines.clear()
 
         if self.parent.adjacent_day_marker_labels:
             for label in self.parent.adjacent_day_marker_labels:
-                self.parent.plotItem.removeItem(label)
+                plot_item.removeItem(label)
             self.parent.adjacent_day_marker_labels.clear()
 
     # ========== Marker Loading ==========
@@ -755,13 +785,14 @@ class PlotMarkerRenderer:
         logger.debug(f"Clearing selected marker set {self.selected_marker_set_index}")
 
         selected_period = self.get_selected_marker_period()
+        plot_item = self.parent.plotItem
 
         if selected_period is None:
             logger.debug("No selected period to clear - trying to clear any existing markers")
-            if self.marker_lines:
+            if self.marker_lines and plot_item is not None:
                 logger.debug(f"Found {len(self.marker_lines)} marker lines to clear")
                 for line in self.marker_lines:
-                    self.parent.plotItem.removeItem(line)
+                    plot_item.removeItem(line)
                 self.marker_lines.clear()
 
                 self.daily_sleep_markers = DailySleepMarkers()
@@ -770,9 +801,10 @@ class PlotMarkerRenderer:
             return
 
         # Remove visual markers for this period
-        lines_to_remove = [line for line in self.marker_lines if line.period == selected_period]
-        for line in lines_to_remove:
-            self.parent.plotItem.removeItem(line)
+        if plot_item is not None:
+            lines_to_remove = [line for line in self.marker_lines if line.period == selected_period]
+            for line in lines_to_remove:
+                plot_item.removeItem(line)
         self.parent.marker_lines = [line for line in self.marker_lines if line.period != selected_period]
 
         # Clear the period from daily_sleep_markers
@@ -806,11 +838,22 @@ class PlotMarkerRenderer:
         if not selected_period or not selected_period.is_complete:
             return
 
-        # Get current timestamp
+        # Type narrowing for data bounds
+        data_start = self.parent.data_start_time
+        data_end = self.parent.data_end_time
+        if data_start is None or data_end is None:
+            return
+
+        # Get current timestamp and narrow types
+        onset_ts = selected_period.onset_timestamp
+        offset_ts = selected_period.offset_timestamp
+        if onset_ts is None or offset_ts is None:
+            return
+
         if marker_type == SleepMarkerEndpoint.ONSET:
-            current_timestamp = selected_period.onset_timestamp
+            current_timestamp = onset_ts
         elif marker_type == SleepMarkerEndpoint.OFFSET:
-            current_timestamp = selected_period.offset_timestamp
+            current_timestamp = offset_ts
         else:
             return
 
@@ -818,17 +861,17 @@ class PlotMarkerRenderer:
         new_timestamp = current_timestamp + seconds_delta
 
         # Ensure timestamp is within data bounds
-        if not (self.parent.data_start_time <= new_timestamp <= self.parent.data_end_time):
+        if not (data_start <= new_timestamp <= data_end):
             return
 
         # Update the timestamp
         if marker_type == SleepMarkerEndpoint.ONSET:
-            if new_timestamp < selected_period.offset_timestamp:
+            if new_timestamp < offset_ts:
                 selected_period.onset_timestamp = new_timestamp
             else:
                 return
         elif marker_type == SleepMarkerEndpoint.OFFSET:
-            if new_timestamp > selected_period.onset_timestamp:
+            if new_timestamp > onset_ts:
                 selected_period.offset_timestamp = new_timestamp
             else:
                 return
@@ -883,6 +926,12 @@ class PlotMarkerRenderer:
         if not period.is_complete:
             return
 
+        # Type narrowing: is_complete guarantees these are not None
+        start_ts = period.start_timestamp
+        end_ts = period.end_timestamp
+        if start_ts is None or end_ts is None:
+            return
+
         start_color, end_color = self._get_nonwear_marker_colors(is_selected)
 
         # Create labels
@@ -890,19 +939,23 @@ class PlotMarkerRenderer:
         end_label = f"NW {period.marker_index} End"
 
         # Draw start marker
-        start_line = self.create_nonwear_marker_line(period.start_timestamp, start_color, start_label, period, MarkerEndpoint.START, is_selected)
+        start_line = self.create_nonwear_marker_line(start_ts, start_color, start_label, period, MarkerEndpoint.START, is_selected)
         self.nonwear_marker_lines.append(start_line)
 
         # Draw end marker
-        end_line = self.create_nonwear_marker_line(period.end_timestamp, end_color, end_label, period, MarkerEndpoint.END, is_selected)
+        end_line = self.create_nonwear_marker_line(end_ts, end_color, end_label, period, MarkerEndpoint.END, is_selected)
         self.nonwear_marker_lines.append(end_line)
 
     def draw_incomplete_nonwear_marker(self, period: ManualNonwearPeriod) -> None:
         """Draw a temporary marker for an incomplete nonwear period."""
+        start_ts = period.start_timestamp
+        if start_ts is None:
+            return
+
         label = f"NW {period.marker_index} Start?"
 
         line = self.create_nonwear_marker_line(
-            period.start_timestamp,
+            start_ts,
             UIColors.INCOMPLETE_MANUAL_NWT,
             label,
             None,
@@ -912,9 +965,11 @@ class PlotMarkerRenderer:
 
     def redraw_nonwear_markers(self) -> None:
         """Redraw all manual nonwear markers."""
+        plot_item = self.parent.plotItem
         # Remove existing nonwear marker lines
-        for line in self.nonwear_marker_lines:
-            self.parent.plotItem.removeItem(line)
+        if plot_item is not None:
+            for line in self.nonwear_marker_lines:
+                plot_item.removeItem(line)
         self.nonwear_marker_lines.clear()
 
         # Don't draw if visibility is off
@@ -936,8 +991,9 @@ class PlotMarkerRenderer:
 
     def clear_nonwear_markers(self) -> None:
         """Clear all manual nonwear markers from the plot."""
-        for line in self.nonwear_marker_lines:
-            self.parent.plotItem.removeItem(line)
+        if (plot_item := self.parent.plotItem) is not None:
+            for line in self.nonwear_marker_lines:
+                plot_item.removeItem(line)
         self.nonwear_marker_lines.clear()
         self.daily_nonwear_markers = DailyNonwearMarkers()
         self.parent._current_nonwear_marker_being_placed = None
@@ -1085,11 +1141,23 @@ class PlotMarkerRenderer:
         if not selected_period or not selected_period.is_complete:
             return
 
+        # Type narrowing for data bounds
+        data_start = self.parent.data_start_time
+        data_end = self.parent.data_end_time
+        if data_start is None or data_end is None:
+            return
+
+        # Type narrowing for timestamps
+        start_ts = selected_period.start_timestamp
+        end_ts = selected_period.end_timestamp
+        if start_ts is None or end_ts is None:
+            return
+
         # Get current timestamp
         if marker_type == MarkerEndpoint.START:
-            current_timestamp = selected_period.start_timestamp
+            current_timestamp = start_ts
         elif marker_type == MarkerEndpoint.END:
-            current_timestamp = selected_period.end_timestamp
+            current_timestamp = end_ts
         else:
             return
 
@@ -1097,29 +1165,35 @@ class PlotMarkerRenderer:
         new_timestamp = current_timestamp + seconds_delta
 
         # Ensure timestamp is within data bounds
-        if not (self.parent.data_start_time <= new_timestamp <= self.parent.data_end_time):
+        if not (data_start <= new_timestamp <= data_end):
             return
 
         # CRITICAL FIX #2: Store original values for potential revert on overlap detection
-        original_start = selected_period.start_timestamp
-        original_end = selected_period.end_timestamp
+        original_start = start_ts
+        original_end = end_ts
 
         # Update the timestamp
         if marker_type == MarkerEndpoint.START:
-            if new_timestamp < selected_period.end_timestamp:
+            if new_timestamp < end_ts:
                 selected_period.start_timestamp = new_timestamp
             else:
                 return
         elif marker_type == MarkerEndpoint.END:
-            if new_timestamp > selected_period.start_timestamp:
+            if new_timestamp > start_ts:
                 selected_period.end_timestamp = new_timestamp
             else:
                 return
 
+        # Get updated timestamps for overlap check (handle None case)
+        check_start = selected_period.start_timestamp
+        check_end = selected_period.end_timestamp
+        if check_start is None or check_end is None:
+            return
+
         # CRITICAL FIX #2: Validate no overlap with other periods
         if self.daily_nonwear_markers.check_overlap(
-            selected_period.start_timestamp,
-            selected_period.end_timestamp,
+            check_start,
+            check_end,
             exclude_slot=selected_period.marker_index,
         ):
             # Overlap detected - revert and notify user

@@ -228,7 +228,7 @@ class Actions:
     """
 
     @staticmethod
-    def file_selected(filename: str) -> Action:
+    def file_selected(filename: str | None) -> Action:
         """Create action for when a file is selected."""
         return Action(
             type=ActionType.FILE_SELECTED,

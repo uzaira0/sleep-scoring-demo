@@ -552,17 +552,27 @@ class AlgorithmDataCompatibilityChecker:
         from sleep_scoring_app.core.algorithms import AlgorithmFactory
         from sleep_scoring_app.core.algorithms.sleep_period import SleepPeriodDetectorFactory
 
-        algorithm = None
+        sleep_algorithm = None
         try:
-            algorithm = AlgorithmFactory.create(algorithm_id)
+            sleep_algorithm = AlgorithmFactory.create(algorithm_id)
         except ValueError:
             # Try SleepPeriodDetectorFactory for SPT detectors like HDCZA
+            # Note: Period detectors are always compatible with epoch data
             try:
-                algorithm = SleepPeriodDetectorFactory.create(algorithm_id)
+                _period_detector = SleepPeriodDetectorFactory.create(algorithm_id)
+                # Period detectors work on pre-classified epoch data, so they're always compatible
+                return CompatibilityResult(
+                    status=CompatibilityStatus.COMPATIBLE,
+                    pipeline_type=PipelineType.EPOCH_DIRECT,
+                    reason=f"{algo_info.display_name} is compatible with epoch data.",
+                    suggested_alternatives=(),
+                    data_source=data_source,
+                    algorithm_id=algorithm_id,
+                )
             except ValueError:
                 pass
 
-        if algorithm is None:
+        if sleep_algorithm is None:
             return CompatibilityResult(
                 status=CompatibilityStatus.INCOMPATIBLE,
                 pipeline_type=None,
@@ -575,7 +585,7 @@ class AlgorithmDataCompatibilityChecker:
         # Determine pipeline type
         pipeline_type = self._orchestrator.determine_pipeline_type(
             data_source,
-            algorithm,
+            sleep_algorithm,
         )
 
         # Get suggested alternatives

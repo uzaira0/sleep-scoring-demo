@@ -51,9 +51,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Try to import pygt3x
+# Use a placeholder type to avoid type checker issues with optional import
+FileReader: Any = None
 try:
-    from pygt3x.reader import FileReader
+    from pygt3x.reader import FileReader as _FileReader
 
+    FileReader = _FileReader
     PYGT3X_AVAILABLE = True
 except ImportError:
     PYGT3X_AVAILABLE = False
@@ -266,7 +269,12 @@ class PyGt3xBackend:
             # Apply calibration
             calibrated = apply_calibration(acc_data, scale, offset)
 
-            return calibrated[:, 0], calibrated[:, 1], calibrated[:, 2]
+            # Ensure we return numpy arrays (not Series/DataFrame slices)
+            return (
+                np.asarray(calibrated[:, 0]),
+                np.asarray(calibrated[:, 1]),
+                np.asarray(calibrated[:, 2]),
+            )
 
         except ImportError as e:
             msg = f"Calibration module not available: {e}"

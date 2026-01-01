@@ -49,15 +49,15 @@ def cmd_status(db_path: Path | None = None) -> None:
         status = manager.check_database_status(conn)
 
         if status["pending_migrations"]:
-            for migration in status["pending_migrations"]:
+            for _migration in status["pending_migrations"]:
                 pass
         else:
             pass
 
         if status["migration_history"]:
             for record in status["migration_history"][:10]:
-                success = "OK" if record["success"] else "FAILED"
-                exec_ms = record["execution_time_ms"]
+                _success = "OK" if record["success"] else "FAILED"
+                _exec_ms = record["execution_time_ms"]
         else:
             pass
 
@@ -117,9 +117,9 @@ def cmd_history(db_path: Path | None = None, output_format: str = "table") -> No
             pass
         else:
             for record in history:
-                status = "SUCCESS" if record["success"] else "FAILED"
-                applied_at = record["applied_at"] or ""
-                exec_ms = record["execution_time_ms"] if record["execution_time_ms"] is not None else ""
+                _status = "SUCCESS" if record["success"] else "FAILED"
+                _applied_at = record["applied_at"] or ""
+                _exec_ms = record["execution_time_ms"] if record["execution_time_ms"] is not None else ""
 
 
 def main() -> None:

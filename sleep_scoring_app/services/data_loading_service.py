@@ -96,7 +96,7 @@ class DataLoadingService:
         logger.info(f"Total data files discovered: {len(data_files)}")
         return data_files
 
-    def load_selected_file(self, file_info: FileInfo, skip_rows: int = 10) -> list[date]:
+    def load_selected_file(self, file_info: FileInfo, skip_rows: int = 10) -> list[date | datetime]:
         """Load file and extract available dates - handles both database and CSV sources."""
         if not file_info:
             return []
@@ -110,7 +110,7 @@ class DataLoadingService:
 
         return []
 
-    def _load_database_file(self, filename: str) -> list[date]:
+    def _load_database_file(self, filename: str) -> list[date | datetime]:
         """Load file dates from database."""
         try:
             # CRIT-002 FIX: Validate filename format to catch path vs filename bugs early
@@ -137,7 +137,7 @@ class DataLoadingService:
             logger.exception(f"Failed to load dates from database for {filename}")
             return []
 
-    def _load_csv_file(self, file_path: Path, skip_rows: int = 10) -> list[date]:
+    def _load_csv_file(self, file_path: Path, skip_rows: int = 10) -> list[date | datetime]:
         """Load dates from CSV file."""
         if not file_path:
             return []
@@ -307,7 +307,7 @@ class DataLoadingService:
 
     def load_real_data(
         self, target_date, hours, filename: str | None = None, activity_column: ActivityDataPreference | None = None
-    ) -> tuple[list[datetime], list[float]]:
+    ) -> tuple[list[datetime], list[float]] | tuple[None, None]:
         """Load real activity data with configurable activity column - prioritize database, fallback to CSV."""
         # Try database first if filename is provided
         if filename and self.use_database:

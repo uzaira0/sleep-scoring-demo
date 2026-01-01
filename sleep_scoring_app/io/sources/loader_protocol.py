@@ -84,7 +84,7 @@ class DataSourceLoader(Protocol):
         ...
 
     @property
-    def supported_extensions(self) -> set[str]:
+    def supported_extensions(self) -> frozenset[str]:
         """
         File extensions supported by this loader.
 

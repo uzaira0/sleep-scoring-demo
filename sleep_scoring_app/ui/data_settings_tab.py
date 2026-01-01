@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import random
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFontMetrics
@@ -48,6 +48,7 @@ if TYPE_CHECKING:
         ServiceContainer,
     )
     from sleep_scoring_app.ui.store import UIStore
+    from sleep_scoring_app.utils.config import AppConfig
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ class DataSettingsTab(QWidget):
 
     def __init__(self, store: UIStore, app_state: AppStateInterface, services: ServiceContainer, parent: MainWindowProtocol) -> None:
         """Initialize the data settings tab presentational shell."""
-        super().__init__(parent)
+        super().__init__(cast(QWidget, parent))
         self.store = store
         self.app_state = app_state
         self.services = services
@@ -75,6 +76,18 @@ class DataSettingsTab(QWidget):
 
         self.setup_ui()
         logger.info("DataSettingsTab initialized as Presenter")
+
+    @property
+    def _config(self) -> AppConfig:
+        """Safely access config, raising if unavailable."""
+        if (c := self.services.config_manager.config) is None:
+            raise RuntimeError("Config not loaded")
+        return c
+
+    @property
+    def _config_or_none(self) -> AppConfig | None:
+        """Safely access config, returning None if unavailable."""
+        return self.services.config_manager.config
 
     def setup_ui(self) -> None:
         """Create the presentational layout."""
@@ -143,8 +156,9 @@ class DataSettingsTab(QWidget):
 
         # Get current paradigm via services
         try:
-            paradigm_value = self.services.config_manager.config.data_paradigm
-            paradigm = StudyDataParadigm(paradigm_value)
+            config = self._config
+            paradigm_value = config.data_paradigm if config else None
+            paradigm = StudyDataParadigm(paradigm_value) if paradigm_value else StudyDataParadigm.get_default()
         except (ValueError, AttributeError):
             paradigm = StudyDataParadigm.get_default()
 
@@ -254,9 +268,9 @@ class DataSettingsTab(QWidget):
         """Create Activity Data section with global settings and import."""
         # Make title paradigm-aware
         try:
-            paradigm_value = self.services.config_manager.config.data_paradigm
+            paradigm_value = self._config.data_paradigm
             paradigm = StudyDataParadigm(paradigm_value)
-        except (ValueError, AttributeError):
+        except (ValueError, AttributeError, RuntimeError):
             paradigm = StudyDataParadigm.get_default()
 
         # Set title based on paradigm
@@ -288,7 +302,7 @@ class DataSettingsTab(QWidget):
         # Set current value from config (block signals during initialization)
         self.data_source_combo.blockSignals(True)
         try:
-            current_loader_id = self.services.config_manager.config.data_source_type_id
+            current_loader_id = self._config.data_source_type_id
             for i in range(self.data_source_combo.count()):
                 if self.data_source_combo.itemData(i) == current_loader_id:
                     self.data_source_combo.setCurrentIndex(i)
@@ -316,7 +330,7 @@ class DataSettingsTab(QWidget):
             self.device_preset_combo.addItem(device_display_names[preset], preset.value)
 
         # Set current value from config via services
-        current_preset = self.services.config_manager.config.device_preset
+        current_preset = self._config.device_preset
         for i in range(self.device_preset_combo.count()):
             if self.device_preset_combo.itemData(i) == current_preset:
                 self.device_preset_combo.setCurrentIndex(i)
@@ -342,7 +356,7 @@ class DataSettingsTab(QWidget):
         settings_grid.addWidget(QLabel("Epoch Length (seconds):"), 2, 0)
         self.epoch_length_spin = QSpinBox()
         self.epoch_length_spin.setRange(1, 300)
-        self.epoch_length_spin.setValue(self.services.config_manager.config.epoch_length)
+        self.epoch_length_spin.setValue(self._config.epoch_length)
         # MainWindowProtocol guarantees this method exists
         self.epoch_length_spin.valueChanged.connect(self.main_window.on_epoch_length_changed)
         self.epoch_length_spin.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
@@ -357,7 +371,7 @@ class DataSettingsTab(QWidget):
         settings_grid.addWidget(QLabel("Skip Rows:"), 3, 0)
         self.skip_rows_spin = QSpinBox()
         self.skip_rows_spin.setRange(0, 100)
-        self.skip_rows_spin.setValue(self.services.config_manager.config.skip_rows)
+        self.skip_rows_spin.setValue(self._config.skip_rows)
         # MainWindowProtocol guarantees this method exists
         self.skip_rows_spin.valueChanged.connect(self.main_window.on_skip_rows_changed)
         self.skip_rows_spin.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
@@ -408,7 +422,7 @@ class DataSettingsTab(QWidget):
         self.gt3x_epoch_length_spin.setRange(1, 300)
         self.gt3x_epoch_length_spin.blockSignals(True)
         try:
-            self.gt3x_epoch_length_spin.setValue(self.services.config_manager.config.gt3x_epoch_length)
+            self.gt3x_epoch_length_spin.setValue(self._config.gt3x_epoch_length)
         finally:
             self.gt3x_epoch_length_spin.blockSignals(False)
         self.gt3x_epoch_length_spin.valueChanged.connect(self._on_gt3x_epoch_length_changed)
@@ -420,7 +434,7 @@ class DataSettingsTab(QWidget):
         self.gt3x_return_raw_check = QCheckBox()
         self.gt3x_return_raw_check.blockSignals(True)
         try:
-            self.gt3x_return_raw_check.setChecked(self.services.config_manager.config.gt3x_return_raw)
+            self.gt3x_return_raw_check.setChecked(self._config.gt3x_return_raw)
         finally:
             self.gt3x_return_raw_check.blockSignals(False)
         self.gt3x_return_raw_check.stateChanged.connect(self._on_gt3x_return_raw_changed)
@@ -701,7 +715,7 @@ class DataSettingsTab(QWidget):
 
     def _update_column_mapping_status(self) -> None:
         """Update the column mapping status label."""
-        config = self.services.config_manager.config
+        config = self._config
 
         if config.device_preset != DevicePreset.GENERIC_CSV.value:
             self.column_mapping_status.setText("")
@@ -733,16 +747,18 @@ class DataSettingsTab(QWidget):
         self._update_column_mapping_status()
 
         # Update config
-        if self.services.config_manager:
-            self.services.config_manager.config.device_preset = preset
+        config = self._config_or_none
+        if config is not None:
+            config.device_preset = preset
             self.services.config_manager.save_config()
             logger.info("Device preset changed to: %s", preset)
 
     def _on_data_source_changed(self, index: int) -> None:
         """Handle data source type selection change."""
         loader_id = self.data_source_combo.itemData(index)
-        if self.services.config_manager:
-            self.services.config_manager.config.data_source_type_id = loader_id
+        config = self._config_or_none
+        if config is not None:
+            config.data_source_type_id = loader_id
             self.services.config_manager.save_config()
             logger.info("Data source type changed to: %s", loader_id)
 
@@ -765,8 +781,9 @@ class DataSettingsTab(QWidget):
         try:
             if paradigm is None:
                 # Use current paradigm from config via services
-                if self.services.config_manager and self.services.config_manager.config:
-                    paradigm_val = self.services.config_manager.config.data_paradigm
+                config = self._config_or_none
+                if config is not None:
+                    paradigm_val = config.data_paradigm
                     paradigm = StudyDataParadigm(paradigm_val)
                 else:
                     paradigm = StudyDataParadigm.get_default()
@@ -814,8 +831,9 @@ class DataSettingsTab(QWidget):
                 new_loader_id = self.data_source_combo.currentData()
 
                 # Update config with new default loader for this paradigm
-                if self.services.config_manager:
-                    self.services.config_manager.config.data_source_type_id = new_loader_id
+                config = self._config_or_none
+                if config is not None:
+                    config.data_source_type_id = new_loader_id
                     self.services.config_manager.save_config()
         finally:
             self.data_source_combo.blockSignals(False)
@@ -838,37 +856,40 @@ class DataSettingsTab(QWidget):
 
     def _on_gt3x_epoch_length_changed(self, value: int) -> None:
         """Handle GT3X epoch length spin box change."""
-        if self.services.config_manager:
-            self.services.config_manager.config.gt3x_epoch_length = value
+        config = self._config_or_none
+        if config is not None:
+            config.gt3x_epoch_length = value
             self.services.config_manager.save_config()
             logger.info("GT3X epoch length changed to: %d", value)
 
     def _on_gt3x_return_raw_changed(self, state: int) -> None:
         """Handle GT3X return raw check box change."""
-        if self.services.config_manager:
-            self.services.config_manager.config.gt3x_return_raw = bool(state)
+        config = self._config_or_none
+        if config is not None:
+            config.gt3x_return_raw = bool(state)
             self.services.config_manager.save_config()
             logger.info("GT3X return raw changed to: %s", bool(state))
 
     def _open_column_mapping_dialog(self) -> None:
         """Open the column mapping configuration dialog."""
         # Try to get a sample file from selected files via services interface
-        sample_file = None
+        sample_file: Path | None = None
         selected_files = getattr(self.services, "_selected_activity_files", None)
+        config = self._config_or_none
         if selected_files:
             # Use one of the selected files
             csv_files = [f for f in selected_files if f.suffix.lower() == ".csv"]
             if csv_files:
                 sample_file = random.choice(csv_files)
-        elif self.services.config_manager.config.import_activity_directory:
+        elif config is not None and config.import_activity_directory:
             # Fall back to import directory
-            folder = Path(self.services.config_manager.config.import_activity_directory)
+            folder = Path(config.import_activity_directory)
             if folder.exists():
                 csv_files = list(folder.glob("*.csv"))
                 if csv_files:
                     sample_file = random.choice(csv_files)
 
-        dialog = ColumnMappingDialog(self, sample_file, self.services.config_manager)
+        dialog = ColumnMappingDialog(self, self.services.config_manager, sample_file)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             # Update status after dialog closed
             self._update_column_mapping_status()
@@ -1010,8 +1031,6 @@ class DataSettingsTab(QWidget):
         sample_file = random.choice(csv_files)
         detector = FormatDetector()
 
-        results = []
-
         try:
             # Detect all three
             skip_rows, skip_conf = detector.detect_header_rows(sample_file)
@@ -1077,17 +1096,21 @@ class DataSettingsTab(QWidget):
             if csv_files:
                 return csv_files
 
+        config = self._config_or_none
+        if config is None:
+            return []
+
         # Fall back to config import directory via services
-        if self.services.config_manager.config.import_activity_directory:
-            folder = Path(self.services.config_manager.config.import_activity_directory)
+        if config.import_activity_directory:
+            folder = Path(config.import_activity_directory)
             if folder.exists():
                 csv_files = list(folder.glob("*.csv"))
                 if csv_files:
                     return csv_files
 
         # Fall back to config data folder via services
-        if self.services.config_manager.config.data_folder:
-            folder = Path(self.services.config_manager.config.data_folder)
+        if config.data_folder:
+            folder = Path(config.data_folder)
             if folder.exists():
                 csv_files = list(folder.glob("*.csv"))
                 if csv_files:
@@ -1099,7 +1122,8 @@ class DataSettingsTab(QWidget):
     def _select_diary_import_files(self) -> None:
         """Select diary files for import to database."""
         # Start from last used diary directory via services
-        start_dir = self.services.config_manager.config.diary_import_directory or str(Path.home())
+        config = self._config_or_none
+        start_dir = (config.diary_import_directory if config else None) or str(Path.home())
         files, _ = QFileDialog.getOpenFileNames(
             self,
             "Select Diary Files to Import",
@@ -1117,9 +1141,10 @@ class DataSettingsTab(QWidget):
             self.diary_import_btn.setEnabled(True)
 
             # Save the directory of the first selected file for next time
-            first_file_dir = str(Path(files[0]).parent)
-            self.services.config_manager.config.diary_import_directory = first_file_dir
-            self.services.config_manager.save_config()
+            if config is not None:
+                first_file_dir = str(Path(files[0]).parent)
+                config.diary_import_directory = first_file_dir
+                self.services.config_manager.save_config()
         else:
             self.selected_diary_files = []
             self.diary_import_files_label.setText("No files selected")

@@ -111,7 +111,7 @@ class Gt3xRsDataSourceLoader:
         return "gt3x_rs"
 
     @property
-    def supported_extensions(self) -> set[str]:
+    def supported_extensions(self) -> frozenset[str]:
         """Supported file extensions."""
         return self.SUPPORTED_EXTENSIONS
 

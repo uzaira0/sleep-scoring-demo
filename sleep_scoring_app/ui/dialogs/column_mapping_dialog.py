@@ -183,6 +183,8 @@ class ColumnMappingDialog(QDialog):
             return
 
         config = self.config_manager.config
+        if config is None:
+            return
 
         # Set datetime combined checkbox
         self.datetime_combined_check.setChecked(config.datetime_combined)
@@ -445,6 +447,10 @@ class ColumnMappingDialog(QDialog):
 
         # Save to config
         config = self.config_manager.config
+        if config is None:
+            self.accept()
+            return
+
         config.custom_date_column = date_col
         config.custom_time_column = time_col if not is_combined else ""
         config.datetime_combined = is_combined

@@ -247,9 +247,8 @@ class PlotStateSerializer:
         }
 
         try:
-            ui_state["plot_menu_enabled"] = (
-                self.parent.plotItem.menuEnabled() if hasattr(self.parent, "plotItem") else False
-            )  # KEEP: Duck typing plot/marker attributes
+            plot_item = getattr(self.parent, "plotItem", None)
+            ui_state["plot_menu_enabled"] = plot_item.menuEnabled() if plot_item is not None else False
         except (AttributeError, RuntimeError) as e:
             logger.debug("Could not get plot menu state: %s", e)
             ui_state["plot_menu_enabled"] = False
@@ -424,9 +423,10 @@ class PlotStateSerializer:
             self.parent.current_filename = ui_state.get("current_filename")
 
             file_info_label = getattr(self.parent, "file_info_label", None)
-            if file_info_label and hasattr(self.parent, "plotItem"):  # KEEP: Duck typing plot/marker attributes
+            plot_item = getattr(self.parent, "plotItem", None)
+            if file_info_label and plot_item is not None:
                 try:
-                    self.parent.plotItem.removeItem(file_info_label)
+                    plot_item.removeItem(file_info_label)
                 except (RuntimeError, ValueError) as e:
                     logger.debug("Could not remove file info label: %s", e)
                 self.parent.file_info_label = None

@@ -8,7 +8,7 @@ injected via dependency injection to ensure consistent save behavior.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from sleep_scoring_app.core.constants import AlgorithmType
 from sleep_scoring_app.core.markers.protocol import (
@@ -59,8 +59,10 @@ class SleepMarkerPersistence(MarkerPersistence):
         participant_id: str,
         date: datetime,
         markers: DailyMarkersProtocol,
+        *,
         sleep_metrics: SleepMetrics | None = None,
         algorithm_type: Any = None,
+        **kwargs: Any,
     ) -> bool:
         """
         Save sleep markers to permanent storage.
@@ -202,6 +204,7 @@ class NonwearMarkerPersistence(MarkerPersistence):
         participant_id: str,
         date: datetime,
         markers: DailyMarkersProtocol,
+        **kwargs: Any,
     ) -> bool:
         """
         Save nonwear markers to permanent storage.
@@ -211,6 +214,7 @@ class NonwearMarkerPersistence(MarkerPersistence):
             participant_id: Participant identifier
             date: The date for these markers
             markers: The daily markers container to save
+            **kwargs: Ignored (for protocol compatibility)
 
         Returns:
             True if save succeeded
@@ -219,14 +223,20 @@ class NonwearMarkerPersistence(MarkerPersistence):
             DatabaseError: If save operation fails
 
         """
+        from typing import cast
+
+        from sleep_scoring_app.core.dataclasses_markers import DailyNonwearMarkers
         from sleep_scoring_app.core.exceptions import DatabaseError, ErrorCodes
+
+        # Cast to concrete type - the database expects DailyNonwearMarkers
+        nonwear_markers = cast(DailyNonwearMarkers, markers)
 
         try:
             self._db_manager.save_manual_nonwear_markers(
                 filename=filename,
                 participant_id=participant_id,
                 sleep_date=date.strftime("%Y-%m-%d"),
-                daily_nonwear_markers=markers,
+                daily_nonwear_markers=nonwear_markers,
             )
             logger.debug("Saved nonwear markers for %s on %s", filename, date)
             return True
@@ -326,8 +336,8 @@ class UnifiedMarkerHandler:
 
     def __init__(
         self,
-        sleep_persistence: MarkerPersistence,
-        nonwear_persistence: MarkerPersistence,
+        sleep_persistence: SleepMarkerPersistence,
+        nonwear_persistence: NonwearMarkerPersistence,
     ) -> None:
         """
         Initialize unified marker handler.
@@ -339,9 +349,9 @@ class UnifiedMarkerHandler:
         """
         self._sleep_persistence = sleep_persistence
         self._nonwear_persistence = nonwear_persistence
-        self._on_save_callbacks: list[callable] = []
+        self._on_save_callbacks: list[Callable[[str, str, datetime], None]] = []
 
-    def add_on_save_callback(self, callback: callable) -> None:
+    def add_on_save_callback(self, callback: Callable[[str, str, datetime], None]) -> None:
         """Add callback to be invoked after successful save."""
         self._on_save_callbacks.append(callback)
 

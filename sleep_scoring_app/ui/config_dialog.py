@@ -103,7 +103,8 @@ class ConfigExportDialog(QDialog):
         scroll_layout = QVBoxLayout(scroll_widget)
 
         # Get current config as dict to show current values
-        config_dict = self.config_manager.config.to_full_dict(include_paths=False)
+        config = self.config_manager.config
+        config_dict = config.to_full_dict(include_paths=False) if config else {}
 
         # Study Settings Section
         study_group = self._create_section("Study Identification", "study", config_dict.get("study", {}))
@@ -237,7 +238,11 @@ class ConfigExportDialog(QDialog):
 
         try:
             # Get full config dict
-            full_config = self.config_manager.config.to_full_dict(include_paths=False)
+            config = self.config_manager.config
+            if config is None:
+                QMessageBox.warning(self, "Error", "Configuration not loaded.")
+                return
+            full_config = config.to_full_dict(include_paths=False)
 
             # Build filtered config with only selected settings
             from sleep_scoring_app import __version__ as app_version
@@ -384,8 +389,9 @@ class ConfigImportDialog(QDialog):
             self.file_label.setText(str(file_path))
 
             # Show version info
-            schema_version = self.import_data.get("config_schema_version", "unknown")
-            app_version = self.import_data.get("app_version", "unknown")
+            import_data = self.import_data or {}
+            schema_version = import_data.get("config_schema_version", "unknown")
+            app_version = import_data.get("app_version", "unknown")
             self.version_label.setText(f"Config schema: {schema_version} | Created by app version: {app_version}")
 
             # Rebuild settings list based on what's in the file
@@ -406,13 +412,14 @@ class ConfigImportDialog(QDialog):
         # Clear existing widgets
         while self.scroll_layout.count():
             item = self.scroll_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            if item is not None and (w := item.widget()) is not None:
+                w.deleteLater()
 
         self.setting_checkboxes.clear()
 
         # Get current config for comparison
-        current_config = self.config_manager.config.to_full_dict(include_paths=False)
+        config = self.config_manager.config
+        current_config = config.to_full_dict(include_paths=False) if config else {}
 
         # Section order and display names
         section_order = [
@@ -422,10 +429,11 @@ class ConfigImportDialog(QDialog):
         ]
 
         # Collect all settings
-        all_settings = []
+        all_settings: list[tuple[str, str, object, object]] = []
+        import_data = self.import_data or {}
         for section_key, section_title in section_order:
-            if section_key in self.import_data and isinstance(self.import_data[section_key], dict):
-                section_data = self.import_data[section_key]
+            if section_key in import_data and isinstance(import_data[section_key], dict):
+                section_data = import_data[section_key]
                 current_section = current_config.get(section_key, {})
                 for key, new_value in section_data.items():
                     full_key = f"{section_key}.{key}"
@@ -442,18 +450,19 @@ class ConfigImportDialog(QDialog):
         table.setColumnCount(4)
         table.setHorizontalHeaderLabels(["Import", "Setting", "Current Value", "New Value"])
         table.setRowCount(len(all_settings))
-        table.verticalHeader().setVisible(False)
+        if (vh := table.verticalHeader()) is not None:
+            vh.setVisible(False)
         table.setAlternatingRowColors(True)
 
         # Let table size to content, scroll area handles overflow
         table.setSizeAdjustPolicy(QTableWidget.SizeAdjustPolicy.AdjustToContents)
 
         # Configure column sizing
-        header = table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        if (header := table.horizontalHeader()) is not None:
+            header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+            header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+            header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         table.setColumnWidth(0, 50)
 
         for row, (full_key, section_title, new_value, current_value) in enumerate(all_settings):

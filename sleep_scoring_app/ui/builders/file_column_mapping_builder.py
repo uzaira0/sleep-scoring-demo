@@ -221,6 +221,8 @@ class FileColumnMappingBuilder:
     def _load_current_config(self) -> None:
         """Load current configuration into UI."""
         config = self.config_manager.config
+        if config is None:
+            return
 
         # Set datetime combined checkbox
         if self.datetime_combined_check:
@@ -500,6 +502,10 @@ class FileColumnMappingBuilder:
 
         # Save to config
         config = self.config_manager.config
+        if config is None:
+            dialog.accept()
+            return
+
         config.custom_date_column = date_col
         config.custom_time_column = time_col if not is_combined else ""
         config.datetime_combined = is_combined

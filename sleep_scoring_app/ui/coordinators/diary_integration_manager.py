@@ -195,7 +195,11 @@ class DiaryIntegrationManager:
                 data_start = self.parent.plot_widget.data_start_time
                 data_end = self.parent.plot_widget.data_end_time
 
-                if data_start and data_end and not (data_start <= timestamp <= data_end):
+                # Convert to timestamps for comparison
+                data_start_ts = data_start.timestamp() if data_start else None
+                data_end_ts = data_end.timestamp() if data_end else None
+
+                if data_start_ts is not None and data_end_ts is not None and not (data_start_ts <= timestamp <= data_end_ts):
                     logger.warning(f"Time {time_str} is outside current data view range, but allowing placement")
                     # Still return the timestamp - let the plot widget handle validation
 
@@ -528,7 +532,11 @@ class DiaryIntegrationManager:
                 data_start = self.parent.plot_widget.data_start_time
                 data_end = self.parent.plot_widget.data_end_time
 
-                if data_start and data_end and not (data_start <= timestamp <= data_end):
+                # Convert to timestamps for comparison
+                data_start_ts = data_start.timestamp() if data_start else None
+                data_end_ts = data_end.timestamp() if data_end else None
+
+                if data_start_ts is not None and data_end_ts is not None and not (data_start_ts <= timestamp <= data_end_ts):
                     logger.warning(f"Time {time_str} is outside data range for current view")
                     return None
 
