@@ -87,6 +87,7 @@ class WindowStateManager:
         self.parent = parent
         # Cast parent to QWidget for dialog calls
         from PyQt6.QtWidgets import QWidget
+
         self._parent_widget: QWidget | None = parent if isinstance(parent, QWidget) else None
 
         # State tracking
@@ -367,7 +368,6 @@ class WindowStateManager:
             # Extract participant info via services
             from dataclasses import replace
 
-
             participant_info = self.services.data_manager.extract_enhanced_participant_info(self.navigation.selected_file)
             # Set the date field for this specific analysis
             participant = replace(participant_info, date=date_str)
@@ -598,69 +598,11 @@ class WindowStateManager:
             logger.error(f"Error creating sleep period from timestamps: {e}", exc_info=True)
             return None
 
-    def update_tables_visual_only(self, daily_sleep_markers: DailySleepMarkers) -> None:
-        """
-        Perform visual updates of tables and sleep info WITHOUT store dispatch.
-        Use this from connectors to avoid infinite loops.
-        """
-        import time
-
-        current_time = time.time()
-        time_since_last_update = current_time - self.main_window._last_table_update_time
-
-        # Store current markers for delayed update via main window reference
-        self.main_window._pending_markers = daily_sleep_markers
-
-        # Use the currently selected marker set from the plot widget via services
-        pw = self.services.plot_widget
-        selected_period = pw.get_selected_marker_period() if pw else None
-
-        if selected_period and selected_period.is_complete:
-            # Always update sleep info immediately (lightweight)
-            self.app_state.update_sleep_info(selected_period)
-
-            # Update tables with optimized caching
-            if time_since_last_update > 0.05:  # 50ms throttle
-                # Use cached indices if available
-                onset_idx = self.main_window._marker_index_cache.get(selected_period.onset_timestamp)
-                offset_idx = self.main_window._marker_index_cache.get(selected_period.offset_timestamp)
-
-                # Get surrounding data using cached indices via main window callback
-                onset_data = self.main_window._get_marker_data_cached(selected_period.onset_timestamp, onset_idx)
-                offset_data = self.main_window._get_marker_data_cached(selected_period.offset_timestamp, offset_idx)
-
-                # Update tables only if we have data
-                if onset_data or offset_data:
-                    self.app_state.update_marker_tables(onset_data, offset_data)
-                    self.main_window._last_table_update_time = current_time
-        else:
-            # Fallback to first complete period if no selection or selected period incomplete
-            complete_periods = daily_sleep_markers.get_complete_periods()
-            if complete_periods:
-                first_period = complete_periods[0]
-
-                # Always update sleep info immediately
-                self.app_state.update_sleep_info(first_period)
-
-                # Throttle table updates
-                if time_since_last_update > 0.05:  # 50ms throttle
-                    onset_idx = self.main_window._marker_index_cache.get(first_period.onset_timestamp)
-                    offset_idx = self.main_window._marker_index_cache.get(first_period.offset_timestamp)
-
-                    onset_data = self.main_window._get_marker_data_cached(first_period.onset_timestamp, onset_idx)
-                    offset_data = self.main_window._get_marker_data_cached(first_period.offset_timestamp, offset_idx)
-
-                    if onset_data or offset_data:
-                        self.app_state.update_marker_tables(onset_data, offset_data)
-                        self.main_window._last_table_update_time = current_time
-            else:
-                self.app_state.update_sleep_info(None)
-                # Clear tables when no markers
-                if time_since_last_update > 0.05:
-                    self.app_state.update_marker_tables([], [])
-                    self.main_window._last_table_update_time = current_time
-
-        # NOTE: Delayed timer removed - SideTableConnector handles updates via Redux state
+    # NOTE: update_tables_visual_only was DELETED
+    # SideTableConnector now handles table updates directly by:
+    # 1. Subscribing to Redux store state changes
+    # 2. Calling table_manager.get_marker_data_cached() for data
+    # 3. Calling table_manager.update_marker_tables() to update widgets
 
     def handle_sleep_markers_changed(self, daily_sleep_markers: DailySleepMarkers) -> None:
         """

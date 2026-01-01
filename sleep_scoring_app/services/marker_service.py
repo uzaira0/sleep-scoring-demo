@@ -396,6 +396,69 @@ class MarkerService:
         self._cache[cache_key] = markers
         return markers
 
+    def load_adjacent_day_markers(
+        self,
+        filename: str,
+        available_dates: list[str],
+        current_date_index: int,
+    ) -> list[dict]:
+        """
+        Load sleep markers from adjacent days for display.
+
+        This is a headless service method - no Qt dependencies.
+        Returns marker data in dict format suitable for plot display.
+
+        Args:
+            filename: File identifier
+            available_dates: List of date strings (ISO format)
+            current_date_index: Index of current date in available_dates
+
+        Returns:
+            List of marker dicts with onset_datetime, offset_datetime, adjacent_date, is_adjacent_day
+
+        """
+        if not available_dates or current_date_index < 0 or current_date_index >= len(available_dates):
+            return []
+
+        adjacent_markers: list[dict] = []
+
+        # Load from previous day
+        if current_date_index > 0:
+            prev_date_str = available_dates[current_date_index - 1]
+            prev_markers = self._load_markers_as_dicts(filename, prev_date_str)
+            for marker in prev_markers:
+                marker["adjacent_date"] = prev_date_str
+                marker["is_adjacent_day"] = True
+            adjacent_markers.extend(prev_markers)
+
+        # Load from next day
+        if current_date_index < len(available_dates) - 1:
+            next_date_str = available_dates[current_date_index + 1]
+            next_markers = self._load_markers_as_dicts(filename, next_date_str)
+            for marker in next_markers:
+                marker["adjacent_date"] = next_date_str
+                marker["is_adjacent_day"] = True
+            adjacent_markers.extend(next_markers)
+
+        return adjacent_markers
+
+    def _load_markers_as_dicts(self, filename: str, date_str: str) -> list[dict]:
+        """Load markers for a date and convert to display dicts."""
+        markers = self.load(filename, date_str)
+        if not markers:
+            return []
+
+        result = []
+        for period in markers.get_complete_periods():
+            if period.onset_timestamp and period.offset_timestamp:
+                result.append(
+                    {
+                        "onset_datetime": period.onset_timestamp,
+                        "offset_datetime": period.offset_timestamp,
+                    }
+                )
+        return result
+
     # ==================== Coordination ====================
 
     def get_marker_status(self, filename: str, sleep_date: date | str) -> MarkerStatus:

@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import QFileDialog, QMessageBox, QWidget
 from sleep_scoring_app.core.constants import StudyDataParadigm
 
 if TYPE_CHECKING:
-    from sleep_scoring_app.ui.protocols import MainWindowProtocol
+    from sleep_scoring_app.ui.protocols import MainWindowProtocol, ServiceContainer
 
 logger = logging.getLogger(__name__)
 
@@ -33,17 +33,28 @@ class ImportUICoordinator:
     - Import worker management
     - Progress updates to UI
     - Import completion handling
+
+    ARCHITECTURE NOTE: This coordinator manages QThread workers which require
+    Qt signal/slot connections. While it does some direct widget manipulation
+    for progress updates, this is acceptable for ephemeral import state.
+
+    Future improvement: Progress could be dispatched to Redux and a connector
+    could update progress bars, but the complexity gain is minimal for
+    ephemeral state that only exists during import operations.
     """
 
-    def __init__(self, parent: MainWindowProtocol) -> None:
+    def __init__(self, parent: MainWindowProtocol, services: ServiceContainer | None = None) -> None:
         """
         Initialize the import UI coordinator.
 
         Args:
-            parent: Reference to main window for UI and service access
+            parent: Reference to main window for UI access
+            services: Service container for headless services (optional for backwards compat)
 
         """
-        self.parent = parent
+        self.main_window = parent
+        # Use provided services or fall back to parent (backwards compatibility)
+        self.services = services if services is not None else parent
 
         # Track selected files for import
         self._selected_activity_files: list[Path] = []
@@ -53,11 +64,11 @@ class ImportUICoordinator:
         self.import_worker = None
         self.nonwear_import_worker = None
 
-        logger.info("ImportUICoordinator initialized")
+        logger.info("ImportUICoordinator initialized with decoupled services")
 
     def _get_config(self):
         """Get config, raising if not available."""
-        config = self.parent.config_manager.config
+        config = self.services.config_manager.config
         if config is None:
             msg = "Configuration not loaded"
             raise RuntimeError(msg)
@@ -66,7 +77,7 @@ class ImportUICoordinator:
     @property
     def _parent_widget(self) -> QWidget | None:
         """Get parent as QWidget for dialogs."""
-        return self.parent if isinstance(self.parent, QWidget) else None
+        return self.main_window if isinstance(self.main_window, QWidget) else None
 
     def browse_data_folder(self) -> None:
         """Browse for CSV data folder (does not automatically load files)."""
@@ -77,7 +88,7 @@ class ImportUICoordinator:
 
         if directory:
             # Save to config but don't automatically load files
-            self.parent.config_manager.update_data_folder(directory)
+            self.services.config_manager.update_data_folder(directory)
 
     def browse_activity_files(self) -> None:
         """Browse for activity data files (multi-select)."""
@@ -102,11 +113,11 @@ class ImportUICoordinator:
                 # Display file count
                 file_count = len(files)
                 display_text = f"{file_count} file(s) selected"
-                self.parent.data_settings_tab._set_path_label_text(self.parent.data_settings_tab.activity_import_files_label, display_text)
-                self.parent.data_settings_tab.activity_import_btn.setEnabled(True)
+                self.main_window.data_settings_tab._set_path_label_text(self.main_window.data_settings_tab.activity_import_files_label, display_text)
+                self.main_window.data_settings_tab.activity_import_btn.setEnabled(True)
                 # Save directory of first file to config for next browse
                 config.import_activity_directory = str(Path(files[0]).parent)
-                self.parent.config_manager.save_config()
+                self.services.config_manager.save_config()
             except AttributeError as e:
                 logger.warning("Parent window missing required attributes: %s", e)
 
@@ -152,11 +163,11 @@ class ImportUICoordinator:
                 # Display file count
                 file_count = len(files)
                 display_text = f"{file_count} file(s) selected"
-                self.parent.data_settings_tab._set_path_label_text(self.parent.data_settings_tab.nwt_import_files_label, display_text)
-                self.parent.data_settings_tab.nwt_import_btn.setEnabled(True)
+                self.main_window.data_settings_tab._set_path_label_text(self.main_window.data_settings_tab.nwt_import_files_label, display_text)
+                self.main_window.data_settings_tab.nwt_import_btn.setEnabled(True)
                 # Save directory of first file to config for next browse
                 config.import_nonwear_directory = str(Path(files[0]).parent)
-                self.parent.config_manager.save_config()
+                self.services.config_manager.save_config()
             except AttributeError as e:
                 logger.warning("Parent window missing required attributes: %s", e)
 
@@ -252,7 +263,7 @@ class ImportUICoordinator:
                 )
                 return
 
-        tab = self.parent.data_settings_tab
+        tab = self.main_window.data_settings_tab
         if tab is None:
             logger.warning("Data settings tab not available")
             return
@@ -288,7 +299,7 @@ class ImportUICoordinator:
         # Start worker thread with selected files
         # import_service comes from ServiceContainer (MainWindow), NOT from widget
         self.import_worker = ImportWorker(
-            self.parent.import_service,
+            self.services.import_service,
             self._selected_activity_files,
             skip_rows,
             False,  # force_reimport
@@ -317,7 +328,7 @@ class ImportUICoordinator:
             )
             return
 
-        tab = self.parent.data_settings_tab
+        tab = self.main_window.data_settings_tab
         if tab is None:
             logger.warning("Data settings tab not available")
             return
@@ -336,7 +347,7 @@ class ImportUICoordinator:
         try:
             # Create and configure the nonwear import worker with selected files
             # import_service comes from ServiceContainer (MainWindow), NOT from widget
-            self.nonwear_import_worker = NonwearImportWorker(self.parent.import_service, self._selected_nonwear_files)
+            self.nonwear_import_worker = NonwearImportWorker(self.services.import_service, self._selected_nonwear_files)
 
             # Connect signals for progress updates
             self.nonwear_import_worker.progress_updated.connect(self.update_nonwear_progress, Qt.ConnectionType.QueuedConnection)
@@ -352,7 +363,7 @@ class ImportUICoordinator:
 
     def update_activity_progress(self, progress) -> None:
         """Update activity import progress."""
-        tab = self.parent.data_settings_tab
+        tab = self.main_window.data_settings_tab
         if tab is None:
             logger.debug("Cannot update activity progress - tab not available")
             return
@@ -366,7 +377,7 @@ class ImportUICoordinator:
 
     def update_nonwear_progress(self, progress) -> None:
         """Update nonwear import progress."""
-        tab = self.parent.data_settings_tab
+        tab = self.main_window.data_settings_tab
         if tab is None:
             logger.debug("Cannot update nonwear progress - tab not available")
             return
@@ -380,7 +391,7 @@ class ImportUICoordinator:
 
     def activity_import_finished(self, progress) -> None:
         """Handle activity import completion."""
-        tab = self.parent.data_settings_tab
+        tab = self.main_window.data_settings_tab
         if tab is not None:
             try:
                 tab.activity_import_btn.setEnabled(False)
@@ -427,25 +438,15 @@ class ImportUICoordinator:
                 success_msg,
             )
 
-        # Invalidate marker status cache since new files might have markers
-        try:
-            self.parent._invalidate_marker_status_cache()
-        except AttributeError:
-            logger.debug("Parent window does not have marker cache invalidation method")
+        # Refresh file list via Redux action - EffectHandlerConnector will handle it
+        from sleep_scoring_app.ui.store import Actions
 
-        # Refresh file list
-        self.parent.load_available_files(preserve_selection=False)
-
-        # Auto-refresh imported files table
-        if tab is not None:
-            try:
-                tab.file_management_widget.refresh_files()
-            except AttributeError:
-                logger.debug("Cannot refresh file management widget")
+        self.main_window.store.dispatch(Actions.refresh_files_requested())
+        logger.info("Dispatched refresh_files_requested after import completion")
 
     def nonwear_import_finished(self, progress) -> None:
         """Handle nonwear import completion."""
-        tab = self.parent.data_settings_tab
+        tab = self.main_window.data_settings_tab
         if tab is not None:
             try:
                 tab.nwt_import_btn.setEnabled(True)
@@ -491,21 +492,24 @@ class ImportUICoordinator:
                 f"Nonwear sensor data imported successfully. Imported {len(progress.imported_nonwear_files)} file(s).",
             )
 
-        # Clear nonwear cache and refresh plot to show newly imported data
+        # Clear nonwear cache so next plot load gets fresh data
         try:
-            self.parent.data_service.nonwear_data_factory.clear_cache()
+            self.services.data_service.nonwear_data_factory.clear_cache()
         except AttributeError:
             logger.debug("Cannot clear nonwear cache - data service not available")
 
-        if self.parent.selected_file:
+        # If a file is selected, reload nonwear data via main_window
+        # (This is acceptable Qt glue - the cache was cleared, now we need to reload)
+        state = self.main_window.store.state
+        if state.current_file:
             try:
-                self.parent.load_nonwear_data_for_plot()
+                self.main_window.load_nonwear_data_for_plot()
             except AttributeError:
                 logger.debug("Cannot reload nonwear data for plot")
 
     def _hide_progress_components(self) -> None:
         """Hide activity progress components after import completion."""
-        tab = self.parent.data_settings_tab
+        tab = self.main_window.data_settings_tab
         if tab is None:
             return
         try:
@@ -518,7 +522,7 @@ class ImportUICoordinator:
 
     def _hide_nonwear_progress_components(self) -> None:
         """Hide nonwear progress components after import completion."""
-        tab = self.parent.data_settings_tab
+        tab = self.main_window.data_settings_tab
         if tab is None:
             return
         try:
@@ -540,22 +544,22 @@ class ImportUICoordinator:
 
         if folder_path:
             # Set the data folder and load files
-            self.parent.data_service.set_data_folder(folder_path)
+            self.services.data_service.set_data_folder(folder_path)
 
             # Only load CSV files if we're in CSV mode
-            if not self.parent.data_service.get_database_mode():
-                self.parent.load_available_files(preserve_selection=False)
+            if not self.services.data_service.get_database_mode():
+                self.main_window.load_available_files(preserve_selection=False)
             else:
                 # In database mode, load files from database with completion counts
-                self.parent.load_available_files(preserve_selection=False)
+                self.main_window.load_available_files(preserve_selection=False)
 
-            self.parent.set_ui_enabled(True)
+            self.main_window.set_ui_enabled(True)
 
             # Save to config
-            self.parent.config_manager.update_data_folder(folder_path)
+            self.services.config_manager.update_data_folder(folder_path)
 
             # Show feedback to user
-            file_count = len(self.parent.available_files)
+            file_count = len(self.main_window.available_files)
             if file_count > 0:
                 QMessageBox.information(
                     self._parent_widget,

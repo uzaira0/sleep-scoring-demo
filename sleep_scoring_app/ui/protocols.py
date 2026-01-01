@@ -205,6 +205,7 @@ class ServiceContainer(Protocol):
     data_service: UnifiedDataService
     config_manager: ConfigManager
     db_manager: DatabaseManager
+    marker_service: Any  # MarkerService (headless)
     store: Any  # UIStore
     import_service: Any  # ImportService (headless)
     export_manager: Any | None  # ExportManager
@@ -268,7 +269,7 @@ class AppStateInterface(Protocol):
     current_date_index: int | None
     tab_widget: Any  # QTabWidget
 
-    def toggle_adjacent_day_markers(self, enabled: bool) -> None: ...
+    # NOTE: toggle_adjacent_day_markers REMOVED - AdjacentMarkersConnector handles it directly
     def set_view_mode(self, hours: int) -> None: ...
     def update_sleep_info(self, period: Any) -> None: ...
     def update_marker_tables(self, onset_data: list, offset_data: list) -> None: ...

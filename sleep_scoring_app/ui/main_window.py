@@ -153,6 +153,11 @@ class SleepScoringMainWindow(QMainWindow):
 
         self.import_service = ImportService(self.db_manager)
 
+        # Initialize marker service (headless, used by connectors)
+        from sleep_scoring_app.services.marker_service import MarkerService
+
+        self.marker_service = MarkerService(self.db_manager)
+
         # Initialize window managers with decoupled interfaces
         # Cast self to protocol types - class implements all required protocol methods
         nav = cast("NavigationInterface", self)
@@ -161,7 +166,9 @@ class SleepScoringMainWindow(QMainWindow):
         services = cast("ServiceContainer", self)
         parent = cast("MainWindowProtocol", self)
 
-        self.state_manager = WindowStateManager(store=self.store, navigation=nav, marker_ops=marker_ops, app_state=app_state, services=services, parent=parent)
+        self.state_manager = WindowStateManager(
+            store=self.store, navigation=nav, marker_ops=marker_ops, app_state=app_state, services=services, parent=parent
+        )
         self.session_manager = SessionStateManager()
         self.nav_manager = FileNavigationManager(store=self.store, navigation=nav, app_state=app_state, services=services, parent=parent)
         self.table_manager = MarkerTableManager(
@@ -177,7 +184,7 @@ class SleepScoringMainWindow(QMainWindow):
         # Note: time_manager initialized after UI setup (needs time input fields)
 
         # Initialize coordinators
-        self.import_coordinator = ImportUICoordinator(parent)
+        self.import_coordinator = ImportUICoordinator(parent, services=services)
         self.ui_state_coordinator = UIStateCoordinator(parent, store=self.store)
 
         # Initialize algorithm-data compatibility helper
@@ -463,7 +470,9 @@ class SleepScoringMainWindow(QMainWindow):
 
         # Note: Tabs use self directly for QWidget parent, but internal code may need MainWindowProtocol
         self.data_settings_tab = DataSettingsTab(store=self.store, app_state=app_state, services=services, parent=self)  # type: ignore[arg-type]
-        self.study_settings_tab = StudySettingsTab(store=self.store, navigation=nav, marker_ops=marker_ops, app_state=app_state, services=services, parent=self)  # type: ignore[arg-type]
+        self.study_settings_tab = StudySettingsTab(
+            store=self.store, navigation=nav, marker_ops=marker_ops, app_state=app_state, services=services, parent=self
+        )  # type: ignore[arg-type]
         self.analysis_tab = AnalysisTab(store=self.store, navigation=nav, marker_ops=marker_ops, app_state=app_state, services=services, parent=self)  # type: ignore[arg-type]
         self.export_tab = ExportTab(store=self.store, marker_ops=marker_ops, app_state=app_state, services=services, parent=self)  # type: ignore[arg-type]
 
@@ -1869,9 +1878,7 @@ class SleepScoringMainWindow(QMainWindow):
         """Mark current date as having no sleep period."""
         self.state_manager.mark_no_sleep_period()
 
-    def toggle_adjacent_day_markers(self, show: bool) -> None:
-        """Toggle display of adjacent day markers from adjacent days."""
-        self.ui_state_coordinator.toggle_adjacent_day_markers(show)
+    # NOTE: toggle_adjacent_day_markers DELETED - AdjacentMarkersConnector handles it directly
 
     def load_saved_markers(self) -> None:
         """Load saved markers for current file and date."""
@@ -1974,8 +1981,12 @@ class SleepScoringMainWindow(QMainWindow):
             logger.exception("Error changing data source")
 
     def update_status_bar(self, message: str | None = None) -> None:
-        """Update the status bar with current information."""
-        self.ui_state_coordinator.update_status_bar(message)
+        """Update the status bar with a temporary message."""
+        try:
+            if message:
+                self.statusBar().showMessage(message, 5000)  # Show for 5 seconds
+        except AttributeError:
+            pass
 
     def get_sleep_algorithm_display_name(self) -> str:
         """
@@ -2001,8 +2012,35 @@ class SleepScoringMainWindow(QMainWindow):
         return "Sadeh"
 
     def update_data_source_status(self) -> None:
-        """Update the data source status label."""
-        self.ui_state_coordinator.update_data_source_status()
+        """
+        Update the data source status label.
+
+        This method directly updates the widget based on database stats.
+        It's acceptable to have this on MainWindow since it:
+        1. Reads from db_manager (service)
+        2. Updates a simple label (not complex state)
+        3. Is triggered by import/clear operations (not Redux state changes)
+        """
+        try:
+            stats = self.db_manager.get_database_stats()
+            file_count = stats.get("unique_files", 0)
+            record_count = stats.get("total_records", 0)
+
+            status_text = f"{file_count} imported files, {record_count} total records"
+            style = "color: #27ae60; font-weight: bold;"
+
+            self.data_settings_tab.activity_status_label.setText(status_text)
+            self.data_settings_tab.activity_status_label.setStyleSheet(style)
+
+        except AttributeError as e:
+            logger.debug("Cannot update data source status: %s", e)
+        except Exception as e:
+            try:
+                self.data_settings_tab.activity_status_label.setText("Status unavailable")
+                self.data_settings_tab.activity_status_label.setStyleSheet("color: #e74c3c;")
+            except AttributeError:
+                pass
+            logger.warning("Error updating data source status: %s", e)
 
     def browse_data_folder(self) -> None:
         """Browse for CSV data folder (does not automatically load files)."""

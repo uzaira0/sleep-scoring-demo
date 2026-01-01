@@ -77,6 +77,10 @@ class ActivityPlotWidget(pg.PlotWidget):
     marker_limit_exceeded = pyqtSignal(str)  # Signal when marker limit exceeded
     error_occurred = pyqtSignal(str)  # Signal when an error occurs that should be shown to user
 
+    # Plot interaction signals - connector decides what action to take based on Redux state
+    plot_left_clicked = pyqtSignal(float)  # Emits clicked timestamp - connector decides sleep/nonwear
+    plot_right_clicked = pyqtSignal()  # Emits when right-click to cancel incomplete marker
+
     def __init__(
         self,
         main_window: "AppStateInterface",
@@ -1761,10 +1765,14 @@ class ActivityPlotWidget(pg.PlotWidget):
 
                 # Check for overlap with existing periods
                 slot = self._current_nonwear_marker_being_placed.marker_index
-                if start_ts is not None and end_ts is not None and self._daily_nonwear_markers.check_overlap(
-                    start_ts,
-                    end_ts,
-                    exclude_slot=slot,
+                if (
+                    start_ts is not None
+                    and end_ts is not None
+                    and self._daily_nonwear_markers.check_overlap(
+                        start_ts,
+                        end_ts,
+                        exclude_slot=slot,
+                    )
                 ):
                     self.marker_limit_exceeded.emit("Nonwear periods cannot overlap")
                     self._current_nonwear_marker_being_placed = None
@@ -1945,17 +1953,11 @@ class ActivityPlotWidget(pg.PlotWidget):
         return arrow, text_item
 
     def on_plot_clicked(self, event) -> None:
-        """Handle mouse clicks for placing markers (sleep or nonwear based on mode)."""
-        # Handle right-click cancellation of incomplete markers
+        """Handle mouse clicks - emit signals for connector to decide action based on Redux state."""
+        # Handle right-click cancellation - emit signal, connector decides which marker to cancel
         if event.button() == Qt.MouseButton.RightButton:
-            if self._active_marker_category == MarkerCategory.SLEEP:
-                if self.current_marker_being_placed is not None:
-                    logger.debug("Right-click detected - cancelling incomplete sleep marker placement")
-                    self.cancel_incomplete_marker()
-            elif self._active_marker_category == MarkerCategory.NONWEAR:
-                if self._current_nonwear_marker_being_placed is not None:
-                    logger.debug("Right-click detected - cancelling incomplete nonwear marker placement")
-                    self.cancel_incomplete_nonwear_marker()
+            logger.debug("Right-click detected - emitting plot_right_clicked signal")
+            self.plot_right_clicked.emit()
             return
 
         # Only process left mouse button clicks for placement
@@ -1985,11 +1987,9 @@ class ActivityPlotWidget(pg.PlotWidget):
 
             # Check if click is within data boundaries (check for None first)
             if self.data_start_time is not None and self.data_end_time is not None and self.data_start_time <= clicked_time <= self.data_end_time:
-                # Route to appropriate handler based on active marker category
-                if self._active_marker_category == MarkerCategory.SLEEP:
-                    self.add_sleep_marker(clicked_time)
-                elif self._active_marker_category == MarkerCategory.NONWEAR:
-                    self.add_nonwear_marker(clicked_time)
+                # Emit signal with timestamp - connector decides sleep/nonwear based on Redux state
+                logger.debug(f"Plot left-clicked at timestamp {clicked_time} - emitting signal")
+                self.plot_left_clicked.emit(clicked_time)
 
         # Update marker visual state when clicking away from markers
         # This ensures selected markers stay emboldened/brightened even when clicked away

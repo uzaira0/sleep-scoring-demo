@@ -34,6 +34,14 @@ class DiaryIntegrationManager:
     - Set sleep markers from diary table clicks
     - Handle diary-to-marker coordinate mapping
     - Validate diary data before marker placement
+
+    ARCHITECTURE: This coordinator uses Redux for state management:
+    - Reads state from store (current_file, current_sleep_markers)
+    - Dispatches actions (sleep_markers_changed, date_navigated)
+    - Uses protocols for navigation and marker operations
+
+    Direct plot_widget manipulation is for Qt rendering only and is acceptable
+    for a coordinator that orchestrates complex diary-to-marker operations.
     """
 
     def __init__(

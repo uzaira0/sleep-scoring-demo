@@ -81,6 +81,13 @@ class AnalysisTab(QWidget):
     nextDateRequested = pyqtSignal()
     dateSelectRequested = pyqtSignal(int)
 
+    # Control change signals - AnalysisTabConnector dispatches to store
+    activitySourceChanged = pyqtSignal(object)  # ActivityDataPreference enum
+    viewModeChanged = pyqtSignal(int)  # hours (24 or 48)
+    adjacentMarkersToggled = pyqtSignal(bool)
+    autoSaveToggled = pyqtSignal(bool)
+    markerModeChanged = pyqtSignal(object)  # MarkerCategory enum
+
     def __init__(
         self,
         store: "UIStore",
@@ -859,12 +866,10 @@ class AnalysisTab(QWidget):
         logger.info("=== ACTIVITY SOURCE CHANGE START ===")
         selected_data = self.activity_source_dropdown.itemData(index)
 
-        # 1. Update Redux store
-        from sleep_scoring_app.ui.store import Actions
+        # Emit signal - AnalysisTabConnector dispatches to store
+        self.activitySourceChanged.emit(selected_data)
 
-        self.store.dispatch(Actions.algorithm_changed(selected_data))
-
-        # 2. Delegate to switcher for the heavy lifting (seamless reload)
+        # Delegate to switcher for the heavy lifting (seamless reload)
         if self.seamless_source_switcher:
             try:
                 # Use callbacks or services instead of direct parent
@@ -1226,30 +1231,23 @@ class AnalysisTab(QWidget):
 
         logger.info(f"View mode requested: {hours} hours")
 
-        # Dispatch to Redux store (SINGLE source of truth)
-        from sleep_scoring_app.ui.store import Actions
-
-        # MW-04 FIX: Use dispatch_async for safety
-        self.store.dispatch_async(Actions.view_mode_changed(hours))
+        # Emit signal - AnalysisTabConnector dispatches to store
+        self.viewModeChanged.emit(hours)
 
     @pyqtSlot(bool)
     def _on_adjacent_day_markers_toggled(self, checked: bool) -> None:
         """Handle adjacent day markers checkbox toggle."""
         logger.info(f"Adjacent day markers toggled: {checked}")
 
-        # Dispatch to Redux store (SINGLE source of truth)
-        from sleep_scoring_app.ui.store import Actions
-
-        self.store.dispatch(Actions.adjacent_markers_toggled(checked))
+        # Emit signal - AnalysisTabConnector dispatches to store
+        self.adjacentMarkersToggled.emit(checked)
 
     def _on_auto_save_toggled(self, checked: bool) -> None:
         """Handle auto-save checkbox toggle."""
         logger.info(f"Auto-save toggled: {checked}")
 
-        # Dispatch to Redux store (SINGLE source of truth)
-        from sleep_scoring_app.ui.store import Actions
-
-        self.store.dispatch(Actions.auto_save_toggled(checked))
+        # Emit signal - AnalysisTabConnector dispatches to store
+        self.autoSaveToggled.emit(checked)
 
         # Update config manager (persistence)
         if self.services.config_manager:
@@ -1276,16 +1274,14 @@ class AnalysisTab(QWidget):
         if not checked:
             return
 
-        from sleep_scoring_app.ui.store import Actions
-
         category = MarkerCategory.SLEEP
         if self.nonwear_mode_btn.isChecked():
             category = MarkerCategory.NONWEAR
 
         logger.debug(f"Marker mode changed to {category}")
 
-        # Dispatch to Redux store (SINGLE source of truth)
-        self.store.dispatch(Actions.marker_mode_changed(category))
+        # Emit signal - AnalysisTabConnector dispatches to store
+        self.markerModeChanged.emit(category)
 
     @pyqtSlot(bool)
     def _on_manual_nonwear_visibility_changed(self, visible: bool) -> None:

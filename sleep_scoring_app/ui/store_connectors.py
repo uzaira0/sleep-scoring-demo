@@ -352,7 +352,8 @@ class DateDropdownConnector:
         filename = Path(state.current_file).name
 
         try:
-            metrics_list = self.main_window.export_manager.db_manager.load_sleep_metrics(filename=filename)
+            # ARCHITECTURE FIX: Use db_manager directly instead of going through export_manager
+            metrics_list = self.main_window.db_manager.load_sleep_metrics(filename=filename)
             status_map = {}
             for m in metrics_list:
                 is_no_sleep = m.onset_time == "NO_SLEEP"
@@ -596,11 +597,15 @@ class SideTableConnector:
     Updates tables based on current marker_mode:
     - SLEEP mode: Shows data around selected sleep period onset/offset
     - NONWEAR mode: Shows data around selected nonwear marker start/end
+
+    ARCHITECTURE FIX: Uses table_manager service directly instead of going through
+    main_window delegate methods.
     """
 
     def __init__(self, store: UIStore, main_window: MainWindowProtocol) -> None:
         self.store = store
         self.main_window = main_window
+        self._last_table_update_time: float = 0.0  # Throttling state - owned by connector
         self._unsubscribe = store.subscribe(self._on_state_change)
 
     def _on_state_change(self, old_state: UIState, new_state: UIState) -> None:
@@ -645,23 +650,77 @@ class SideTableConnector:
                 self._update_nonwear_tables(new_state.current_nonwear_markers, new_state.selected_nonwear_index)
 
     def _update_sleep_tables(self, markers: Any) -> None:
-        """Update side tables with data around selected sleep period onset/offset."""
-        # Delegate to state_manager which handles the complex table update logic
-        if self.main_window.state_manager:
-            # Use visual-only update to avoid store dispatch loop
-            self.main_window.state_manager.update_tables_visual_only(markers)
+        """
+        Update side tables with data around selected sleep period onset/offset.
+
+        ARCHITECTURE FIX: Uses table_manager service directly instead of going
+        through main_window.state_manager.
+        """
+        import time
+
+        table_manager = self.main_window.table_manager
+        if not table_manager:
+            return
+
+        pw = self.main_window.plot_widget
+        if not pw:
+            table_manager.update_marker_tables([], [])
+            return
+
+        # Get selected period from widget
+        selected_period = pw.get_selected_marker_period()
+
+        if selected_period and selected_period.is_complete:
+            # Throttle updates (50ms)
+            current_time = time.time()
+            time_since_last_update = current_time - self._last_table_update_time
+            if time_since_last_update > 0.05:
+                # Get data around onset/offset timestamps using table_manager service
+                onset_data = table_manager.get_marker_data_cached(selected_period.onset_timestamp, None)
+                offset_data = table_manager.get_marker_data_cached(selected_period.offset_timestamp, None)
+
+                if onset_data or offset_data:
+                    table_manager.update_marker_tables(onset_data, offset_data)
+                    self._last_table_update_time = current_time
+
+                logger.debug(
+                    "Updated tables for sleep marker: onset=%d rows, offset=%d rows",
+                    len(onset_data) if onset_data else 0,
+                    len(offset_data) if offset_data else 0,
+                )
+        else:
+            # Fallback to first complete period
+            complete_periods = markers.get_complete_periods()
+            if complete_periods:
+                first_period = complete_periods[0]
+                current_time = time.time()
+                time_since_last_update = current_time - self._last_table_update_time
+                if time_since_last_update > 0.05:
+                    onset_data = table_manager.get_marker_data_cached(first_period.onset_timestamp, None)
+                    offset_data = table_manager.get_marker_data_cached(first_period.offset_timestamp, None)
+                    if onset_data or offset_data:
+                        table_manager.update_marker_tables(onset_data, offset_data)
+                        self._last_table_update_time = current_time
+            else:
+                # No complete periods - clear tables
+                table_manager.update_marker_tables([], [])
 
     def _update_nonwear_tables(self, markers: Any, selected_index: int) -> None:
         """
         Update side tables with data around selected nonwear marker start/end.
 
         Mirrors _update_sleep_tables exactly - uses widget's get_selected_nonwear_period().
+        ARCHITECTURE FIX: Uses table_manager service directly.
         """
         import time
 
+        table_manager = self.main_window.table_manager
+        if not table_manager:
+            return
+
         pw = self.main_window.plot_widget
         if not pw:
-            self.main_window.update_marker_tables([], [])
+            table_manager.update_marker_tables([], [])
             return
 
         # Use the SAME pattern as sleep: get selected period from widget
@@ -670,15 +729,15 @@ class SideTableConnector:
         if selected_period and selected_period.is_complete:
             # Throttle updates (same as sleep)
             current_time = time.time()
-            time_since_last_update = current_time - self.main_window._last_table_update_time
+            time_since_last_update = current_time - self._last_table_update_time
             if time_since_last_update > 0.05:  # 50ms throttle
                 # Get data around start/end timestamps (same as sleep onset/offset)
-                start_data = self.main_window._get_marker_data_cached(selected_period.start_timestamp, None)
-                end_data = self.main_window._get_marker_data_cached(selected_period.end_timestamp, None)
+                start_data = table_manager.get_marker_data_cached(selected_period.start_timestamp, None)
+                end_data = table_manager.get_marker_data_cached(selected_period.end_timestamp, None)
 
                 if start_data or end_data:
-                    self.main_window.update_marker_tables(start_data, end_data)
-                    self.main_window._last_table_update_time = current_time
+                    table_manager.update_marker_tables(start_data, end_data)
+                    self._last_table_update_time = current_time
 
                 logger.debug(
                     "Updated tables for nonwear marker: start=%d rows, end=%d rows",
@@ -687,7 +746,7 @@ class SideTableConnector:
                 )
         else:
             # No complete period selected - clear tables (same as sleep fallback)
-            self.main_window.update_marker_tables([], [])
+            table_manager.update_marker_tables([], [])
 
     def disconnect(self) -> None:
         """Cleanup subscription."""
@@ -899,12 +958,19 @@ class MarkerModeConnector:
 
 
 class AdjacentMarkersConnector:
-    """Connects the adjacent markers checkbox to the store and reloads on date changes."""
+    """
+    Connects adjacent markers checkbox to store and handles display.
+
+    ARCHITECTURE: This connector:
+    - Subscribes to store state changes
+    - Calls MarkerService to load adjacent day markers (headless)
+    - Updates plot widget directly (widget updates are connector's job)
+    - Does NOT go through UIStateCoordinator
+    """
 
     def __init__(self, store: UIStore, main_window: MainWindowProtocol) -> None:
         self.store = store
         self.main_window = main_window
-        self._pending_reload = False  # Track if we need to reload after data loads
         self._unsubscribe = store.subscribe(self._on_state_change)
 
         # Initial update
@@ -917,10 +983,10 @@ class AdjacentMarkersConnector:
 
         if visibility_changed:
             self._update_checkbox(new_state.show_adjacent_markers)
-            self._toggle_markers(new_state.show_adjacent_markers)
+            self._toggle_markers(new_state)
         elif date_changed and new_state.show_adjacent_markers:
-            # Date changed with checkbox checked - reload immediately (same as checkbox toggle)
-            self._toggle_markers(True)
+            # Date changed with checkbox checked - reload
+            self._toggle_markers(new_state)
 
     def _update_checkbox(self, enabled: bool) -> None:
         """Update checkbox state without triggering signals."""
@@ -928,18 +994,47 @@ class AdjacentMarkersConnector:
         if not tab:
             return
 
-        # Protocol-guaranteed attribute
         tab.show_adjacent_day_markers_checkbox.blockSignals(True)
         tab.show_adjacent_day_markers_checkbox.setChecked(enabled)
         tab.show_adjacent_day_markers_checkbox.blockSignals(False)
 
-    def _toggle_markers(self, enabled: bool) -> None:
-        """Toggle adjacent markers display on plot."""
-        if not self.main_window.plot_widget:
+    def _toggle_markers(self, state: UIState) -> None:
+        """Toggle adjacent markers display on plot using service for data loading."""
+        pw = self.main_window.plot_widget
+        if not pw:
             return
 
-        # AppStateInterface guarantees toggle_adjacent_day_markers exists
-        self.main_window.toggle_adjacent_day_markers(enabled)
+        if not state.show_adjacent_markers:
+            # Clear adjacent markers from plot
+            try:
+                pw.clear_adjacent_day_markers()
+            except AttributeError:
+                logger.debug("Plot widget does not have clear_adjacent_day_markers method")
+            return
+
+        # Load adjacent markers via service (headless)
+        if not state.current_file or state.current_date_index < 0:
+            return
+
+        marker_service = getattr(self.main_window, "marker_service", None)
+        if not marker_service:
+            logger.warning("MarkerService not available for adjacent markers")
+            return
+
+        available_dates = list(state.available_dates)
+        adjacent_markers = marker_service.load_adjacent_day_markers(
+            filename=state.current_file,
+            available_dates=available_dates,
+            current_date_index=state.current_date_index,
+        )
+
+        # Update plot widget with loaded markers
+        if adjacent_markers:
+            try:
+                pw.display_adjacent_day_markers(adjacent_markers)
+                logger.info(f"Displayed {len(adjacent_markers)} adjacent day markers")
+            except AttributeError:
+                logger.debug("Plot widget does not have display_adjacent_day_markers method")
 
     def disconnect(self) -> None:
         """Cleanup subscription."""
@@ -989,6 +1084,69 @@ class DiaryTableConnector:
         self._unsubscribe()
 
 
+class PlotClickConnector:
+    """
+    Handles plot click signals and decides action based on Redux state.
+
+    ARCHITECTURE FIX: Widget emits click signal, connector checks Redux marker_mode
+    to decide whether to add sleep or nonwear marker. Widget is DUMB.
+    """
+
+    def __init__(self, store: UIStore, main_window: MainWindowProtocol) -> None:
+        self.store = store
+        self.main_window = main_window
+
+        # Connect to plot widget click signals
+        pw = main_window.plot_widget
+        if pw:
+            pw.plot_left_clicked.connect(self._on_plot_left_clicked)
+            pw.plot_right_clicked.connect(self._on_plot_right_clicked)
+            logger.info("PLOT CLICK CONNECTOR: Connected to plot click signals")
+
+    def _on_plot_left_clicked(self, timestamp: float) -> None:
+        """Handle left-click on plot - add marker based on Redux marker_mode."""
+        pw = self.main_window.plot_widget
+        if not pw:
+            return
+
+        # Check Redux state for marker mode
+        marker_mode = self.store.state.marker_mode
+        logger.debug(f"PLOT CLICK CONNECTOR: Left click at {timestamp}, mode={marker_mode}")
+
+        if marker_mode == MarkerCategory.SLEEP:
+            pw.add_sleep_marker(timestamp)
+        elif marker_mode == MarkerCategory.NONWEAR:
+            pw.add_nonwear_marker(timestamp)
+
+    def _on_plot_right_clicked(self) -> None:
+        """Handle right-click on plot - cancel incomplete marker based on Redux marker_mode."""
+        pw = self.main_window.plot_widget
+        if not pw:
+            return
+
+        # Check Redux state for marker mode
+        marker_mode = self.store.state.marker_mode
+
+        if marker_mode == MarkerCategory.SLEEP:
+            if pw.current_marker_being_placed is not None:
+                logger.debug("PLOT CLICK CONNECTOR: Cancelling incomplete sleep marker")
+                pw.cancel_incomplete_marker()
+        elif marker_mode == MarkerCategory.NONWEAR:
+            if pw._current_nonwear_marker_being_placed is not None:
+                logger.debug("PLOT CLICK CONNECTOR: Cancelling incomplete nonwear marker")
+                pw.cancel_incomplete_nonwear_marker()
+
+    def disconnect(self) -> None:
+        """Cleanup signal connections."""
+        pw = self.main_window.plot_widget
+        if pw:
+            try:
+                pw.plot_left_clicked.disconnect(self._on_plot_left_clicked)
+                pw.plot_right_clicked.disconnect(self._on_plot_right_clicked)
+            except (TypeError, RuntimeError):
+                pass  # Already disconnected
+
+
 class PlotDataConnector:
     """
     Connects the PlotWidget to activity data in the Redux store.
@@ -1011,9 +1169,30 @@ class PlotDataConnector:
         # Check if activity data changed
         data_changed = old_state.activity_timestamps != new_state.activity_timestamps
 
-        if data_changed and new_state.activity_timestamps:
-            logger.info(f"PLOT DATA CONNECTOR: Activity data changed. timestamps={len(new_state.activity_timestamps)}, updating plot")
-            self._update_plot(new_state)
+        if data_changed:
+            if new_state.activity_timestamps:
+                logger.info(f"PLOT DATA CONNECTOR: Activity data changed. timestamps={len(new_state.activity_timestamps)}, updating plot")
+                self._update_plot(new_state)
+            else:
+                # Data was cleared - clear the plot widget
+                logger.info("PLOT DATA CONNECTOR: Activity data cleared, clearing plot")
+                self._clear_plot()
+
+        # Also clear if file becomes None (regardless of data change)
+        if old_state.current_file and not new_state.current_file:
+            logger.info("PLOT DATA CONNECTOR: File deselected, clearing plot")
+            self._clear_plot()
+
+    def _clear_plot(self) -> None:
+        """Clear the plot widget when data is removed."""
+        pw = self.main_window.plot_widget
+        if not pw:
+            return
+        pw.clear_plot()
+        pw.clear_sleep_markers()
+        pw.clear_nonwear_markers()
+        pw.clear_sleep_onset_offset_markers()
+        logger.info("PLOT DATA CONNECTOR: Plot cleared")
 
     def _update_plot(self, state: UIState) -> None:
         """Update plot widget with data from store."""
@@ -1391,6 +1570,85 @@ class NavigationGuardConnector:
                 pass  # Already disconnected
 
 
+class AnalysisTabConnector:
+    """
+    Connects AnalysisTab control signals to Redux store dispatch.
+
+    This connector bridges widget signals to store actions, following the architecture:
+    Widget (emit signal) → Connector (dispatch action) → Store → Connectors (update widgets)
+
+    Signals handled:
+    - activitySourceChanged → Actions.algorithm_changed
+    - viewModeChanged → Actions.view_mode_changed
+    - adjacentMarkersToggled → Actions.adjacent_markers_toggled
+    - autoSaveToggled → Actions.auto_save_toggled
+    - markerModeChanged → Actions.marker_mode_changed
+    """
+
+    def __init__(self, store: UIStore, main_window: MainWindowProtocol) -> None:
+        self.store = store
+        self.main_window = main_window
+
+        # Connect to AnalysisTab control signals
+        tab = main_window.analysis_tab
+        if tab:
+            tab.activitySourceChanged.connect(self._on_activity_source_changed)
+            tab.viewModeChanged.connect(self._on_view_mode_changed)
+            tab.adjacentMarkersToggled.connect(self._on_adjacent_markers_toggled)
+            tab.autoSaveToggled.connect(self._on_auto_save_toggled)
+            tab.markerModeChanged.connect(self._on_marker_mode_changed)
+            logger.info("ANALYSIS TAB CONNECTOR: Connected to AnalysisTab control signals")
+
+    def _on_activity_source_changed(self, selected_data) -> None:
+        """Dispatch algorithm_changed action when activity source changes."""
+        from sleep_scoring_app.ui.store import Actions
+
+        logger.debug(f"ANALYSIS TAB CONNECTOR: Activity source changed to {selected_data}")
+        self.store.dispatch(Actions.algorithm_changed(selected_data))
+
+    def _on_view_mode_changed(self, hours: int) -> None:
+        """Dispatch view_mode_changed action when view mode changes."""
+        from sleep_scoring_app.ui.store import Actions
+
+        logger.debug(f"ANALYSIS TAB CONNECTOR: View mode changed to {hours}")
+        # Use dispatch_async for safety (MW-04 fix)
+        self.store.dispatch_async(Actions.view_mode_changed(hours))
+
+    def _on_adjacent_markers_toggled(self, checked: bool) -> None:
+        """Dispatch adjacent_markers_toggled action when checkbox changes."""
+        from sleep_scoring_app.ui.store import Actions
+
+        logger.debug(f"ANALYSIS TAB CONNECTOR: Adjacent markers toggled to {checked}")
+        self.store.dispatch(Actions.adjacent_markers_toggled(checked))
+
+    def _on_auto_save_toggled(self, checked: bool) -> None:
+        """Dispatch auto_save_toggled action when checkbox changes."""
+        from sleep_scoring_app.ui.store import Actions
+
+        logger.debug(f"ANALYSIS TAB CONNECTOR: Auto-save toggled to {checked}")
+        self.store.dispatch(Actions.auto_save_toggled(checked))
+
+    def _on_marker_mode_changed(self, category) -> None:
+        """Dispatch marker_mode_changed action when mode changes."""
+        from sleep_scoring_app.ui.store import Actions
+
+        logger.debug(f"ANALYSIS TAB CONNECTOR: Marker mode changed to {category}")
+        self.store.dispatch(Actions.marker_mode_changed(category))
+
+    def disconnect(self) -> None:
+        """Cleanup signal connections."""
+        tab = self.main_window.analysis_tab
+        if tab:
+            try:
+                tab.activitySourceChanged.disconnect(self._on_activity_source_changed)
+                tab.viewModeChanged.disconnect(self._on_view_mode_changed)
+                tab.adjacentMarkersToggled.disconnect(self._on_adjacent_markers_toggled)
+                tab.autoSaveToggled.disconnect(self._on_auto_save_toggled)
+                tab.markerModeChanged.disconnect(self._on_marker_mode_changed)
+            except (TypeError, RuntimeError):
+                pass  # Already disconnected
+
+
 class ViewModeConnector:
     """Connects the view mode (24h/48h) radio buttons to the store."""
 
@@ -1463,7 +1721,6 @@ class SignalsConnector:
 
     def _connect_all_signals(self) -> None:
         """Connect various UI signals to store actions."""
-
         # 1. File Selection Table - Protocol guarantees file_selector exists on AnalysisTabProtocol
         tab = self.main_window.analysis_tab
         if tab and tab.file_selector:
@@ -1472,7 +1729,6 @@ class SignalsConnector:
 
     def _on_file_selected(self, row: int, file_info: FileInfo) -> None:
         """Handle file selection from UI table."""
-
         logger.info(f"SIGNALS CONNECTOR: _on_file_selected called with row={row}, file={file_info.filename if file_info else None}")
 
         if file_info:
@@ -1506,7 +1762,7 @@ class TimeFieldConnector:
         self._unsubscribe = store.subscribe(self._on_state_change)
 
         # Initial update
-        self._update_fields()
+        self._update_fields(store.state)
 
     def _on_state_change(self, old_state: UIState, new_state: UIState) -> None:
         """React to marker or selection changes by updating time fields."""
@@ -1517,14 +1773,66 @@ class TimeFieldConnector:
         )
 
         if markers_changed:
-            self._update_fields()
+            self._update_fields(new_state)
 
-    def _update_fields(self) -> None:
-        """Update time fields via MainWindow."""
-        # This method is optional - may not be implemented yet
-        update_fn = getattr(self.main_window, "_update_time_fields_from_selection", None)
-        if update_fn:
-            update_fn()
+    def _update_fields(self, state: UIState) -> None:
+        """Update time fields via MainWindow.update_sleep_info()."""
+        # Get selected period from current markers
+        sleep_period = None
+        if state.current_sleep_markers:
+            complete_periods = state.current_sleep_markers.get_complete_periods()
+            if complete_periods:
+                # Use selected period or first period
+                idx = max(0, min(state.selected_period_index or 0, len(complete_periods) - 1))
+                sleep_period = complete_periods[idx]
+
+        # Protocol guarantees update_sleep_info exists on MainWindowProtocol
+        self.main_window.update_sleep_info(sleep_period)
+
+    def disconnect(self) -> None:
+        """Cleanup subscription."""
+        self._unsubscribe()
+
+
+class FileSelectionLabelConnector:
+    """
+    Updates the file selection label based on available_files and database_mode.
+
+    ARCHITECTURE: Replaces UIStateCoordinator.update_folder_info_label()
+    by reacting to Redux state changes instead of direct widget manipulation.
+    """
+
+    def __init__(self, store: UIStore, main_window: MainWindowProtocol) -> None:
+        self.store = store
+        self.main_window = main_window
+        self._unsubscribe = store.subscribe(self._on_state_change)
+
+        # Initial update
+        self._update_label(store.state)
+
+    def _on_state_change(self, old_state: UIState, new_state: UIState) -> None:
+        """React to available_files or database_mode changes."""
+        changed = old_state.available_files != new_state.available_files or old_state.database_mode != new_state.database_mode
+
+        if changed:
+            self._update_label(new_state)
+
+    def _update_label(self, state: UIState) -> None:
+        """Update the file selection label."""
+        tab = self.main_window.analysis_tab
+        if not tab:
+            return
+
+        label = getattr(tab, "file_selection_label", None)
+        if not label:
+            return
+
+        file_count = len(state.available_files)
+
+        if state.database_mode:
+            label.setText(f"File Selection ({file_count} files from database)")
+        else:
+            label.setText(f"File Selection ({file_count} files)")
 
     def disconnect(self) -> None:
         """Cleanup subscription."""
@@ -1769,6 +2077,8 @@ class StudySettingsConnector:
 
         Called after algorithm or rule changes to update the table data
         which contains algorithm scores at each epoch.
+
+        ARCHITECTURE FIX: Uses table_manager service directly.
         """
         from sleep_scoring_app.core.constants import MarkerCategory
 
@@ -1776,13 +2086,17 @@ class StudySettingsConnector:
         if self.store.state.marker_mode != MarkerCategory.SLEEP:
             return
 
+        table_manager = self.main_window.table_manager
+        if not table_manager:
+            return
+
         if selected_period and selected_period.is_complete:
-            # Get fresh data with new algorithm values
-            onset_data = self.main_window._get_marker_data_cached(selected_period.onset_timestamp, None)
-            offset_data = self.main_window._get_marker_data_cached(selected_period.offset_timestamp, None)
+            # Get fresh data with new algorithm values using table_manager service
+            onset_data = table_manager.get_marker_data_cached(selected_period.onset_timestamp, None)
+            offset_data = table_manager.get_marker_data_cached(selected_period.offset_timestamp, None)
 
             if onset_data or offset_data:
-                self.main_window.update_marker_tables(onset_data, offset_data)
+                table_manager.update_marker_tables(onset_data, offset_data)
                 logger.info("Refreshed marker tables with new algorithm values")
 
     def disconnect(self) -> None:
@@ -2278,9 +2592,11 @@ class SideEffectConnector:
                 deleted_count = self.main_window.db_manager.clear_activity_data()
                 logger.info(f"SIDE EFFECT: Cleared {deleted_count} activity records")
 
-            # 2. Reset state via store
+            # 2. Reset state via store - clear all related state
             self.store.dispatch(Actions.file_selected(None))
             self.store.dispatch(Actions.dates_loaded([]))
+            self.store.dispatch(Actions.activity_data_cleared())
+            self.store.dispatch(Actions.markers_cleared())
 
             # 3. Refresh file list
             self.handle_refresh_files()
@@ -2349,10 +2665,13 @@ class StoreConnectorManager:
             AdjacentMarkersConnector(self.store, self.main_window),
             AlgorithmConfigConnector(self.store, self.main_window),
             DiaryTableConnector(self.store, self.main_window),
+            FileSelectionLabelConnector(self.store, self.main_window),  # Updates file selection label
             ActivityDataConnector(self.store, self.main_window),  # CRITICAL: Loads unified data to store
             PlotDataConnector(self.store, self.main_window),  # CRITICAL: Updates plot from store
+            PlotClickConnector(self.store, self.main_window),  # Handles plot clicks via Redux state
             NavigationConnector(self.store, self.main_window),
             NavigationGuardConnector(self.store, self.main_window),  # Intercepts nav signals
+            AnalysisTabConnector(self.store, self.main_window),  # Bridges control signals to store
             ViewModeConnector(self.store, self.main_window),
             SignalsConnector(self.store, self.main_window),
             TimeFieldConnector(self.store, self.main_window),
