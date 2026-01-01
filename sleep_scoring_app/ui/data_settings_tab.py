@@ -39,16 +39,12 @@ from PyQt6.QtWidgets import (
 
 from sleep_scoring_app.core.constants import ButtonText, DataSourceType, DevicePreset, InfoMessage, StudyDataParadigm
 from sleep_scoring_app.io.sources.loader_factory import DataSourceFactory
-from sleep_scoring_app.preprocessing.calibration import CalibrationConfig
-from sleep_scoring_app.ui.builders import DataSourceConfigBuilder
 from sleep_scoring_app.ui.dialogs import ColumnMappingDialog
 
 if TYPE_CHECKING:
     from sleep_scoring_app.ui.protocols import (
         AppStateInterface,
         MainWindowProtocol,
-        MarkerOperationsInterface,
-        NavigationInterface,
         ServiceContainer,
     )
     from sleep_scoring_app.ui.store import UIStore

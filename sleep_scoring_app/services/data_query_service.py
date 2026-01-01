@@ -6,7 +6,6 @@ Handles participant info extraction, time filtering, and database queries.
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from sleep_scoring_app.core.exceptions import DatabaseError, ValidationError

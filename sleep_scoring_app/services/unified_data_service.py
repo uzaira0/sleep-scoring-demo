@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any
 from sleep_scoring_app.services.cache_service import CacheService
 from sleep_scoring_app.services.diary_service import DiaryService
 from sleep_scoring_app.services.file_service import FileService
-from sleep_scoring_app.services.memory_service import estimate_object_size_mb
 from sleep_scoring_app.utils.participant_extractor import extract_participant_info
 
 if TYPE_CHECKING:

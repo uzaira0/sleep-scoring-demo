@@ -6,7 +6,6 @@ Contains the main analysis interface with plots and controls.
 
 import logging
 from dataclasses import dataclass
-from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -15,22 +14,18 @@ from PyQt6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
     QCheckBox,
-    QColorDialog,
     QComboBox,
-    QDialog,
     QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QRadioButton,
     QScrollArea,
     QSizePolicy,
     QSplitter,
     QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -42,7 +37,6 @@ from sleep_scoring_app.utils.thread_safety import ensure_main_thread
 if TYPE_CHECKING:
     from sleep_scoring_app.ui.protocols import (
         AppStateInterface,
-        MainWindowProtocol,
         MarkerOperationsInterface,
         NavigationInterface,
         ServiceContainer,

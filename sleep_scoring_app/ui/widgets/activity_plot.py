@@ -7,12 +7,12 @@ Focuses on display and user interaction, with algorithms handled separately.
 import logging
 import traceback
 from collections.abc import Callable
-from datetime import date, datetime, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QKeyEvent
 
 from sleep_scoring_app.core.constants import (
@@ -21,9 +21,7 @@ from sleep_scoring_app.core.constants import (
     MarkerEndpoint,
     MarkerLimits,
     NonwearAlgorithm,
-    NonwearDataSource,
     SleepMarkerEndpoint,
-    UIColors,
 )
 from sleep_scoring_app.core.dataclasses import (
     DailyNonwearMarkers,
@@ -42,7 +40,6 @@ from sleep_scoring_app.utils.date_range import get_range_for_view_mode
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from sleep_scoring_app.core.dataclasses import NonwearPeriod
     from sleep_scoring_app.ui.protocols import AppStateInterface
 
 

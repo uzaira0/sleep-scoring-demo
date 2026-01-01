@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from typing import TYPE_CHECKING
 
 from sleep_scoring_app.core.constants import DatabaseColumn, DatabaseTable
 from sleep_scoring_app.core.dataclasses import DailyNonwearMarkers, ManualNonwearPeriod

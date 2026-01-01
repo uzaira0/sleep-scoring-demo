@@ -14,9 +14,6 @@ from sleep_scoring_app.core.constants import (
     DatabaseColumn,
     DatabaseTable,
 )
-from sleep_scoring_app.core.dataclasses import (
-    DailySleepMarkers,
-)
 from sleep_scoring_app.core.exceptions import (
     DatabaseError,
     ErrorCodes,
@@ -37,7 +34,6 @@ from sleep_scoring_app.utils.column_registry import (
 from sleep_scoring_app.utils.resource_resolver import get_database_path
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
     from datetime import date, datetime
     from pathlib import Path
 
@@ -332,9 +328,7 @@ class DatabaseManager:
 
     def get_all_sleep_data_for_export(self) -> list[dict[str, Any]]:
         """Get all sleep data formatted for export with integrated diary and nonwear data."""
-        from datetime import datetime
 
-        from sleep_scoring_app.core.constants import ExportColumn
 
         try:
             metrics = self.sleep_metrics.load_sleep_metrics()

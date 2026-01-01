@@ -178,7 +178,6 @@ class PopOutTableWindow(QDialog):
 
     def _restore_geometry(self) -> None:
         """Restore window size and position."""
-        from PyQt6.QtWidgets import QApplication
 
         settings = QSettings("SleepResearch", "SleepScoringApp")
 

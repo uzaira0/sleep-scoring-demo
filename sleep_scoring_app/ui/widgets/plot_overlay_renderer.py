@@ -18,7 +18,7 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import QTimer
 
-from sleep_scoring_app.core.constants import NonwearAlgorithm, NonwearDataSource, UIColors
+from sleep_scoring_app.core.constants import NonwearAlgorithm, UIColors
 
 if TYPE_CHECKING:
     from sleep_scoring_app.core.dataclasses import NonwearPeriod

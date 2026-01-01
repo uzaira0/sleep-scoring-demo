@@ -13,7 +13,6 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from sleep_scoring_app.core.constants import ButtonStyle, ButtonText
 
 if TYPE_CHECKING:
     from sleep_scoring_app.ui.protocols import MainWindowProtocol

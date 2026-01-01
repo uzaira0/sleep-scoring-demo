@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import QObject, Qt
+from PyQt6.QtCore import QObject
 from PyQt6.QtGui import QKeySequence, QShortcut
 
 if TYPE_CHECKING:

@@ -560,7 +560,6 @@ def _calculate_metrics(
     period_activity = activity_df[activity_col].iloc[onset_idx : offset_idx + 1] if activity_col else None
 
     # Calculate basic metrics
-    from sleep_scoring_app.utils.calculations import calculate_total_minutes_in_bed_from_indices
 
     # Note: batch scoring uses inclusive range (offset_idx - onset_idx + 1)
     # while data_service uses exclusive range (offset_idx - onset_idx)

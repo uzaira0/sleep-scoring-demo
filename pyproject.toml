@@ -237,11 +237,13 @@ reportOptionalOperand = "warning"  # Optional operand - warn but don't fail
 reportOptionalIterable = "warning"  # Optional iterable - warn but don't fail
 reportOptionalSubscript = "warning"  # Optional subscript - warn but don't fail
 reportGeneralTypeIssues = "warning"  # General type issues - warn but don't fail
-reportAttributeAccessIssue = "warning"  # Attribute access issues - warn but don't fail
 reportPossiblyUnboundVariable = "warning"  # Possibly unbound - warn but don't fail
 reportUnusedImport = "warning"
 reportUnusedVariable = "warning"
-reportPrivateUsage = "warning"
+# Suppressed: Qt/PyQt6 dynamic attributes and intentional protected member access
+reportAttributeAccessIssue = false  # Qt widgets have dynamic attrs not in stubs
+reportPrivateUsage = false  # Intentional _method access across layers
+reportUnsupportedDunderAll = false  # __all__ with re-exports
 include = ["sleep_scoring_app"]
 exclude = ["tests", "**/__pycache__", "main.py"]
 

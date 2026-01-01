@@ -12,10 +12,8 @@ Manages all data operations for the activity plot including:
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
 
 if TYPE_CHECKING:
     from datetime import datetime

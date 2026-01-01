@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from sleep_scoring_app.core.constants import DatabaseColumn, DatabaseTable
 from sleep_scoring_app.core.exceptions import DatabaseError, ErrorCodes

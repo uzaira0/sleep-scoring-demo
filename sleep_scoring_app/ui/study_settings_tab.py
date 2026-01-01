@@ -10,10 +10,9 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import Qt, QTime, QTimer, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import Qt, QTime, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import (
     QComboBox,
-    QFormLayout,
     QFrame,
     QGroupBox,
     QHBoxLayout,
@@ -26,21 +25,13 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
-    QTextEdit,
-    QTimeEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from sleep_scoring_app.core.constants import (
-    ActivityDataPreference,
-    AlgorithmHelpText,
-    AlgorithmTooltip,
     NonwearAlgorithm,
     ParadigmInfoText,
-    ParadigmLabel,
-    ParadigmStyle,
-    ParadigmTooltip,
     ParadigmWarning,
     SettingsSection,
     StudyDataParadigm,
@@ -56,7 +47,6 @@ from sleep_scoring_app.ui.builders import (
 if TYPE_CHECKING:
     from sleep_scoring_app.ui.protocols import (
         AppStateInterface,
-        MainWindowProtocol,
         MarkerOperationsInterface,
         NavigationInterface,
         ServiceContainer,

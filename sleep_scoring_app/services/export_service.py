@@ -20,7 +20,6 @@ from sleep_scoring_app.core.constants import (
     ActivityDataPreference,
     AlgorithmType,
     DirectoryName,
-    FeatureFlags,
     NonwearAlgorithm,
     get_backup_filename,
     sanitize_filename_component,

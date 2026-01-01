@@ -12,7 +12,6 @@ Handles all marker drawing operations including:
 from __future__ import annotations
 
 import logging
-from functools import partial
 from typing import TYPE_CHECKING
 
 import pyqtgraph as pg

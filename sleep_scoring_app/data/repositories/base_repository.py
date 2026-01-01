@@ -13,7 +13,6 @@ from sleep_scoring_app.core.exceptions import (
     DatabaseError,
     DataIntegrityError,
     ErrorCodes,
-    ValidationError,
 )
 from sleep_scoring_app.utils.column_registry import DataType, column_registry
 

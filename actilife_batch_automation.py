@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-import sys
-import threading
 import time
 from enum import StrEnum
 from pathlib import Path

@@ -1388,7 +1388,6 @@ class SignalsConnector:
 
     def _connect_all_signals(self) -> None:
         """Connect various UI signals to store actions."""
-        from sleep_scoring_app.ui.store import Actions
 
         # 1. File Selection Table - Protocol guarantees file_selector exists on AnalysisTabProtocol
         tab = self.main_window.analysis_tab
@@ -1398,7 +1397,6 @@ class SignalsConnector:
 
     def _on_file_selected(self, row: int, file_info: FileInfo) -> None:
         """Handle file selection from UI table."""
-        from sleep_scoring_app.ui.store import Actions
 
         logger.info(f"SIGNALS CONNECTOR: _on_file_selected called with row={row}, file={file_info.filename if file_info else None}")
 

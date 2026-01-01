@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any
 from sleep_scoring_app.core.constants import DatabaseColumn, DatabaseTable
 from sleep_scoring_app.core.exceptions import DatabaseError, ErrorCodes
 from sleep_scoring_app.core.validation import InputValidator
-from sleep_scoring_app.data.config import DataConfig
 from sleep_scoring_app.data.repositories.base_repository import BaseRepository
 
 if TYPE_CHECKING:

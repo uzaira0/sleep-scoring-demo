@@ -7,7 +7,6 @@ Tracks progress for import operations with file and record counts.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 

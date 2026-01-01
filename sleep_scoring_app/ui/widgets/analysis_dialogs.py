@@ -9,7 +9,7 @@ Extracted from analysis_tab.py to reduce god-class complexity.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import QSettings, Qt
 from PyQt6.QtGui import QColor

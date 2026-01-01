@@ -13,10 +13,8 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor
+from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
-    QApplication,
     QFileDialog,
     QLabel,
     QMainWindow,
@@ -27,20 +25,10 @@ from PyQt6.QtWidgets import (
 )
 
 from sleep_scoring_app.core.constants import (
-    AlgorithmType,
-    ButtonStyle,
-    ButtonText,
     FeatureFlags,
-    InfoMessage,
     MarkerEndpoint,
     SleepMarkerEndpoint,
-    SleepStatusValue,
-    StudyDataParadigm,
-    SuccessMessage,
-    TableDimensions,
-    WindowTitle,
 )
-from sleep_scoring_app.core.dataclasses import ParticipantInfo, SleepMetrics
 from sleep_scoring_app.data.database import DatabaseManager
 from sleep_scoring_app.services.export_service import (
     ExportManager as EnhancedExportManager,
@@ -68,9 +56,7 @@ from sleep_scoring_app.ui.store import UIStore
 from sleep_scoring_app.ui.store_connectors import connect_all_components
 from sleep_scoring_app.ui.study_settings_tab import StudySettingsTab
 from sleep_scoring_app.ui.window_state import WindowStateManager
-from sleep_scoring_app.ui.workers import ImportWorker
 from sleep_scoring_app.utils.config import ConfigManager
-from sleep_scoring_app.utils.table_helpers import update_marker_table
 
 if TYPE_CHECKING:
     from PyQt6.QtGui import QCloseEvent

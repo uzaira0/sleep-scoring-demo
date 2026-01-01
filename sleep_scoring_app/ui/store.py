@@ -43,7 +43,6 @@ from sleep_scoring_app.core.constants import (
 
 if TYPE_CHECKING:
     from sleep_scoring_app.core.dataclasses import FileInfo
-    from sleep_scoring_app.core.dataclasses_markers import DailyNonwearMarkers, DailySleepMarkers
 
 logger = logging.getLogger(__name__)
 

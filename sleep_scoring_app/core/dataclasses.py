@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any
 from sleep_scoring_app.core.constants import (
     DeleteStatus,
     FileSourceType,
-    MarkerType,  # Re-export for backward compatibility (noqa: F401)
     ParticipantGroup,
     ParticipantTimepoint,
 )

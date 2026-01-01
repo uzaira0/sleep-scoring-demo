@@ -15,7 +15,6 @@ from PyQt6.QtWidgets import QMessageBox
 
 if TYPE_CHECKING:
     from sleep_scoring_app.ui.protocols import (
-        AppStateInterface,
         MainWindowProtocol,
         MarkerOperationsInterface,
         NavigationInterface,

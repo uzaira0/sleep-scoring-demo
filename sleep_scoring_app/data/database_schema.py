@@ -16,7 +16,6 @@ from sleep_scoring_app.core.constants import (
     DatabaseTable,
     ImportStatus,
 )
-from sleep_scoring_app.data.config import DataConfig
 from sleep_scoring_app.utils.column_registry import (
     DataType,
     column_registry,

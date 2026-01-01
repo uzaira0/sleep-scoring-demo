@@ -345,7 +345,6 @@ class AlgorithmFactory:
             AlgorithmDataRequirement.RAW_DATA
 
         """
-        from sleep_scoring_app.core.pipeline import AlgorithmDataRequirement
 
         if algorithm_id not in cls._registry:
             return None

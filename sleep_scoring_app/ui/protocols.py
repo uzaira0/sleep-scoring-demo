@@ -16,7 +16,6 @@ if TYPE_CHECKING:
     from sleep_scoring_app.core.dataclasses import DailySleepMarkers, FileInfo, SleepPeriod
     from sleep_scoring_app.data.database import DatabaseManager
     from sleep_scoring_app.services.unified_data_service import UnifiedDataService
-    from sleep_scoring_app.ui.widgets.activity_plot import ActivityPlotWidget
     from sleep_scoring_app.utils.config import ConfigManager
 
 

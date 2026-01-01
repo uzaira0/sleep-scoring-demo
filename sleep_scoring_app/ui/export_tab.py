@@ -31,7 +31,6 @@ from sleep_scoring_app.utils.column_registry import column_registry
 if TYPE_CHECKING:
     from sleep_scoring_app.ui.protocols import (
         AppStateInterface,
-        MainWindowProtocol,
         MarkerOperationsInterface,
         ServiceContainer,
     )

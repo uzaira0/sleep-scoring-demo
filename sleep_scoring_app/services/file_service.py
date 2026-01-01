@@ -66,7 +66,6 @@ class FileService:
         """Find available files and include completion counts."""
         from dataclasses import replace
 
-        from sleep_scoring_app.core.dataclasses import FileInfo as FileInfoClass
 
         files = self.find_available_files()
         updated_files: list[FileInfo] = []

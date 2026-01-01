@@ -13,7 +13,7 @@ Manages application state including:
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -25,7 +25,6 @@ from sleep_scoring_app.core.constants import (
     ButtonText,
     FeatureFlags,
     InfoMessage,
-    SuccessMessage,
     WindowTitle,
 )
 from sleep_scoring_app.core.dataclasses import DailySleepMarkers, SleepMetrics, SleepPeriod
@@ -366,7 +365,6 @@ class WindowStateManager:
             # Extract participant info via services
             from dataclasses import replace
 
-            from sleep_scoring_app.core.dataclasses import ParticipantInfo
 
             participant_info = self.services.data_manager.extract_enhanced_participant_info(self.navigation.selected_file)
             # Set the date field for this specific analysis

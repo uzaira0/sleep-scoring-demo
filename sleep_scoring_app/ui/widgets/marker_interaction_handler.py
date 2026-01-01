@@ -58,7 +58,6 @@ class MarkerInteractionHandler:
         QTimer.singleShot(50, lambda: setattr(self.plot_widget, "_marker_click_in_progress", False))
 
         if hasattr(line, "period") and line.period:  # KEEP: Duck typing plot/marker attributes
-            from sleep_scoring_app.ui.widgets.plot_marker_renderer import PlotMarkerRenderer
 
             renderer: PlotMarkerRenderer = self.plot_widget.marker_renderer
             old_selection = renderer.selected_marker_set_index
@@ -151,7 +150,6 @@ class MarkerInteractionHandler:
 
         # Update the period with new timestamp
         if hasattr(line, "period") and line.period:  # KEEP: Duck typing plot/marker attributes
-            from sleep_scoring_app.ui.widgets.plot_marker_renderer import PlotMarkerRenderer
 
             renderer: PlotMarkerRenderer = self.plot_widget.marker_renderer
 
@@ -205,7 +203,6 @@ class MarkerInteractionHandler:
         QTimer.singleShot(50, lambda: setattr(self.plot_widget, "_marker_click_in_progress", False))
 
         if hasattr(line, "period") and line.period:  # KEEP: Duck typing plot/marker attributes
-            from sleep_scoring_app.ui.widgets.plot_marker_renderer import PlotMarkerRenderer
 
             renderer: PlotMarkerRenderer = self.plot_widget.marker_renderer
             old_selection = renderer.selected_nonwear_marker_index
@@ -247,7 +244,6 @@ class MarkerInteractionHandler:
         snapped_ts = self.plot_widget.x_data[new_idx]
 
         if hasattr(line, "period") and line.period:  # KEEP: Duck typing plot/marker attributes
-            from sleep_scoring_app.ui.widgets.plot_marker_renderer import PlotMarkerRenderer
 
             renderer: PlotMarkerRenderer = self.plot_widget.marker_renderer
 
@@ -312,7 +308,6 @@ class MarkerInteractionHandler:
         line.setPos(snapped_pos)
 
         if hasattr(line, "period") and line.period:  # KEEP: Duck typing plot/marker attributes
-            from sleep_scoring_app.ui.widgets.plot_marker_renderer import PlotMarkerRenderer
 
             renderer: PlotMarkerRenderer = self.plot_widget.marker_renderer
 
@@ -360,7 +355,6 @@ class MarkerInteractionHandler:
 
         Mirrors _deselect_sleep_markers exactly for symmetry.
         """
-        from sleep_scoring_app.ui.widgets.plot_marker_renderer import PlotMarkerRenderer
 
         renderer: PlotMarkerRenderer = self.plot_widget.marker_renderer
         # Set selected index to 0 (no selection) - this is a special value meaning none selected
@@ -370,7 +364,6 @@ class MarkerInteractionHandler:
 
     def _deselect_sleep_markers(self) -> None:
         """Deselect all sleep markers (make them all unselected visually)."""
-        from sleep_scoring_app.ui.widgets.plot_marker_renderer import PlotMarkerRenderer
 
         renderer: PlotMarkerRenderer = self.plot_widget.marker_renderer
         # Set selected index to 0 (no selection) - this is a special value meaning none selected
