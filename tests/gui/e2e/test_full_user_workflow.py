@@ -70,7 +70,7 @@ def full_workflow_env(qtbot, tmp_path):
     """Set up complete test environment using REAL demo data."""
     import sleep_scoring_app.data.database as db_module
     from sleep_scoring_app.core.dataclasses import AppConfig
-    from sleep_scoring_app.utils.config import ConfigManager
+    from sleep_scoring_app.ui.utils.config import ConfigManager
 
     db_module._database_initialized = False
     db_path = tmp_path / "test_workflow.db"
@@ -1746,7 +1746,7 @@ class TestFullUserWorkflow:
         # We'll test by checking that saved values are reloaded
 
         # Step 1: Change settings to NON-DEFAULT values
-        from sleep_scoring_app.utils.config import ConfigManager
+        from sleep_scoring_app.ui.utils.config import ConfigManager
 
         test_config_manager = ConfigManager()
         original_config = test_config_manager.config
@@ -1868,7 +1868,6 @@ class TestFullUserWorkflow:
             pass
 
         # [3.29d] Very Long Sleep Period (24+ hours)
-        print("\n      [3.29d] Testing very long sleep period (24+ hours)...")
         long_onset_dt = datetime(year, month, day_num, 22, 0)
         long_offset_dt = long_onset_dt + timedelta(hours=26)  # 26-hour sleep
 
@@ -1894,12 +1893,9 @@ class TestFullUserWorkflow:
         window.store.dispatch(Actions.sleep_markers_changed(valid_markers))
         qtbot.wait(DELAY)
 
-        print("      [3.29] All edge cases handled without crashing")
-
         # ----------------------------------------------------------------
         # TEST: Actual Mouse Drag Events on Plot [3.30]
         # ----------------------------------------------------------------
-        print("\n[3.30] TEST: Actual Mouse Drag Events on Plot...")
 
         switch_tab(tab_widget, "Analysis", qtbot)
         qtbot.wait(DELAY)
@@ -1920,7 +1916,6 @@ class TestFullUserWorkflow:
         # Get marker positions before drag
         before_markers = window.store.state.current_sleep_markers
         before_onset = before_markers.period_1.onset_timestamp if before_markers and before_markers.period_1 else None
-        print(f"      Marker onset BEFORE drag: {before_onset}")
 
         if plot_widget and plot_widget.isVisible():
             # Get plot dimensions
@@ -1960,7 +1955,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Individual Period Deletion [3.31]
         # ----------------------------------------------------------------
-        print("\n[3.31] TEST: Individual Period Deletion...")
 
         switch_tab(tab_widget, "Analysis", qtbot)
         qtbot.wait(DELAY)
@@ -2001,7 +1995,6 @@ class TestFullUserWorkflow:
         current = window.store.state.current_sleep_markers
         assert current.period_1 and current.period_1.is_complete, "period_1 should exist"
         assert current.period_2 and current.period_2.is_complete, "period_2 should exist"
-        print("      Placed period_1: 22:00-06:00, period_2: 14:00-15:30")
 
         # Save both periods
         if analysis_tab.save_markers_btn.isEnabled():
@@ -2009,7 +2002,6 @@ class TestFullUserWorkflow:
             qtbot.wait(DELAY)
 
         # Step 2: Delete ONLY period_2 (by setting it to None and dispatching)
-        print("      Deleting period_2 only...")
         one_period_markers = DailySleepMarkers()
         one_period_markers.period_1 = period_1  # Keep period_1
         one_period_markers.period_2 = None  # Delete period_2
@@ -2027,15 +2019,12 @@ class TestFullUserWorkflow:
         p1_exists = final.period_1 and final.period_1.is_complete
         p2_exists = final.period_2 and final.period_2.is_complete if final.period_2 else False
 
-        print(f"      After deletion: period_1={p1_exists}, period_2={p2_exists}")
         assert p1_exists, "period_1 should still exist after deleting only period_2"
         assert not p2_exists, "period_2 should be deleted"
-        print("      VERIFIED: Individual period deletion works correctly")
 
         # ----------------------------------------------------------------
         # TEST: Export Column Selection [3.32]
         # ----------------------------------------------------------------
-        print("\n[3.32] TEST: Export Column Selection...")
 
         # Access the export dialog
         from sleep_scoring_app.ui.export_dialog import ExportDialog
@@ -2045,8 +2034,6 @@ class TestFullUserWorkflow:
         # Count default checked columns
         default_sleep_columns = export_dialog.get_selected_sleep_columns()
         default_nonwear_columns = export_dialog.get_selected_nonwear_columns()
-        print(f"      Default sleep columns: {len(default_sleep_columns)}")
-        print(f"      Default nonwear columns: {len(default_nonwear_columns)}")
 
         # Deselect some columns
         checkboxes = list(export_dialog.sleep_column_checkboxes.items())
@@ -2058,7 +2045,6 @@ class TestFullUserWorkflow:
 
         # Get updated selection
         updated_sleep_columns = export_dialog.get_selected_sleep_columns()
-        print(f"      Sleep columns after deselection: {len(updated_sleep_columns)}")
 
         # Verify deselected columns are not in the list
         for col in deselected_columns:
@@ -2072,15 +2058,12 @@ class TestFullUserWorkflow:
         # Close dialog
         export_dialog.reject()
         qtbot.wait(DELAY)
-        print("      VERIFIED: Export column selection works")
 
         # ----------------------------------------------------------------
         # TEST: Error Handling [3.33]
         # ----------------------------------------------------------------
-        print("\n[3.33] TEST: Error Handling...")
 
         # [3.33a] Invalid Export Path
-        print("\n      [3.33a] Testing invalid export path...")
         invalid_path = "Z:\\nonexistent\\path\\that\\does\\not\\exist"
 
         try:
@@ -2095,27 +2078,17 @@ class TestFullUserWorkflow:
             pass
 
         assert window.isVisible(), "Window should still be visible after error"
-        print("      VERIFIED: App did not crash with invalid export path")
 
         # [3.33b] Database Edge Cases - Query non-existent file
-        print("\n      [3.33b] Testing database query for non-existent file...")
         nonexistent_markers = query_database_markers(db_path, "NONEXISTENT_FILE_xyz123.csv")
-        print(f"      Query result for non-existent file: {len(nonexistent_markers)} markers")
         assert nonexistent_markers == [] or nonexistent_markers is not None, "Should return empty list, not crash"
-        print("      VERIFIED: Database query handles non-existent file gracefully")
 
         # [3.33c] Query with empty filename
-        print("\n      [3.33c] Testing database query with empty filename...")
         empty_name_markers = query_database_markers(db_path, "")
-        print(f"      Query result for empty filename: {len(empty_name_markers)} markers")
-        print("      VERIFIED: Database handles empty filename gracefully")
-
-        print("      [3.33] All error conditions handled without crashing")
 
         # ----------------------------------------------------------------
         # TEST: Marker Table Row Click -> Plot Selection [3.34]
         # ----------------------------------------------------------------
-        print("\n[3.34] TEST: Marker Table Row Click -> Plot Selection...")
 
         switch_tab(tab_widget, "Analysis", qtbot)
         qtbot.wait(DELAY)
@@ -2187,7 +2160,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Choi Axis Dropdown [3.35]
         # ----------------------------------------------------------------
-        print("\n[3.35] TEST: Choi Axis Dropdown...")
 
         switch_tab(tab_widget, "Study", qtbot)
         qtbot.wait(DELAY)
@@ -2227,7 +2199,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Save/Reset Settings Buttons [3.36]
         # ----------------------------------------------------------------
-        print("\n[3.36] TEST: Save/Reset Settings Buttons...")
 
         # Look for save and reset buttons in study settings tab
         save_btn = getattr(study_tab, "save_settings_btn", None)
@@ -2248,7 +2219,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Auto-detect Buttons [3.37]
         # ----------------------------------------------------------------
-        print("\n[3.37] TEST: Auto-detect Buttons (Device/Epoch/Skip/All)...")
 
         switch_tab(tab_widget, "Data", qtbot)
         qtbot.wait(DELAY)
@@ -2280,7 +2250,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Configure Columns Button and Dialog [3.38]
         # ----------------------------------------------------------------
-        print("\n[3.38] TEST: Configure Columns Button and Dialog...")
 
         configure_columns_btn = getattr(data_tab, "configure_columns_btn", None)
         if configure_columns_btn and configure_columns_btn.isVisible():
@@ -2303,7 +2272,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Clear Data Buttons [3.39]
         # ----------------------------------------------------------------
-        print("\n[3.39] TEST: Clear Activity/Diary/NWT/Markers Buttons...")
 
         # Look for clear buttons - usually in file management widget
         file_mgmt = getattr(data_tab, "file_management_widget", None)
@@ -2332,7 +2300,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Plot Click to Place Marker [3.40]
         # ----------------------------------------------------------------
-        print("\n[3.40] TEST: Plot Click to Place Marker...")
 
         switch_tab(tab_widget, "Analysis", qtbot)
         qtbot.wait(DELAY)
@@ -2349,8 +2316,6 @@ class TestFullUserWorkflow:
         # Get plot data bounds for timestamp calculation
         data_start = plot_widget.data_start_time
         data_end = plot_widget.data_end_time
-
-        print(f"      Plot data bounds: {data_start} to {data_end}")
 
         if data_start is not None and data_end is not None:
             # Calculate onset timestamp (evening ~22:00)
@@ -2445,7 +2410,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Pop-out Table Buttons [3.41]
         # ----------------------------------------------------------------
-        print("\n[3.41] TEST: Pop-out Table Buttons (Onset/Offset)...")
 
         onset_popout_button = getattr(analysis_tab, "onset_popout_button", None)
         offset_popout_button = getattr(analysis_tab, "offset_popout_button", None)
@@ -2477,7 +2441,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Show NW Markers Checkbox [3.42]
         # ----------------------------------------------------------------
-        print("\n[3.42] TEST: Show NW Markers Checkbox...")
 
         show_nw_checkbox = getattr(analysis_tab, "show_manual_nonwear_checkbox", None)
 
@@ -2499,7 +2462,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Export Button Visibility [3.43]
         # ----------------------------------------------------------------
-        print("\n[3.43] TEST: Export Button Visibility...")
 
         switch_tab(tab_widget, "Export", qtbot)
         qtbot.wait(DELAY)
@@ -2517,7 +2479,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Multiple Sleep Periods Per Night [3.44]
         # ----------------------------------------------------------------
-        print("\n[3.44] TEST: Multiple Sleep Periods Per Night (period_2, period_3, period_4)...")
 
         switch_tab(tab_widget, "Analysis", qtbot)
         qtbot.wait(DELAY)
@@ -2566,7 +2527,6 @@ class TestFullUserWorkflow:
                 offset_dt = datetime.fromtimestamp(period.offset_timestamp)
 
         assert periods_set == 4, f"Expected 4 periods, got {periods_set}"
-        print("      VERIFIED: All 4 sleep periods set correctly")
 
         # Save and verify database
         if analysis_tab.save_markers_btn.isEnabled():
@@ -2580,7 +2540,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Overlapping Nonwear and Sleep [3.45]
         # ----------------------------------------------------------------
-        print("\n[3.45] TEST: Overlapping Nonwear and Sleep...")
 
         # Create sleep marker
         sleep_markers = DailySleepMarkers()
@@ -2624,14 +2583,10 @@ class TestFullUserWorkflow:
         sleep_offset_dt = datetime.fromtimestamp(sleep_offset_ts)
         nw_start_dt = datetime.fromtimestamp(nw_start_ts)
         nw_end_dt = datetime.fromtimestamp(nw_end_ts)
-        print(f"      Sleep: {sleep_onset_dt.strftime('%H:%M')} - {sleep_offset_dt.strftime('%H:%M')}")
-        print(f"      Nonwear: {nw_start_dt.strftime('%H:%M')} - {nw_end_dt.strftime('%H:%M')}")
-        print("      VERIFIED: Overlapping nonwear and sleep markers handled correctly")
 
         # ----------------------------------------------------------------
         # TEST: Very Short Sleep (<30 min) [3.46]
         # ----------------------------------------------------------------
-        print("\n[3.46] TEST: Very Short Sleep (<30 min)...")
 
         short_sleep_markers = DailySleepMarkers()
         short_onset = datetime(2000, 1, 1, 23, 0).timestamp()
@@ -2655,7 +2610,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Very Long Sleep (>12 hours) [3.47]
         # ----------------------------------------------------------------
-        print("\n[3.47] TEST: Very Long Sleep (>12 hours)...")
 
         long_sleep_markers = DailySleepMarkers()
         long_onset = datetime(2000, 1, 1, 18, 0).timestamp()  # 6 PM
@@ -2679,7 +2633,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Nap Markers [3.48]
         # ----------------------------------------------------------------
-        print("\n[3.48] TEST: Nap Markers...")
 
         nap_markers = DailySleepMarkers()
 
@@ -2731,7 +2684,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Mark as No Sleep [3.49]
         # ----------------------------------------------------------------
-        print("\n[3.49] TEST: Mark as No Sleep...")
 
         # Find No Sleep button
         no_sleep_btn = getattr(analysis_tab, "no_sleep_btn", None)
@@ -2766,7 +2718,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Confirmation Dialogs [3.50]
         # ----------------------------------------------------------------
-        print("\n[3.50] TEST: Confirmation Dialogs...")
 
         # Test delete confirmation if there's a delete button
         switch_tab(tab_widget, "Data", qtbot)
@@ -2795,7 +2746,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Empty/Malformed CSV Files [3.51]
         # ----------------------------------------------------------------
-        print("\n[3.51] TEST: Empty/Malformed CSV Files Error Handling...")
 
         # Create a malformed CSV file
         malformed_csv = exports_folder / "malformed_test.csv"
@@ -2806,9 +2756,6 @@ class TestFullUserWorkflow:
 
         # Try to import these files would fail - verify graceful handling
         # We don't actually import as it would pollute test state
-        print("      Created malformed CSV for testing")
-        print("      Created empty CSV for testing")
-        print("      VERIFIED: Test files created (import test skipped to preserve test state)")
 
         # Clean up test files
         malformed_csv.unlink(missing_ok=True)
@@ -2817,7 +2764,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Gaps in Activity Data [3.52]
         # ----------------------------------------------------------------
-        print("\n[3.52] TEST: Gaps in Activity Data...")
 
         # The synthetic demo data we created has continuous data
         # This test verifies the app handles viewing data with gaps
@@ -2835,12 +2781,9 @@ class TestFullUserWorkflow:
             else:
                 pass
 
-        print("      VERIFIED: Data with potential gaps handled gracefully")
-
         # ----------------------------------------------------------------
         # TEST: All 4 Sleep Algorithms Produce Different Outputs [3.53]
         # ----------------------------------------------------------------
-        print("\n[3.53] TEST: All 4 Sleep Algorithms Produce Different Outputs...")
 
         # Test algorithms by verifying the store state changes and algorithm is set correctly
         # Note: Plot widget algorithm results require properly formatted axis_y data
@@ -2929,7 +2872,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: File Deletion Workflow [3.54]
         # ----------------------------------------------------------------
-        print("\n[3.54] TEST: File Deletion Workflow...")
 
         switch_tab(tab_widget, "Data Settings", qtbot)
         qtbot.wait(DELAY)
@@ -2959,7 +2901,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Column Mapping Dialog Full Workflow [3.55]
         # ----------------------------------------------------------------
-        print("\n[3.55] TEST: Column Mapping Dialog Full Workflow...")
 
         switch_tab(tab_widget, "Data Settings", qtbot)
         qtbot.wait(DELAY)
@@ -2990,7 +2931,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Valid Groups Add/Edit/Remove [3.56]
         # ----------------------------------------------------------------
-        print("\n[3.56] TEST: Valid Groups Add/Edit/Remove...")
 
         switch_tab(tab_widget, "Study Settings", qtbot)
         qtbot.wait(DELAY)
@@ -3036,7 +2976,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Valid Timepoints Add/Edit/Remove [3.57]
         # ----------------------------------------------------------------
-        print("\n[3.57] TEST: Valid Timepoints Add/Edit/Remove...")
 
         # The buttons are on the valid_values_builder
         add_tp_btn = None
@@ -3069,7 +3008,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Export Path Browse Button [3.58]
         # ----------------------------------------------------------------
-        print("\n[3.58] TEST: Export Path Browse Button...")
 
         switch_tab(tab_widget, "Export", qtbot)
         qtbot.wait(DELAY)
@@ -3092,7 +3030,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Export Grouping Options [3.59]
         # ----------------------------------------------------------------
-        print("\n[3.59] TEST: Export Grouping Options...")
 
         # Look for export grouping radio buttons or combo
         grouping_group = getattr(export_tab, "export_grouping_group", None)
@@ -3124,7 +3061,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Right-Click Context Menus [3.60]
         # ----------------------------------------------------------------
-        print("\n[3.60] TEST: Right-Click Context Menus...")
 
         switch_tab(tab_widget, "Analysis", qtbot)
         qtbot.wait(DELAY)
@@ -3154,7 +3090,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Date Dropdown Selection [3.61]
         # ----------------------------------------------------------------
-        print("\n[3.61] TEST: Date Dropdown Selection...")
 
         date_dropdown = analysis_tab.date_dropdown
         if date_dropdown and date_dropdown.count() > 1:
@@ -3182,7 +3117,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Metrics Accuracy Verification [3.62]
         # ----------------------------------------------------------------
-        print("\n[3.62] TEST: Metrics Accuracy Verification (TST, WASO, Efficiency)...")
 
         # Place a known sleep period and verify metrics
         window.store.dispatch(Actions.date_selected(0))
@@ -3239,7 +3173,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Algorithm S/W Classification Correctness [3.63]
         # ----------------------------------------------------------------
-        print("\n[3.63] TEST: Algorithm S/W Classification Correctness...")
 
         # The algorithm should classify epochs as 1 (sleep) or 0 (wake)
         if hasattr(plot_widget, "sadeh_results") and plot_widget.sadeh_results:
@@ -3261,7 +3194,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Nonwear Overlap Handling in Metrics [3.64]
         # ----------------------------------------------------------------
-        print("\n[3.64] TEST: Nonwear Overlap Handling in Metrics...")
 
         # Create overlapping sleep and nonwear periods
         overlap_sleep = DailySleepMarkers()
@@ -3302,7 +3234,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Concurrent File Access Error [3.65]
         # ----------------------------------------------------------------
-        print("\n[3.65] TEST: Concurrent File Access Error Handling...")
 
         # Try to simulate concurrent access by locking database file
         import sqlite3
@@ -3343,7 +3274,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Database Locked Error [3.66]
         # ----------------------------------------------------------------
-        print("\n[3.66] TEST: Database Locked Error Recovery...")
 
         # Test that application can recover after database errors
         try:
@@ -3374,7 +3304,6 @@ class TestFullUserWorkflow:
         # ----------------------------------------------------------------
         # TEST: Network Path Failure [3.67]
         # ----------------------------------------------------------------
-        print("\n[3.67] TEST: Network Path Failure Handling...")
 
         # Test export to invalid network path
         invalid_network_paths = [
@@ -3393,29 +3322,15 @@ class TestFullUserWorkflow:
             except Exception as e:
                 error_type = type(e).__name__
 
-        print("      VERIFIED: Network path failures handled gracefully")
-
         # Restore valid markers
         window.store.dispatch(Actions.sleep_markers_changed(valid_markers))
         qtbot.wait(DELAY)
 
-        print("\n" + "=" * 80)
-        print("EXTENDED EDGE CASE TESTS COMPLETE [3.35-3.67]")
-        print("=" * 80)
-
-        print("\n" + "=" * 80)
-        print("EDGE CASE AND INTERACTION TESTS COMPLETE [3.29-3.67]")
-        print("=" * 80)
-
         # ================================================================
         # PHASE 4: NAVIGATION VERIFICATION
         # ================================================================
-        print("\n" + "=" * 80)
-        print("PHASE 4: NAVIGATION VERIFICATION")
-        print("=" * 80)
 
         # Test keyboard navigation
-        print("\n[4.1] Keyboard navigation...")
         window.activateWindow()
         window.setFocus()
 
@@ -3424,15 +3339,12 @@ class TestFullUserWorkflow:
         QTest.keyClick(window, Qt.Key.Key_Right)
         qtbot.wait(DELAY)
         idx_after_right = window.store.state.current_date_index
-        print(f"      Right arrow: {idx_before} -> {idx_after_right}")
 
         QTest.keyClick(window, Qt.Key.Key_Left)
         qtbot.wait(DELAY)
         idx_after_left = window.store.state.current_date_index
-        print(f"      Left arrow: {idx_after_right} -> {idx_after_left}")
 
         # Test button navigation
-        print("\n[4.2] Button navigation...")
         if analysis_tab.next_date_btn.isEnabled():
             qtbot.mouseClick(analysis_tab.next_date_btn, Qt.MouseButton.LeftButton)
             qtbot.wait(DELAY)
@@ -3444,32 +3356,23 @@ class TestFullUserWorkflow:
         # ================================================================
         # PHASE 5: EXPORT AND FULL VALIDATION
         # ================================================================
-        print("\n" + "=" * 80)
-        print("PHASE 5: EXPORT AND FULL VALIDATION")
-        print("=" * 80)
 
         switch_tab(tab_widget, "Export", qtbot)
 
         # Export all data
-        print("\n[5.1] Exporting all data...")
         export_result = window.export_manager.export_all_sleep_data(str(exports_folder))
         qtbot.wait(DELAY)
-        print(f"      Result: {export_result}")
 
         # Read export file
         export_files = list(exports_folder.glob("*.csv"))
         assert len(export_files) >= 1, "Should have export file"
 
         df = pd.read_csv(export_files[0])
-        print(f"\n[5.2] Export file: {len(df)} rows, {len(df.columns)} columns")
 
         # VERIFY: All placed markers appear in export
-        print("\n[5.3] VERIFYING placed markers appear in export...")
         assert len(df) >= len(placed_sleep_markers), f"Export should have at least {len(placed_sleep_markers)} rows"
-        print(f"      VERIFIED: {len(df)} rows >= {len(placed_sleep_markers)} placed")
 
         # VERIFY: Check specific column values match what we placed
-        print("\n[5.4] VERIFYING export values match placed markers...")
 
         # Find onset/offset columns
         onset_col = None
@@ -3489,7 +3392,6 @@ class TestFullUserWorkflow:
             found_onset = any(first_onset in str(v) for v in onset_values)
 
         # VERIFY: Expected columns exist
-        print("\n[5.5] VERIFYING expected columns...")
         expected_patterns = [
             "Participant",
             "ID",
@@ -3511,10 +3413,7 @@ class TestFullUserWorkflow:
                     found += 1
                     break
 
-        print(f"      Found {found}/{len(expected_patterns)} expected column patterns")
-
         # Show all columns for verification
-        print("\n[5.6] All export columns:")
         for i, col in enumerate(df.columns, 1):
             pass
 
@@ -3527,87 +3426,6 @@ class TestFullUserWorkflow:
         # ================================================================
         # FINAL SUMMARY
         # ================================================================
-        print("\n" + "=" * 80)
-        print("WORKFLOW COMPLETE - SUMMARY")
-        print("=" * 80)
-
-        print("\n  Settings tested:")
-        print("    - Algorithm: Sadeh -> Cole-Kripke (VERIFIED)")
-        print("    - Detector: 3S/5S -> 5S/10S (VERIFIED)")
-        print("    - Night hours: 21:00 -> 20:00 (VERIFIED)")
-        print("    - View mode toggle (VERIFIED)")
-        print("    - Activity source switch (VERIFIED)")
-        print("    - Adjacent markers toggle (VERIFIED)")
-        print("    - Sleep/Nonwear mode toggle (VERIFIED)")
-        print("    - Marker dragging simulation (VERIFIED)")
-        print("    - Diary table click-to-place (VERIFIED)")
-
-        print("\n  Data Integrity Tests [3.24-3.28]:")
-        print("    - [3.24] Multi-file marker isolation (VERIFIED)")
-        print("    - [3.25] Metrics accuracy verification (VERIFIED)")
-        print("    - [3.26] Sleep period detector output changes (VERIFIED)")
-        print("    - [3.27] Database persistence across sessions (VERIFIED)")
-        print("    - [3.28] Config persistence across sessions (VERIFIED)")
-
-        print("\n  Edge Cases and Error Handling [3.29-3.34]:")
-        print("    - [3.29] Invalid marker placement edge cases (VERIFIED)")
-        print("    - [3.30] Mouse drag events on plot (VERIFIED)")
-        print("    - [3.31] Individual period deletion (VERIFIED)")
-        print("    - [3.32] Export column selection (VERIFIED)")
-        print("    - [3.33] Error handling (invalid paths, edge cases) (VERIFIED)")
-        print("    - [3.34] Marker table row click -> plot selection (VERIFIED)")
-
-        print("\n  Extended Coverage [3.35-3.52]:")
-        print("    - [3.35] Choi Axis dropdown (VERIFIED)")
-        print("    - [3.36] Save/Reset Settings buttons (VERIFIED)")
-        print("    - [3.37] Auto-detect buttons (VERIFIED)")
-        print("    - [3.38] Configure Columns dialog (VERIFIED)")
-        print("    - [3.39] Clear data buttons (VERIFIED)")
-        print("    - [3.40] Plot click to place marker (VERIFIED)")
-        print("    - [3.41] Pop-out table buttons (VERIFIED)")
-        print("    - [3.42] Show NW Markers checkbox (VERIFIED)")
-        print("    - [3.43] Export button visibility (VERIFIED)")
-        print("    - [3.44] Multiple sleep periods per night (VERIFIED)")
-        print("    - [3.45] Overlapping nonwear and sleep (VERIFIED)")
-        print("    - [3.46] Very short sleep <30 min (VERIFIED)")
-        print("    - [3.47] Very long sleep >12 hours (VERIFIED)")
-        print("    - [3.48] Nap markers (VERIFIED)")
-        print("    - [3.49] Mark as No Sleep (VERIFIED)")
-        print("    - [3.50] Confirmation dialogs (VERIFIED)")
-        print("    - [3.51] Empty/malformed CSV handling (VERIFIED)")
-        print("    - [3.52] Gaps in activity data (VERIFIED)")
-
-        print("\n  Algorithm & Metrics Coverage [3.53-3.67]:")
-        print("    - [3.53] All 4 sleep algorithms different outputs (VERIFIED)")
-        print("    - [3.54] File deletion workflow (VERIFIED)")
-        print("    - [3.55] Column mapping dialog workflow (VERIFIED)")
-        print("    - [3.56] Valid groups add/edit/remove (VERIFIED)")
-        print("    - [3.57] Valid timepoints add/edit/remove (VERIFIED)")
-        print("    - [3.58] Export path browse button (VERIFIED)")
-        print("    - [3.59] Export grouping options (VERIFIED)")
-        print("    - [3.60] Right-click context menus (VERIFIED)")
-        print("    - [3.61] Date dropdown selection (VERIFIED)")
-        print("    - [3.62] Metrics accuracy (TST, WASO, Efficiency) (VERIFIED)")
-        print("    - [3.63] Algorithm S/W classification (VERIFIED)")
-        print("    - [3.64] Nonwear overlap in metrics (VERIFIED)")
-        print("    - [3.65] Concurrent file access error (VERIFIED)")
-        print("    - [3.66] Database locked error recovery (VERIFIED)")
-        print("    - [3.67] Network path failure handling (VERIFIED)")
-
-        print("\n  Data:")
-        print(f"    - Dates available: {len(dates)}")
-        print(f"    - Sleep markers placed: {len(placed_sleep_markers)}")
-        print(f"    - Nonwear markers placed: {len(placed_nonwear_markers)}")
-        print(f"    - Database sleep markers: {len(query_database_markers(db_path, stored_filename))}")
-        print(f"    - Database nonwear markers: {len(query_database_nonwear_markers(db_path, stored_filename))}")
-
-        print("\n  Export:")
-        print(f"    - Rows: {len(df)}")
-        print(f"    - Columns: {len(df.columns)}")
-
-        print("\n" + "=" * 80)
-        print("ALL VERIFICATIONS PASSED")
-        print("=" * 80)
 
         qtbot.wait(DELAY * 2)
 

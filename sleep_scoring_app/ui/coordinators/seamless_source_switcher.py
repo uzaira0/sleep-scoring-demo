@@ -14,8 +14,8 @@ from PyQt6.QtWidgets import QApplication
 if TYPE_CHECKING:
     from sleep_scoring_app.services.protocols import UnifiedDataProtocol
     from sleep_scoring_app.ui.store import UIStore
+    from sleep_scoring_app.ui.utils.config import ConfigManager
     from sleep_scoring_app.ui.widgets.activity_plot import ActivityPlotWidget
-    from sleep_scoring_app.utils.config import ConfigManager
 
 from sleep_scoring_app.core.constants import ActivityDataPreference
 from sleep_scoring_app.utils.date_range import get_24h_range, get_48h_range

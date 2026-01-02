@@ -102,7 +102,8 @@ class PlotAlgorithmManager:
 
             algo = self.parent.create_sleep_algorithm(algorithm_id, config)
             if algo is None:
-                raise RuntimeError(f"Failed to create sleep algorithm with id: {algorithm_id}")
+                msg = f"Failed to create sleep algorithm with id: {algorithm_id}"
+                raise RuntimeError(msg)
             self._sleep_scoring_algorithm = algo
             logger.debug("Created sleep scoring algorithm: %s (id: %s)", algo.name, algorithm_id)
 
@@ -148,7 +149,8 @@ class PlotAlgorithmManager:
 
             detector = self.parent.create_sleep_period_detector(detector_id)
             if detector is None:
-                raise RuntimeError(f"Failed to create sleep period detector with id: {detector_id}")
+                msg = f"Failed to create sleep period detector with id: {detector_id}"
+                raise RuntimeError(msg)
             self._sleep_period_detector = detector
             logger.debug("Created sleep period detector: %s (id: %s)", detector.name, detector_id)
 

@@ -37,7 +37,7 @@ from sleep_scoring_app.core.pipeline.types import AlgorithmDataRequirement
 from .choi import ChoiAlgorithm
 
 if TYPE_CHECKING:
-    from sleep_scoring_app.utils.config import AppConfig
+    from sleep_scoring_app.core.dataclasses import AppConfig
 
     from .protocol import NonwearDetectionAlgorithm
 

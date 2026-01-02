@@ -328,8 +328,6 @@ class DatabaseManager:
 
     def get_all_sleep_data_for_export(self) -> list[dict[str, Any]]:
         """Get all sleep data formatted for export with integrated diary and nonwear data."""
-
-
         try:
             metrics = self.sleep_metrics.load_sleep_metrics()
             export_data = []

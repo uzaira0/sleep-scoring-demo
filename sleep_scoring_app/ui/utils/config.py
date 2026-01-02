@@ -686,7 +686,7 @@ def load_diary_mapping_config(config_path: str | Path | None = None) -> DiaryCol
 
     Example:
         ```python
-        from sleep_scoring_app.utils.config import load_diary_mapping_config
+        from sleep_scoring_app.ui.utils.config import load_diary_mapping_config
 
         # Load default mapping configuration
         mapping = load_diary_mapping_config()

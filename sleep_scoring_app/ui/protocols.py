@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from sleep_scoring_app.core.dataclasses import DailySleepMarkers, FileInfo, SleepPeriod
     from sleep_scoring_app.data.database import DatabaseManager
     from sleep_scoring_app.services.unified_data_service import UnifiedDataService
-    from sleep_scoring_app.utils.config import ConfigManager
+    from sleep_scoring_app.ui.utils.config import ConfigManager
 
 
 @runtime_checkable
@@ -212,7 +212,7 @@ class ServiceContainer(Protocol):
     autosave_coordinator: Any | None
     compatibility_helper: Any | None
     table_manager: Any | None
-    diary_manager: Any | None
+    diary_coordinator: Any | None
 
 
 class MarkerOperationsInterface(Protocol):
@@ -306,7 +306,7 @@ class MainWindowProtocol(ServiceContainer, MarkerOperationsInterface, Navigation
     state_manager: Any | None
 
     # Session manager
-    session_manager: Any | None
+    session_service: Any | None
 
     # UI controls
     save_markers_btn: Any

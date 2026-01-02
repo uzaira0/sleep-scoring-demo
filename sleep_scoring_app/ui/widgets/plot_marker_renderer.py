@@ -228,9 +228,7 @@ class PlotMarkerRenderer:
             return []
 
         onset_line = self.create_marker_line_no_add(onset_ts, onset_color, onset_label, period, SleepMarkerEndpoint.ONSET, is_selected)
-        offset_line = self.create_marker_line_no_add(
-            offset_ts, offset_color, offset_label, period, SleepMarkerEndpoint.OFFSET, is_selected
-        )
+        offset_line = self.create_marker_line_no_add(offset_ts, offset_color, offset_label, period, SleepMarkerEndpoint.OFFSET, is_selected)
 
         return [onset_line, offset_line]
 

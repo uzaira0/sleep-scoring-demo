@@ -19,7 +19,7 @@ from sleep_scoring_app.core.constants import (
 )
 
 if TYPE_CHECKING:
-    from sleep_scoring_app.utils.config import ConfigManager
+    from sleep_scoring_app.ui.utils.config import ConfigManager
 
 logger = logging.getLogger(__name__)
 

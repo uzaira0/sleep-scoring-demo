@@ -125,7 +125,7 @@ def real_main_window(qtbot, temp_db, temp_config, tmp_path):
     only replacing the database and config to use temp locations.
     """
     from sleep_scoring_app.ui.main_window import SleepScoringMainWindow
-    from sleep_scoring_app.utils.config import ConfigManager
+    from sleep_scoring_app.ui.utils.config import ConfigManager
 
     # Patch DatabaseManager and ConfigManager to use our temp instances
     with patch.object(DatabaseManager, "__init__", lambda self, path=None: None):
@@ -1143,7 +1143,7 @@ class TestMarkerTableIntegration:
 
     def test_marker_table_update_helper_works(self):
         """Test that the marker table update helper function works."""
-        from sleep_scoring_app.utils.table_helpers import update_marker_table
+        from sleep_scoring_app.ui.utils.table_helpers import update_marker_table
 
         # Verify the helper function exists
         assert update_marker_table is not None

@@ -1,7 +1,7 @@
 """
 Tests for UI Coordinators.
 
-Tests AutosaveCoordinator, MarkerLoadingCoordinator, and SessionStateManager.
+Tests AutosaveCoordinator, MarkerLoadingCoordinator, and SessionStateService.
 """
 
 from __future__ import annotations
@@ -689,123 +689,123 @@ class TestMarkerLoadingCoordinatorDisconnect:
 
 
 # ============================================================================
-# Test SessionStateManager
+# Test SessionStateService
 # ============================================================================
 
 
-class TestSessionStateManagerKeys:
-    """Tests for SessionStateManager key constants."""
+class TestSessionStateServiceKeys:
+    """Tests for SessionStateService key constants."""
 
     def test_has_required_keys(self) -> None:
         """Has all required session keys."""
-        from sleep_scoring_app.ui.coordinators.session_state_manager import (
-            SessionStateManager,
+        from sleep_scoring_app.ui.services.session_state_service import (
+            SessionStateService,
         )
 
-        assert hasattr(SessionStateManager, "KEY_CURRENT_FILE")
-        assert hasattr(SessionStateManager, "KEY_DATE_INDEX")
-        assert hasattr(SessionStateManager, "KEY_VIEW_MODE")
-        assert hasattr(SessionStateManager, "KEY_CURRENT_TAB")
-        assert hasattr(SessionStateManager, "KEY_WINDOW_GEOMETRY")
+        assert hasattr(SessionStateService, "KEY_CURRENT_FILE")
+        assert hasattr(SessionStateService, "KEY_DATE_INDEX")
+        assert hasattr(SessionStateService, "KEY_VIEW_MODE")
+        assert hasattr(SessionStateService, "KEY_CURRENT_TAB")
+        assert hasattr(SessionStateService, "KEY_WINDOW_GEOMETRY")
 
 
-class TestSessionStateManagerNavigationState:
+class TestSessionStateServiceNavigationState:
     """Tests for navigation state save/restore."""
 
     def test_save_and_get_current_file(self) -> None:
         """Can save and retrieve current file."""
-        from sleep_scoring_app.ui.coordinators.session_state_manager import (
-            SessionStateManager,
+        from sleep_scoring_app.ui.services.session_state_service import (
+            SessionStateService,
         )
 
-        with patch("sleep_scoring_app.ui.coordinators.session_state_manager.QSettings") as mock_settings:
+        with patch("sleep_scoring_app.ui.services.session_state_service.QSettings") as mock_settings:
             mock_instance = MagicMock()
             mock_settings.return_value = mock_instance
 
-            manager = SessionStateManager()
+            manager = SessionStateService()
             manager.save_current_file("test.csv")
 
-            mock_instance.setValue.assert_called_with(SessionStateManager.KEY_CURRENT_FILE, "test.csv")
+            mock_instance.setValue.assert_called_with(SessionStateService.KEY_CURRENT_FILE, "test.csv")
 
     def test_get_current_file_returns_none_when_not_set(self) -> None:
         """get_current_file returns None when not set."""
-        from sleep_scoring_app.ui.coordinators.session_state_manager import (
-            SessionStateManager,
+        from sleep_scoring_app.ui.services.session_state_service import (
+            SessionStateService,
         )
 
-        with patch("sleep_scoring_app.ui.coordinators.session_state_manager.QSettings") as mock_settings:
+        with patch("sleep_scoring_app.ui.services.session_state_service.QSettings") as mock_settings:
             mock_instance = MagicMock()
             mock_instance.value.return_value = None
             mock_settings.return_value = mock_instance
 
-            manager = SessionStateManager()
+            manager = SessionStateService()
             result = manager.get_current_file()
 
             assert result is None
 
     def test_save_current_date_index(self) -> None:
         """Can save date index."""
-        from sleep_scoring_app.ui.coordinators.session_state_manager import (
-            SessionStateManager,
+        from sleep_scoring_app.ui.services.session_state_service import (
+            SessionStateService,
         )
 
-        with patch("sleep_scoring_app.ui.coordinators.session_state_manager.QSettings") as mock_settings:
+        with patch("sleep_scoring_app.ui.services.session_state_service.QSettings") as mock_settings:
             mock_instance = MagicMock()
             mock_settings.return_value = mock_instance
 
-            manager = SessionStateManager()
+            manager = SessionStateService()
             manager.save_current_date_index(5)
 
-            mock_instance.setValue.assert_called_with(SessionStateManager.KEY_DATE_INDEX, 5)
+            mock_instance.setValue.assert_called_with(SessionStateService.KEY_DATE_INDEX, 5)
 
     def test_get_current_date_index_defaults_to_zero(self) -> None:
         """get_current_date_index defaults to 0."""
-        from sleep_scoring_app.ui.coordinators.session_state_manager import (
-            SessionStateManager,
+        from sleep_scoring_app.ui.services.session_state_service import (
+            SessionStateService,
         )
 
-        with patch("sleep_scoring_app.ui.coordinators.session_state_manager.QSettings") as mock_settings:
+        with patch("sleep_scoring_app.ui.services.session_state_service.QSettings") as mock_settings:
             mock_instance = MagicMock()
             mock_instance.value.return_value = None
             mock_settings.return_value = mock_instance
 
-            manager = SessionStateManager()
+            manager = SessionStateService()
             result = manager.get_current_date_index()
 
             # Default behavior varies, but should return int
             assert isinstance(result, int)
 
 
-class TestSessionStateManagerViewState:
+class TestSessionStateServiceViewState:
     """Tests for view state save/restore."""
 
     def test_save_view_mode(self) -> None:
         """Can save view mode."""
-        from sleep_scoring_app.ui.coordinators.session_state_manager import (
-            SessionStateManager,
+        from sleep_scoring_app.ui.services.session_state_service import (
+            SessionStateService,
         )
 
-        with patch("sleep_scoring_app.ui.coordinators.session_state_manager.QSettings") as mock_settings:
+        with patch("sleep_scoring_app.ui.services.session_state_service.QSettings") as mock_settings:
             mock_instance = MagicMock()
             mock_settings.return_value = mock_instance
 
-            manager = SessionStateManager()
+            manager = SessionStateService()
             manager.save_view_mode(48)
 
-            mock_instance.setValue.assert_called_with(SessionStateManager.KEY_VIEW_MODE, 48)
+            mock_instance.setValue.assert_called_with(SessionStateService.KEY_VIEW_MODE, 48)
 
     def test_get_view_mode_defaults_to_24(self) -> None:
         """get_view_mode defaults to 24."""
-        from sleep_scoring_app.ui.coordinators.session_state_manager import (
-            SessionStateManager,
+        from sleep_scoring_app.ui.services.session_state_service import (
+            SessionStateService,
         )
 
-        with patch("sleep_scoring_app.ui.coordinators.session_state_manager.QSettings") as mock_settings:
+        with patch("sleep_scoring_app.ui.services.session_state_service.QSettings") as mock_settings:
             mock_instance = MagicMock()
             mock_instance.value.return_value = None
             mock_settings.return_value = mock_instance
 
-            manager = SessionStateManager()
+            manager = SessionStateService()
             result = manager.get_view_mode()
 
             # Should return default or int
@@ -813,50 +813,50 @@ class TestSessionStateManagerViewState:
 
     def test_get_view_mode_validates_values(self) -> None:
         """get_view_mode only accepts 24 or 48."""
-        from sleep_scoring_app.ui.coordinators.session_state_manager import (
-            SessionStateManager,
+        from sleep_scoring_app.ui.services.session_state_service import (
+            SessionStateService,
         )
 
-        with patch("sleep_scoring_app.ui.coordinators.session_state_manager.QSettings") as mock_settings:
+        with patch("sleep_scoring_app.ui.services.session_state_service.QSettings") as mock_settings:
             mock_instance = MagicMock()
             mock_instance.value.return_value = 72  # Invalid value
             mock_settings.return_value = mock_instance
 
-            manager = SessionStateManager()
+            manager = SessionStateService()
             result = manager.get_view_mode()
 
             assert result == 24  # Should default to 24
 
     def test_save_current_tab(self) -> None:
         """Can save current tab index."""
-        from sleep_scoring_app.ui.coordinators.session_state_manager import (
-            SessionStateManager,
+        from sleep_scoring_app.ui.services.session_state_service import (
+            SessionStateService,
         )
 
-        with patch("sleep_scoring_app.ui.coordinators.session_state_manager.QSettings") as mock_settings:
+        with patch("sleep_scoring_app.ui.services.session_state_service.QSettings") as mock_settings:
             mock_instance = MagicMock()
             mock_settings.return_value = mock_instance
 
-            manager = SessionStateManager()
+            manager = SessionStateService()
             manager.save_current_tab(2)
 
-            mock_instance.setValue.assert_called_with(SessionStateManager.KEY_CURRENT_TAB, 2)
+            mock_instance.setValue.assert_called_with(SessionStateService.KEY_CURRENT_TAB, 2)
 
 
-class TestSessionStateManagerClear:
+class TestSessionStateServiceClear:
     """Tests for clearing session state."""
 
     def test_clear_session(self) -> None:
         """Can clear all session state."""
-        from sleep_scoring_app.ui.coordinators.session_state_manager import (
-            SessionStateManager,
+        from sleep_scoring_app.ui.services.session_state_service import (
+            SessionStateService,
         )
 
-        with patch("sleep_scoring_app.ui.coordinators.session_state_manager.QSettings") as mock_settings:
+        with patch("sleep_scoring_app.ui.services.session_state_service.QSettings") as mock_settings:
             mock_instance = MagicMock()
             mock_settings.return_value = mock_instance
 
-            manager = SessionStateManager()
+            manager = SessionStateService()
             manager.clear_session()
 
             mock_instance.remove.assert_called_with("session")
@@ -864,37 +864,37 @@ class TestSessionStateManagerClear:
 
     def test_clear_file_selection(self) -> None:
         """Can clear just file selection."""
-        from sleep_scoring_app.ui.coordinators.session_state_manager import (
-            SessionStateManager,
+        from sleep_scoring_app.ui.services.session_state_service import (
+            SessionStateService,
         )
 
-        with patch("sleep_scoring_app.ui.coordinators.session_state_manager.QSettings") as mock_settings:
+        with patch("sleep_scoring_app.ui.services.session_state_service.QSettings") as mock_settings:
             mock_instance = MagicMock()
             mock_settings.return_value = mock_instance
 
-            manager = SessionStateManager()
+            manager = SessionStateService()
             manager.clear_file_selection()
 
             # Should remove both file and date index
             assert mock_instance.remove.call_count == 2
 
 
-class TestSessionStateManagerSplitters:
+class TestSessionStateServiceSplitters:
     """Tests for splitter state save/restore."""
 
     def test_save_splitter_states(self) -> None:
         """Can save splitter states."""
-        from sleep_scoring_app.ui.coordinators.session_state_manager import (
-            SessionStateManager,
+        from sleep_scoring_app.ui.services.session_state_service import (
+            SessionStateService,
         )
 
-        with patch("sleep_scoring_app.ui.coordinators.session_state_manager.QSettings") as mock_settings:
+        with patch("sleep_scoring_app.ui.services.session_state_service.QSettings") as mock_settings:
             mock_instance = MagicMock()
             mock_settings.return_value = mock_instance
 
             # Mock backup_to_json to avoid file operations
-            with patch.object(SessionStateManager, "backup_to_json"):
-                manager = SessionStateManager()
+            with patch.object(SessionStateService, "backup_to_json"):
+                manager = SessionStateService()
                 manager.save_splitter_states(
                     top_level_state=b"top",
                     main_state=b"main",
@@ -905,16 +905,16 @@ class TestSessionStateManagerSplitters:
 
     def test_get_splitter_states_returns_tuple(self) -> None:
         """get_splitter_states returns tuple of bytes or None."""
-        from sleep_scoring_app.ui.coordinators.session_state_manager import (
-            SessionStateManager,
+        from sleep_scoring_app.ui.services.session_state_service import (
+            SessionStateService,
         )
 
-        with patch("sleep_scoring_app.ui.coordinators.session_state_manager.QSettings") as mock_settings:
+        with patch("sleep_scoring_app.ui.services.session_state_service.QSettings") as mock_settings:
             mock_instance = MagicMock()
             mock_instance.value.return_value = None
             mock_settings.return_value = mock_instance
 
-            manager = SessionStateManager()
+            manager = SessionStateService()
             result = manager.get_splitter_states()
 
             assert isinstance(result, tuple)

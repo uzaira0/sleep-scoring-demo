@@ -37,7 +37,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-
     from sleep_scoring_app.core.pipeline.types import DataSourceType
     from sleep_scoring_app.ui.main_window import SleepScoringMainWindow
 

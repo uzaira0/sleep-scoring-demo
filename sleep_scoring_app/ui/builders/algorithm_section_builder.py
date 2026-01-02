@@ -31,7 +31,7 @@ from sleep_scoring_app.core.constants import (
 from sleep_scoring_app.services.algorithm_service import get_algorithm_service
 
 if TYPE_CHECKING:
-    from sleep_scoring_app.utils.config import ConfigManager
+    from sleep_scoring_app.ui.utils.config import ConfigManager
 
 logger = logging.getLogger(__name__)
 

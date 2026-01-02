@@ -130,7 +130,7 @@ class PopOutTableWindow(QDialog):
         from PyQt6.QtGui import QColor
 
         from sleep_scoring_app.core.constants import TableDimensions
-        from sleep_scoring_app.utils.table_helpers import update_marker_table
+        from sleep_scoring_app.ui.utils.table_helpers import update_marker_table
 
         # Store the data for click handling
         self._table_data = data
@@ -178,7 +178,6 @@ class PopOutTableWindow(QDialog):
 
     def _restore_geometry(self) -> None:
         """Restore window size and position."""
-
         settings = QSettings("SleepResearch", "SleepScoringApp")
 
         # Restore geometry if available

@@ -26,9 +26,6 @@ from sleep_scoring_app.core.validation import InputValidator
 from sleep_scoring_app.data.repositories.base_repository import BaseRepository
 from sleep_scoring_app.utils.column_registry import column_registry
 
-if TYPE_CHECKING:
-    pass
-
 logger = logging.getLogger(__name__)
 
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Time Field Manager
+Time Field Coordinator
 Manages time field validation and focus handling.
 """
 
@@ -19,9 +19,9 @@ logger = logging.getLogger(__name__)
 class TimeFieldFocusHandler(QObject):
     """Handle focus events for time fields."""
 
-    def __init__(self, parent_manager: "TimeFieldManager", field_name: str, parent=None) -> None:
+    def __init__(self, parent_coordinator: "TimeFieldCoordinator", field_name: str, parent=None) -> None:
         super().__init__(parent)
-        self.parent_manager = parent_manager
+        self.parent_coordinator = parent_coordinator
         self.field_name = field_name
         self.initial_value = ""
 
@@ -37,11 +37,11 @@ class TimeFieldFocusHandler(QObject):
             # Check if value changed when focus lost
             if isinstance(obj, QLineEdit) and obj.text() != self.initial_value:
                 # Trigger update via callback
-                QTimer.singleShot(50, self.parent_manager.trigger_update)
+                QTimer.singleShot(50, self.parent_coordinator.trigger_update)
         return False  # Don't consume the event
 
 
-class TimeFieldManager(QObject):
+class TimeFieldCoordinator(QObject):
     """Manages time field validation and focus handling."""
 
     def __init__(
@@ -53,7 +53,7 @@ class TimeFieldManager(QObject):
         update_callback: callable,
     ) -> None:
         """
-        Initialize the time field manager.
+        Initialize the time field coordinator.
 
         Args:
             store: The UI store

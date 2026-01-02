@@ -11,8 +11,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 import pytest
 
 from sleep_scoring_app.core.constants import MarkerCategory
-from sleep_scoring_app.ui.store import Actions, UIState, UIStore
-from sleep_scoring_app.ui.store_connectors import (
+from sleep_scoring_app.ui.connectors import (
     AutoSaveConnector,
     DateDropdownConnector,
     FileListConnector,
@@ -24,6 +23,7 @@ from sleep_scoring_app.ui.store_connectors import (
     ViewModeConnector,
     connect_all_components,
 )
+from sleep_scoring_app.ui.store import Actions, UIState, UIStore
 
 # ============================================================================
 # Fixtures

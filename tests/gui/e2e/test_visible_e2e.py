@@ -132,7 +132,7 @@ def visible_main_window(qtbot, tmp_path, test_data_folder, temp_db_path):
 
     # Patch ConfigManager to use temp directories
     from sleep_scoring_app.core.dataclasses import AppConfig
-    from sleep_scoring_app.utils.config import ConfigManager
+    from sleep_scoring_app.ui.utils.config import ConfigManager
 
     temp_config = AppConfig.create_default()
     temp_config.data_folder = str(test_data_folder)

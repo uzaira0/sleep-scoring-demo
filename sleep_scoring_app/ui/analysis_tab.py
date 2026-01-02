@@ -30,9 +30,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from sleep_scoring_app.ui.utils.thread_safety import ensure_main_thread
 from sleep_scoring_app.ui.widgets.file_selection_table import FileSelectionTable
 from sleep_scoring_app.ui.widgets.popout_table_window import PopOutTableWindow
-from sleep_scoring_app.utils.thread_safety import ensure_main_thread
 
 if TYPE_CHECKING:
     from sleep_scoring_app.ui.protocols import (
@@ -52,11 +52,11 @@ from sleep_scoring_app.core.constants import (
     TooltipText,
     UIColors,
 )
-from sleep_scoring_app.ui.coordinators import DiaryTableManager, SeamlessSourceSwitcher, TimeFieldManager
-from sleep_scoring_app.ui.coordinators.diary_table_manager import DiaryTableColumn
+from sleep_scoring_app.ui.coordinators import DiaryTableConnector, SeamlessSourceSwitcher, TimeFieldCoordinator
+from sleep_scoring_app.ui.coordinators.diary_table_connector import DiaryTableColumn
+from sleep_scoring_app.ui.utils.table_helpers import create_marker_data_table
 from sleep_scoring_app.ui.widgets.activity_plot import ActivityPlotWidget
 from sleep_scoring_app.ui.widgets.analysis_dialogs import AnalysisDialogManager
-from sleep_scoring_app.utils.table_helpers import create_marker_data_table
 
 logger = logging.getLogger(__name__)
 
@@ -120,8 +120,8 @@ class AnalysisTab(QWidget):
 
         # Managers (initialized after setup_ui creates widgets they depend on)
         self.seamless_source_switcher: SeamlessSourceSwitcher | None = None
-        self.diary_table_manager: DiaryTableManager | None = None
-        self.time_field_manager: TimeFieldManager | None = None
+        self.diary_table_connector: DiaryTableConnector | None = None
+        self.time_field_coordinator: TimeFieldCoordinator | None = None
 
         self.setup_ui()
 
@@ -437,13 +437,13 @@ class AnalysisTab(QWidget):
             load_markers_callback=self.marker_ops.load_saved_markers,
             get_tab_dropdown_fn=lambda: self.activity_source_dropdown,
         )
-        self.diary_table_manager = DiaryTableManager(
+        self.diary_table_connector = DiaryTableConnector(
             store=self.store,
             data_service=self.services.data_service,
-            diary_manager=self.services.diary_manager,
+            diary_coordinator=self.services.diary_coordinator,
             diary_table_widget=self.diary_table_widget,
         )
-        self.time_field_manager = TimeFieldManager(
+        self.time_field_coordinator = TimeFieldCoordinator(
             store=self.store,
             onset_time_input=self.onset_time_input,
             offset_time_input=self.offset_time_input,
@@ -726,7 +726,7 @@ class AnalysisTab(QWidget):
         self.onset_time_input.setPlaceholderText("HH:MM")
         self.onset_time_input.setMaximumWidth(55)
         self.onset_time_input.setToolTip(TooltipText.ONSET_TIME_INPUT)
-        # Signal connections handled by TimeFieldManager
+        # Signal connections handled by TimeFieldCoordinator
         self.onset_time_input.setStyleSheet(f"""
             QLineEdit {{
                 padding: 4px;
@@ -745,7 +745,7 @@ class AnalysisTab(QWidget):
         self.offset_time_input.setPlaceholderText("HH:MM")
         self.offset_time_input.setMaximumWidth(55)
         self.offset_time_input.setToolTip(TooltipText.OFFSET_TIME_INPUT)
-        # Signal connections handled by TimeFieldManager
+        # Signal connections handled by TimeFieldCoordinator
         self.offset_time_input.setStyleSheet(f"""
             QLineEdit {{
                 padding: 4px;
@@ -1086,27 +1086,27 @@ class AnalysisTab(QWidget):
         """
         Update diary table with data for current participant.
 
-        Delegates to DiaryTableManager.
+        Delegates to DiaryTableConnector.
         """
         logger.info("=== UPDATE DIARY DISPLAY START ===")
-        logger.info(f"diary_table_manager exists: {self.diary_table_manager is not None}")
+        logger.info(f"diary_table_connector exists: {self.diary_table_connector is not None}")
         logger.info(f"diary_table_widget visible: {self.diary_table_widget.isVisible() if self.diary_table_widget else 'N/A'}")
         logger.info(f"Current participant ID: {self._get_current_participant_id()}")
 
-        if self.diary_table_manager:
+        if self.diary_table_connector:
             try:
-                self.diary_table_manager.update_diary_display()
+                self.diary_table_connector.update_diary_display()
                 logger.info(f"After update - diary_table_widget visible: {self.diary_table_widget.isVisible()}")
                 logger.info("=== UPDATE DIARY DISPLAY COMPLETE ===")
             except Exception as e:
                 logger.exception(f"=== UPDATE DIARY DISPLAY FAILED: {e} ===")
         else:
-            logger.warning("=== UPDATE DIARY DISPLAY SKIPPED: No diary_table_manager ===")
+            logger.warning("=== UPDATE DIARY DISPLAY SKIPPED: No diary_table_connector ===")
 
     def _on_diary_row_clicked(self, item) -> None:
-        """Handle click on diary table row - delegates to DiaryTableManager."""
-        if self.diary_table_manager:
-            self.diary_table_manager.on_diary_row_clicked(item)
+        """Handle click on diary table row - delegates to DiaryTableConnector."""
+        if self.diary_table_connector:
+            self.diary_table_connector.on_diary_row_clicked(item)
 
     def save_splitter_states(self) -> tuple[bytes, bytes, bytes]:
         """Save splitter states for layout persistence."""

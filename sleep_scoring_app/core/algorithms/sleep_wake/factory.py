@@ -37,8 +37,8 @@ from .cole_kripke import ColeKripkeAlgorithm
 from .sadeh import SadehAlgorithm
 
 if TYPE_CHECKING:
+    from sleep_scoring_app.core.dataclasses import AppConfig
     from sleep_scoring_app.core.pipeline import AlgorithmDataRequirement
-    from sleep_scoring_app.utils.config import AppConfig
 
     from .protocol import SleepScoringAlgorithm
 
@@ -345,7 +345,6 @@ class AlgorithmFactory:
             AlgorithmDataRequirement.RAW_DATA
 
         """
-
         if algorithm_id not in cls._registry:
             return None
 

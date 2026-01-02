@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 from PyQt6.QtGui import QColor
 
 from sleep_scoring_app.core.constants import MarkerEndpoint, SleepMarkerEndpoint, TableDimensions
-from sleep_scoring_app.utils.table_helpers import update_marker_table, update_table_sleep_algorithm_header
+from sleep_scoring_app.ui.utils.table_helpers import update_marker_table, update_table_sleep_algorithm_header
 
 if TYPE_CHECKING:
     from collections.abc import Callable

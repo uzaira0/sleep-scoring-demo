@@ -41,22 +41,22 @@ from sleep_scoring_app.services.memory_service import (
 from sleep_scoring_app.services.nonwear_service import NonwearDataService
 from sleep_scoring_app.services.unified_data_service import UnifiedDataService
 from sleep_scoring_app.ui.analysis_tab import AnalysisTab
+from sleep_scoring_app.ui.connectors import connect_all_components
 from sleep_scoring_app.ui.coordinators import (
-    DiaryIntegrationManager,
+    DiaryIntegrationCoordinator,
     ImportUICoordinator,
-    SessionStateManager,
-    TimeFieldManager,
+    TimeFieldCoordinator,
     UIStateCoordinator,
 )
 from sleep_scoring_app.ui.data_settings_tab import DataSettingsTab
 from sleep_scoring_app.ui.export_tab import ExportTab
 from sleep_scoring_app.ui.file_navigation import FileNavigationManager
 from sleep_scoring_app.ui.marker_table import MarkerTableManager
+from sleep_scoring_app.ui.services import SessionStateService
 from sleep_scoring_app.ui.store import UIStore
-from sleep_scoring_app.ui.store_connectors import connect_all_components
 from sleep_scoring_app.ui.study_settings_tab import StudySettingsTab
+from sleep_scoring_app.ui.utils.config import ConfigManager
 from sleep_scoring_app.ui.window_state import WindowStateManager
-from sleep_scoring_app.utils.config import ConfigManager
 
 if TYPE_CHECKING:
     from PyQt6.QtGui import QCloseEvent
@@ -169,7 +169,7 @@ class SleepScoringMainWindow(QMainWindow):
         self.state_manager = WindowStateManager(
             store=self.store, navigation=nav, marker_ops=marker_ops, app_state=app_state, services=services, parent=parent
         )
-        self.session_manager = SessionStateManager()
+        self.session_service = SessionStateService()
         self.nav_manager = FileNavigationManager(store=self.store, navigation=nav, app_state=app_state, services=services, parent=parent)
         self.table_manager = MarkerTableManager(
             store=self.store,
@@ -180,8 +180,10 @@ class SleepScoringMainWindow(QMainWindow):
             parent=parent,
             get_sleep_algorithm_name=self.get_sleep_algorithm_display_name,
         )
-        self.diary_manager = DiaryIntegrationManager(store=self.store, navigation=nav, marker_ops=marker_ops, services=services, parent=parent)
-        # Note: time_manager initialized after UI setup (needs time input fields)
+        self.diary_coordinator = DiaryIntegrationCoordinator(
+            store=self.store, navigation=nav, marker_ops=marker_ops, services=services, parent=parent
+        )
+        # Note: time_coordinator initialized after UI setup (needs time input fields)
 
         # Initialize coordinators
         self.import_coordinator = ImportUICoordinator(parent, services=services)
@@ -386,10 +388,10 @@ class SleepScoringMainWindow(QMainWindow):
         from sleep_scoring_app.ui.store import Actions
 
         # 1. Restore window geometry (standard Qt stuff)
-        self.session_manager.restore_window_geometry(self)
+        self.session_service.restore_window_geometry(self)
 
         # 2. Restore file selection
-        last_file_path = self.session_manager.get_current_file()
+        last_file_path = self.session_service.get_current_file()
         if last_file_path and self.available_files:
             logger.info(f"MAIN WINDOW: Attempting to restore file: {last_file_path}")
             # Find the matching FileInfo (dataclass, not dict)
@@ -418,7 +420,7 @@ class SleepScoringMainWindow(QMainWindow):
                     logger.warning("MAIN WINDOW: No dates found for restored file")
 
                 # Restore date index (only if we have dates)
-                date_index = self.session_manager.get_current_date_index()
+                date_index = self.session_service.get_current_date_index()
                 # Validate index against actual available dates
                 if new_dates and 0 <= date_index < len(new_dates):
                     logger.info(f"MAIN WINDOW: Restoring date index to {date_index}")
@@ -427,26 +429,26 @@ class SleepScoringMainWindow(QMainWindow):
                 logger.info("MAIN WINDOW: Last file no longer exists in available files")
 
         # 3. Restore view mode
-        view_mode = self.session_manager.get_view_mode()
+        view_mode = self.session_service.get_view_mode()
         logger.info(f"MAIN WINDOW: Restoring view mode to {view_mode}h")
         self.store.dispatch(Actions.view_mode_changed(view_mode))
 
         # 4. Restore tab
-        tab_index = self.session_manager.get_current_tab()
+        tab_index = self.session_service.get_current_tab()
         if 0 <= tab_index < self.tab_widget.count():
             self.tab_widget.setCurrentIndex(tab_index)
 
         # 5. Restore splitter layout states
         if self.analysis_tab:
-            states = self.session_manager.get_splitter_states()
+            states = self.session_service.get_splitter_states()
             self.analysis_tab.restore_splitter_states(*states)
 
         logger.info("MAIN WINDOW: _restore_session() COMPLETE")
 
     def _on_tab_changed(self, index: int) -> None:
         """Handle tab change - save to session."""
-        # session_manager is guaranteed to exist after __init__ Phase 2
-        self.session_manager.save_current_tab(index)
+        # session_service is guaranteed to exist after __init__ Phase 2
+        self.session_service.save_current_tab(index)
 
     def setup_ui(self) -> None:
         """Create the user interface."""
@@ -558,8 +560,8 @@ class SleepScoringMainWindow(QMainWindow):
         self.weekday_label = getattr(self.analysis_tab, "weekday_label", None)
         self.show_adjacent_day_markers_checkbox = getattr(self.analysis_tab, "show_adjacent_day_markers_checkbox", None)
 
-        # Initialize time field manager now that UI fields are available
-        self.time_manager = TimeFieldManager(
+        # Initialize time field coordinator now that UI fields are available
+        self.time_coordinator = TimeFieldCoordinator(
             store=self.store,
             onset_time_input=self.onset_time_input,
             offset_time_input=self.offset_time_input,
@@ -644,7 +646,7 @@ class SleepScoringMainWindow(QMainWindow):
         # The data service handles all state updates atomically including UI button states
         self.data_service.set_view_mode(hours)
         # Save to session
-        self.session_manager.save_view_mode(hours)
+        self.session_service.save_view_mode(hours)
 
     def change_view_range_only(self, hours) -> None:
         """Change view range without reloading data - preserves sleep markers."""
@@ -869,7 +871,7 @@ class SleepScoringMainWindow(QMainWindow):
             self.analysis_tab.update_activity_source_dropdown()
 
         # 4. Update session
-        self.session_manager.save_current_file(self.selected_file)
+        self.session_service.save_current_file(self.selected_file)
 
         # 5. Update compatibility checking
         if file_info.source_path:
@@ -889,7 +891,7 @@ class SleepScoringMainWindow(QMainWindow):
             self.store.dispatch(Actions.date_selected(index))
 
             # Save to session
-            self.session_manager.save_current_date_index(index)
+            self.session_service.save_current_date_index(index)
 
     def _check_unsaved_markers_before_navigation(self) -> bool:
         """
@@ -1926,7 +1928,7 @@ class SleepScoringMainWindow(QMainWindow):
 
     def _load_diary_data_for_file(self) -> None:
         """Load diary data for the currently selected file."""
-        self.diary_manager.load_diary_data_for_file()
+        self.diary_coordinator.load_diary_data_for_file()
 
     def auto_save_current_markers(self) -> None:
         """
@@ -2334,9 +2336,9 @@ class SleepScoringMainWindow(QMainWindow):
             # Auto-save current markers (legacy - will be replaced by autosave coordinator)
             self.auto_save_current_markers()
 
-            # Save session state - session_manager guaranteed after Phase 2
+            # Save session state - session_service guaranteed after Phase 2
             current_file = Path(self.selected_file).name if self.selected_file else None
-            self.session_manager.save_all(
+            self.session_service.save_all(
                 current_file=current_file,
                 date_index=self.current_date_index,
                 view_mode=self.current_view_mode,
@@ -2347,7 +2349,7 @@ class SleepScoringMainWindow(QMainWindow):
             # Save splitter layout states
             if self.analysis_tab:
                 states = self.analysis_tab.save_splitter_states()
-                self.session_manager.save_splitter_states(*states)
+                self.session_service.save_splitter_states(*states)
 
             # Clean up autosave coordinator
             if self.autosave_coordinator is not None:  # Guaranteed after Phase 2

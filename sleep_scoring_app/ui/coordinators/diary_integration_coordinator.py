@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Diary Integration Manager for Sleep Scoring Application.
+Diary Integration Coordinator for Sleep Scoring Application.
 
 Manages diary data loading and marker population.
 """
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class DiaryIntegrationManager:
+class DiaryIntegrationCoordinator:
     """
     Manages diary data integration with the main window.
 
@@ -53,7 +53,7 @@ class DiaryIntegrationManager:
         parent: MainWindowProtocol,
     ) -> None:
         """
-        Initialize the diary integration manager.
+        Initialize the diary integration coordinator.
 
         Args:
             store: The UI store
@@ -69,7 +69,7 @@ class DiaryIntegrationManager:
         self.services = services
         self.main_window = parent  # Keep for Qt-level access (dialogs, plot_widget)
 
-        logger.info("DiaryIntegrationManager initialized with decoupled interfaces")
+        logger.info("DiaryIntegrationCoordinator initialized with decoupled interfaces")
 
     def load_diary_data_for_file(self) -> None:
         """Load diary data for the currently selected file."""

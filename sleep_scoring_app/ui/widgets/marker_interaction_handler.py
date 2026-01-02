@@ -58,7 +58,6 @@ class MarkerInteractionHandler:
         QTimer.singleShot(50, lambda: setattr(self.plot_widget, "_marker_click_in_progress", False))
 
         if hasattr(line, "period") and line.period:  # KEEP: Duck typing plot/marker attributes
-
             renderer: PlotMarkerRenderer = self.plot_widget.marker_renderer
             old_selection = renderer.selected_marker_set_index
 
@@ -150,7 +149,6 @@ class MarkerInteractionHandler:
 
         # Update the period with new timestamp
         if hasattr(line, "period") and line.period:  # KEEP: Duck typing plot/marker attributes
-
             renderer: PlotMarkerRenderer = self.plot_widget.marker_renderer
 
             if line.marker_type == SleepMarkerEndpoint.ONSET:
@@ -203,7 +201,6 @@ class MarkerInteractionHandler:
         QTimer.singleShot(50, lambda: setattr(self.plot_widget, "_marker_click_in_progress", False))
 
         if hasattr(line, "period") and line.period:  # KEEP: Duck typing plot/marker attributes
-
             renderer: PlotMarkerRenderer = self.plot_widget.marker_renderer
             old_selection = renderer.selected_nonwear_marker_index
 
@@ -244,7 +241,6 @@ class MarkerInteractionHandler:
         snapped_ts = self.plot_widget.x_data[new_idx]
 
         if hasattr(line, "period") and line.period:  # KEEP: Duck typing plot/marker attributes
-
             renderer: PlotMarkerRenderer = self.plot_widget.marker_renderer
 
             # Auto-select the marker being dragged (same as sleep)
@@ -308,7 +304,6 @@ class MarkerInteractionHandler:
         line.setPos(snapped_pos)
 
         if hasattr(line, "period") and line.period:  # KEEP: Duck typing plot/marker attributes
-
             renderer: PlotMarkerRenderer = self.plot_widget.marker_renderer
 
             # Store original values for potential revert
@@ -355,7 +350,6 @@ class MarkerInteractionHandler:
 
         Mirrors _deselect_sleep_markers exactly for symmetry.
         """
-
         renderer: PlotMarkerRenderer = self.plot_widget.marker_renderer
         # Set selected index to 0 (no selection) - this is a special value meaning none selected
         renderer.selected_nonwear_marker_index = 0
@@ -364,7 +358,6 @@ class MarkerInteractionHandler:
 
     def _deselect_sleep_markers(self) -> None:
         """Deselect all sleep markers (make them all unselected visually)."""
-
         renderer: PlotMarkerRenderer = self.plot_widget.marker_renderer
         # Set selected index to 0 (no selection) - this is a special value meaning none selected
         renderer.selected_marker_set_index = 0

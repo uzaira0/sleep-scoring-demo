@@ -42,13 +42,13 @@ from sleep_scoring_app.io.sources.loader_factory import DataSourceFactory
 from sleep_scoring_app.ui.dialogs import ColumnMappingDialog
 
 if TYPE_CHECKING:
+    from sleep_scoring_app.core.dataclasses import AppConfig
     from sleep_scoring_app.ui.protocols import (
         AppStateInterface,
         MainWindowProtocol,
         ServiceContainer,
     )
     from sleep_scoring_app.ui.store import UIStore
-    from sleep_scoring_app.utils.config import AppConfig
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ class DataSettingsTab(QWidget):
 
     def __init__(self, store: UIStore, app_state: AppStateInterface, services: ServiceContainer, parent: MainWindowProtocol) -> None:
         """Initialize the data settings tab presentational shell."""
-        super().__init__(cast(QWidget, parent))
+        super().__init__(cast("QWidget", parent))
         self.store = store
         self.app_state = app_state
         self.services = services
@@ -81,7 +81,8 @@ class DataSettingsTab(QWidget):
     def _config(self) -> AppConfig:
         """Safely access config, raising if unavailable."""
         if (c := self.services.config_manager.config) is None:
-            raise RuntimeError("Config not loaded")
+            msg = "Config not loaded"
+            raise RuntimeError(msg)
         return c
 
     @property

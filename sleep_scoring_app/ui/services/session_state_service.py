@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Session state manager using QSettings (platform-native storage).
+Session state service using QSettings (platform-native storage).
 This is the PRIMARY session recovery mechanism.
 
 Also provides JSON backup for portability and recovery.
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class SessionStateManager:
+class SessionStateService:
     r"""
     Manages session state using QSettings (platform-native storage).
 
@@ -51,7 +51,7 @@ class SessionStateManager:
     def __init__(self) -> None:
         self._settings = QSettings("SleepResearch", "SleepScoringApp")
         logger.debug(
-            "SessionStateManager initialized, storage: %s",
+            "SessionStateService initialized, storage: %s",
             self._settings.fileName(),
         )
 

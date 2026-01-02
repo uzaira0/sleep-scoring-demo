@@ -103,7 +103,7 @@ def app_environment(qtbot, tmp_path):
     """Set up complete application environment."""
     import sleep_scoring_app.data.database as db_module
     from sleep_scoring_app.core.dataclasses import AppConfig
-    from sleep_scoring_app.utils.config import ConfigManager
+    from sleep_scoring_app.ui.utils.config import ConfigManager
 
     # Reset database
     db_module._database_initialized = False

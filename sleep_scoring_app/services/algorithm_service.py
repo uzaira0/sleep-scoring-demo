@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from sleep_scoring_app.core.algorithms.nonwear.protocol import NonwearDetectionAlgorithm
     from sleep_scoring_app.core.algorithms.sleep_period.protocol import SleepPeriodDetector
     from sleep_scoring_app.core.algorithms.sleep_wake.protocol import SleepScoringAlgorithm
-    from sleep_scoring_app.utils.config import AppConfig
+    from sleep_scoring_app.core.dataclasses import AppConfig
 
 logger = logging.getLogger(__name__)
 

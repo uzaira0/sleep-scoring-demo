@@ -35,7 +35,7 @@ from PyQt6.QtCore import QTimer
 from sleep_scoring_app.core.dataclasses_markers import DailyNonwearMarkers, DailySleepMarkers
 from sleep_scoring_app.data.database import DatabaseManager
 from sleep_scoring_app.ui.store import UIState, UIStore
-from sleep_scoring_app.utils.config import ConfigManager
+from sleep_scoring_app.ui.utils.config import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -361,11 +361,11 @@ class AutosaveCoordinator:
         """Backup all QSettings to JSON file for portability."""
         try:
             logger.info("Starting settings backup to JSON")
-            from sleep_scoring_app.ui.coordinators.session_state_manager import SessionStateManager
+            from sleep_scoring_app.ui.services import SessionStateService
 
-            # Reuse session manager instance (lazy initialization)
+            # Reuse session service instance (lazy initialization)
             if self._session_manager is None:
-                self._session_manager = SessionStateManager()
+                self._session_manager = SessionStateService()
             result = self._session_manager.backup_to_json()
             if result:
                 logger.info("Settings backup completed: %s", result)

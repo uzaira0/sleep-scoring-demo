@@ -152,7 +152,7 @@ class TestDataLoadingPaths:
 
         import inspect
 
-        from sleep_scoring_app.ui.store_connectors import NavigationConnector
+        from sleep_scoring_app.ui.connectors import NavigationConnector
 
         source = inspect.getsource(NavigationConnector._update_navigation)
 

@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import QApplication, QWidget
 from sleep_scoring_app.core.dataclasses import ParticipantInfo
 from sleep_scoring_app.data.database import DatabaseManager
 from sleep_scoring_app.services.unified_data_service import UnifiedDataService
-from sleep_scoring_app.utils.config import ConfigManager
+from sleep_scoring_app.ui.utils.config import ConfigManager
 
 # ============================================================================
 # TEST ISOLATION: Use separate database and QSettings for all tests

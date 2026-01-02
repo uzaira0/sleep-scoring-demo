@@ -18,7 +18,7 @@ _warned_no_patterns = False
 def _get_global_config():
     """Get config from ConfigManager if available (lazy import to avoid circular deps)."""
     try:
-        from sleep_scoring_app.utils.config import ConfigManager
+        from sleep_scoring_app.ui.utils.config import ConfigManager
 
         config_manager = ConfigManager()
         return config_manager.config

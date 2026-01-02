@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Diary Table Manager
+Diary Table Connector
 Manages diary table display and interaction.
 """
 
@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import QTableWidgetItem
 
 if TYPE_CHECKING:
     from sleep_scoring_app.services.protocols import UnifiedDataProtocol
-    from sleep_scoring_app.ui.coordinators.diary_integration_manager import DiaryIntegrationManager
+    from sleep_scoring_app.ui.coordinators.diary_integration_coordinator import DiaryIntegrationCoordinator
     from sleep_scoring_app.ui.store import UIStore
 
 logger = logging.getLogger(__name__)
@@ -46,23 +46,25 @@ class DiaryTableColumn(StrEnum):
     NONWEAR_3_REASON = "nonwear_3_reason"
 
 
-class DiaryTableManager:
+class DiaryTableConnector:
     """Manages diary table operations."""
 
-    def __init__(self, store: "UIStore", data_service: "UnifiedDataProtocol", diary_manager: "DiaryIntegrationManager | None", diary_table_widget) -> None:
+    def __init__(
+        self, store: "UIStore", data_service: "UnifiedDataProtocol", diary_coordinator: "DiaryIntegrationCoordinator | None", diary_table_widget
+    ) -> None:
         """
-        Initialize the diary table manager.
+        Initialize the diary table connector.
 
         Args:
             store: The UI store
             data_service: The unified data service
-            diary_manager: The diary integration manager
+            diary_coordinator: The diary integration coordinator
             diary_table_widget: The diary table widget container
 
         """
         self.store = store
         self.data_service = data_service
-        self.diary_manager = diary_manager
+        self.diary_coordinator = diary_coordinator
         self.diary_table_widget = diary_table_widget
 
     def update_diary_display(self) -> None:
@@ -72,7 +74,7 @@ class DiaryTableManager:
         Hides the diary section completely if no diary data is available
         for the current participant.
         """
-        logger.info("=== DiaryTableManager.update_diary_display START ===")
+        logger.info("=== DiaryTableConnector.update_diary_display START ===")
 
         if not self.data_service:
             logger.warning("No data_service - hiding diary section")
@@ -83,10 +85,10 @@ class DiaryTableManager:
             # First check if participant has any diary data at all
             # Get current file from store - service is headless
             current_file = self.store.state.current_file if self.store else None
-            logger.info(f"DiaryTableManager: store.current_file = {current_file}")
+            logger.info(f"DiaryTableConnector: store.current_file = {current_file}")
 
             if not current_file:
-                logger.info("DiaryTableManager: No current file - hiding section")
+                logger.info("DiaryTableConnector: No current file - hiding section")
                 self._hide_diary_section()
                 return
 
@@ -95,15 +97,15 @@ class DiaryTableManager:
 
             if not has_data:
                 # Hide the entire diary section if no diary data for this participant
-                logger.info("DiaryTableManager: No diary data - hiding section")
+                logger.info("DiaryTableConnector: No diary data - hiding section")
                 self._hide_diary_section()
                 return
 
             # Show the diary section since participant has data
-            logger.info("DiaryTableManager: HAS diary data - SHOWING section")
+            logger.info("DiaryTableConnector: HAS diary data - SHOWING section")
             self._show_diary_section()
             logger.info(
-                f"DiaryTableManager: After _show_diary_section, widget visible: {self.diary_table_widget.isVisible() if self.diary_table_widget else 'N/A'}"
+                f"DiaryTableConnector: After _show_diary_section, widget visible: {self.diary_table_widget.isVisible() if self.diary_table_widget else 'N/A'}"
             )
 
             # Load diary data for current file
@@ -116,10 +118,10 @@ class DiaryTableManager:
 
             # Display the diary data
             self._populate_diary_table(diary_entries)
-            logger.info("=== DiaryTableManager.update_diary_display COMPLETE ===")
+            logger.info("=== DiaryTableConnector.update_diary_display COMPLETE ===")
 
         except Exception as e:
-            logger.exception(f"=== DiaryTableManager.update_diary_display FAILED: {e} ===")
+            logger.exception(f"=== DiaryTableConnector.update_diary_display FAILED: {e} ===")
             self._clear_diary_table()
 
     def _populate_diary_table(self, diary_entries) -> None:
@@ -240,11 +242,11 @@ class DiaryTableManager:
 
                 if column_type in marker_columns:
                     logger.debug(f"Column {column_type} is a marker column, setting markers from diary")
-                    # Use DiaryIntegrationManager for marker placement
-                    if self.diary_manager:
-                        self.diary_manager.set_markers_from_diary_column(row, column_type)
+                    # Use DiaryIntegrationCoordinator for marker placement
+                    if self.diary_coordinator:
+                        self.diary_coordinator.set_markers_from_diary_column(row, column_type)
                     else:
-                        logger.warning("DiaryIntegrationManager not available")
+                        logger.warning("DiaryIntegrationCoordinator not available")
                 else:
                     logger.warning(f"Clicked on non-marker column: {column_type}")
             else:

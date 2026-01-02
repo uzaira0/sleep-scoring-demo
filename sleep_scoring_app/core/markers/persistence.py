@@ -8,7 +8,7 @@ injected via dependency injection to ensure consistent save behavior.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from sleep_scoring_app.core.constants import AlgorithmType
 from sleep_scoring_app.core.markers.protocol import (
@@ -18,9 +18,11 @@ from sleep_scoring_app.core.markers.protocol import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from datetime import datetime
 
     from sleep_scoring_app.core.dataclasses import SleepMetrics
+    from sleep_scoring_app.core.dataclasses_markers import DailyNonwearMarkers
     from sleep_scoring_app.data.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
@@ -225,11 +227,10 @@ class NonwearMarkerPersistence(MarkerPersistence):
         """
         from typing import cast
 
-        from sleep_scoring_app.core.dataclasses_markers import DailyNonwearMarkers
         from sleep_scoring_app.core.exceptions import DatabaseError, ErrorCodes
 
         # Cast to concrete type - the database expects DailyNonwearMarkers
-        nonwear_markers = cast(DailyNonwearMarkers, markers)
+        nonwear_markers = cast("DailyNonwearMarkers", markers)
 
         try:
             self._db_manager.save_manual_nonwear_markers(
