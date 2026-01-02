@@ -174,7 +174,6 @@ def mock_database_manager(test_db_path):
     mock_db.db_path = test_db_path
     mock_db.get_database_stats.return_value = {"unique_files": 5, "total_records": 150, "autosave_records": 10}
     mock_db.load_sleep_metrics.return_value = []
-    mock_db.load_autosave_metrics.return_value = None
     return mock_db
 
 

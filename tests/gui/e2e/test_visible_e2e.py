@@ -127,8 +127,8 @@ def visible_main_window(qtbot, tmp_path, test_data_folder, temp_db_path):
     # Patch DatabaseManager to use temp path
     original_init = db_module.DatabaseManager.__init__
 
-    def patched_init(self, db_path=None):
-        original_init(self, db_path=str(temp_db_path))
+    def patched_init(self, db_path=None, resource_manager=None):
+        original_init(self, db_path=str(temp_db_path), resource_manager=resource_manager)
 
     # Patch ConfigManager to use temp directories
     from sleep_scoring_app.core.dataclasses import AppConfig

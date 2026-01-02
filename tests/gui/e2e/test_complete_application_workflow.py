@@ -102,8 +102,8 @@ def test_environment(qtbot, tmp_path):
 
     original_init = db_module.DatabaseManager.__init__
 
-    def patched_init(self, db_path_arg=None):
-        original_init(self, db_path=str(db_path))
+    def patched_init(self, db_path_arg=None, resource_manager=None):
+        original_init(self, db_path=str(db_path), resource_manager=resource_manager)
 
     with patch.object(db_module.DatabaseManager, "__init__", patched_init):
         with patch.object(ConfigManager, "is_config_valid", return_value=True):
