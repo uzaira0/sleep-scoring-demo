@@ -689,11 +689,11 @@ class TestLoadSleepMarkers:
         loaded = mock_marker_service.load("file.csv", "2024-01-15")
 
         assert loaded is sample_daily_sleep_markers
-        mock_marker_service._db.fetch_one.assert_not_called()
+        mock_marker_service._db.get_sleep_metrics_by_filename_and_date.assert_not_called()
 
     def test_load_returns_none_when_not_found(self, mock_marker_service: MarkerService):
         """Returns None when no markers exist."""
-        mock_marker_service._db.fetch_one.return_value = None
+        mock_marker_service._db.get_sleep_metrics_by_filename_and_date.return_value = None
 
         loaded = mock_marker_service.load("nonexistent.csv", "2024-01-15")
 
@@ -701,15 +701,15 @@ class TestLoadSleepMarkers:
 
     def test_load_queries_database_on_cache_miss(self, mock_marker_service: MarkerService):
         """Queries database when cache is empty."""
-        mock_marker_service._db.fetch_one.return_value = None
+        mock_marker_service._db.get_sleep_metrics_by_filename_and_date.return_value = None
 
         mock_marker_service.load("file.csv", "2024-01-15")
 
-        mock_marker_service._db.fetch_one.assert_called_once()
+        mock_marker_service._db.get_sleep_metrics_by_filename_and_date.assert_called_once()
 
     def test_load_accepts_date_object(self, mock_marker_service: MarkerService):
         """Accepts date object in addition to string."""
-        mock_marker_service._db.fetch_one.return_value = None
+        mock_marker_service._db.get_sleep_metrics_by_filename_and_date.return_value = None
 
         loaded = mock_marker_service.load("file.csv", date(2024, 1, 15))
 
@@ -748,7 +748,9 @@ class TestLoadNonwearMarkers:
 
     def test_load_nonwear_returns_none_when_not_found(self, mock_marker_service: MarkerService):
         """Returns None when no nonwear markers exist."""
-        mock_marker_service._db.fetch_one.return_value = None
+        # load_manual_nonwear_markers returns empty DailyNonwearMarkers when not found
+        empty_markers = DailyNonwearMarkers()
+        mock_marker_service._db.load_manual_nonwear_markers.return_value = empty_markers
 
         loaded = mock_marker_service.load_nonwear("nonexistent.csv", "2024-01-15")
 

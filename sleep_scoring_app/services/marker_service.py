@@ -336,23 +336,13 @@ class MarkerService:
         if cache_key in self._cache:
             return self._cache[cache_key]  # type: ignore
 
-        # Query database
-        row = self._db.fetch_one(
-            f"""
-            SELECT markers_json FROM {self._db._validate_table_name(DatabaseTable.SLEEP_MARKERS_EXTENDED)}
-            WHERE filename = ? AND analysis_date = ?
-            """,
-            (filename, date_str),
-        )
+        # Query database via DatabaseManager
+        sleep_metrics = self._db.get_sleep_metrics_by_filename_and_date(filename, date_str)
 
-        if row is None:
+        if sleep_metrics is None:
             return None
 
-        # Deserialize using json.loads (NOT eval)
-        from sleep_scoring_app.core.dataclasses import DailySleepMarkers
-
-        data = json.loads(row[0])
-        markers = DailySleepMarkers.from_dict(data)
+        markers = sleep_metrics.daily_sleep_markers
         self._cache[cache_key] = markers
         return markers
 
@@ -376,25 +366,17 @@ class MarkerService:
         if cache_key in self._cache:
             return self._cache[cache_key]  # type: ignore
 
-        # Query database
-        row = self._db.fetch_one(
-            f"""
-            SELECT markers_json FROM {self._db._validate_table_name(DatabaseTable.MANUAL_NWT_MARKERS)}
-            WHERE filename = ? AND sleep_date = ?
-            """,
-            (filename, date_str),
-        )
-
-        if row is None:
+        # Query database via DatabaseManager
+        try:
+            markers = self._db.load_manual_nonwear_markers(filename, date_str)
+            # load_manual_nonwear_markers returns empty DailyNonwearMarkers if not found
+            if markers and markers.has_any_markers():
+                self._cache[cache_key] = markers
+                return markers
             return None
-
-        # Deserialize using json.loads (NOT eval)
-        from sleep_scoring_app.core.dataclasses_markers import DailyNonwearMarkers
-
-        data = json.loads(row[0])
-        markers = DailyNonwearMarkers.from_dict(data)
-        self._cache[cache_key] = markers
-        return markers
+        except Exception:
+            logger.debug("No nonwear markers found for %s on %s", filename, date_str)
+            return None
 
     def load_adjacent_day_markers(
         self,
