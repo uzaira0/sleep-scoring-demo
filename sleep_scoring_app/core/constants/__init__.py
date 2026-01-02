@@ -72,9 +72,7 @@ from .io import (
     sanitize_filename_component,
 )
 
-# NOTE: UI constants moved to sleep_scoring_app.ui.constants
-# Import from there instead. These re-exports maintained for backwards compatibility
-# but will be removed in a future version.
+# UI constants
 from .ui import (
     AlgorithmHelpText,
     AlgorithmTooltip,
@@ -124,7 +122,7 @@ __all__ = [
     # I/O constants
     "ActivityColumn",
     "ActivityDataPreference",
-    # UI constants (also available via sleep_scoring_app.ui.constants)
+    # UI constants
     "AlgorithmHelpText",
     # Algorithm constants
     "AlgorithmOutputColumn",
