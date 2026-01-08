@@ -254,3 +254,76 @@ class ResolvedAnnotation(Base):
     resolution_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (Index("ix_resolved_annotations_file_date", "file_id", "analysis_date", unique=True),)
+
+
+class DiaryEntry(Base):
+    """
+    Sleep diary entry for a participant/date.
+
+    Stores self-reported sleep times from a diary CSV for comparison
+    with actigraphy-derived markers.
+    """
+
+    __tablename__ = "diary_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    file_id: Mapped[int] = mapped_column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
+    analysis_date: Mapped[datetime] = mapped_column(Date, nullable=False)
+
+    # Self-reported times (stored as HH:MM strings or datetime)
+    bed_time: Mapped[str | None] = mapped_column(String(10), nullable=True)  # "22:30"
+    wake_time: Mapped[str | None] = mapped_column(String(10), nullable=True)  # "07:15"
+    lights_out: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    got_up: Mapped[str | None] = mapped_column(String(10), nullable=True)
+
+    # Optional quality metrics
+    sleep_quality: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 1-5 or 1-10 scale
+    time_to_fall_asleep_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    number_of_awakenings: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Import metadata
+    imported_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    imported_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    # Relationships
+    file: Mapped[File] = relationship("File")
+
+    __table_args__ = (Index("ix_diary_entries_file_date", "file_id", "analysis_date", unique=True),)
+
+
+class UserSettings(Base):
+    """
+    User-specific settings and preferences.
+
+    Persists settings that were previously only stored in localStorage.
+    """
+
+    __tablename__ = "user_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
+
+    # Study settings
+    sleep_detection_rule: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    night_start_hour: Mapped[str | None] = mapped_column(String(10), nullable=True)  # "21:00"
+    night_end_hour: Mapped[str | None] = mapped_column(String(10), nullable=True)  # "09:00"
+
+    # Data settings
+    device_preset: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    epoch_length_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    skip_rows: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Display preferences
+    preferred_display_column: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    view_mode_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 24 or 48
+    default_algorithm: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    # All other settings as JSON for flexibility
+    extra_settings_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    user: Mapped[User] = relationship("User")

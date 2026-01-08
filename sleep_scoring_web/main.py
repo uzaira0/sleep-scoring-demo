@@ -84,13 +84,15 @@ async def root() -> dict[str, str]:
 
 
 # Include routers
-from sleep_scoring_web.api import activity, auth, export, files, markers
+from sleep_scoring_web.api import activity, auth, diary, export, files, markers, settings as settings_router
 
 app.include_router(auth.router, prefix=f"{settings.api_v1_prefix}/auth", tags=["auth"])
 app.include_router(files.router, prefix=f"{settings.api_v1_prefix}/files", tags=["files"])
 app.include_router(activity.router, prefix=f"{settings.api_v1_prefix}/activity", tags=["activity"])
 app.include_router(markers.router, prefix=f"{settings.api_v1_prefix}/markers", tags=["markers"])
 app.include_router(export.router, prefix=f"{settings.api_v1_prefix}/export", tags=["export"])
+app.include_router(diary.router, prefix=f"{settings.api_v1_prefix}", tags=["diary"])
+app.include_router(settings_router.router, prefix=f"{settings.api_v1_prefix}", tags=["settings"])
 
 
 if __name__ == "__main__":
