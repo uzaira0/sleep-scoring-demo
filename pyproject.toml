@@ -44,6 +44,21 @@ gui = [
 # local = [
 #     "gt3x-rs>=0.1.0",
 # ]
+# Web dependencies - required for the FastAPI web application
+web = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "asyncpg>=0.29.0",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "python-multipart>=0.0.9",
+    "aiofiles>=23.0.0",
+    "watchdog>=4.0.0",
+    "polars>=0.20.0",
+]
 # Development dependencies - testing and code quality tools
 dev = [
     "pytest>=7.0.0",
@@ -67,7 +82,7 @@ sleep-scoring-demo = "sleep_scoring_app.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["sleep_scoring_app*"]
+include = ["sleep_scoring_app*", "sleep_scoring_web*"]
 
 
 

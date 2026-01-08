@@ -2,26 +2,26 @@
 Marker API endpoints for sleep and nonwear marker management.
 
 Provides CRUD operations for markers with optimistic update support.
-"""
 
-from __future__ import annotations
+Note: We intentionally avoid `from __future__ import annotations` here
+because FastAPI's dependency injection needs actual types, not string
+annotations. Using Annotated types requires runtime resolution.
+"""
 
 import calendar
 from datetime import date, datetime, timedelta
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, delete, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
+from sleep_scoring_web.api.deps import CurrentUser, DbSession
 from sleep_scoring_web.db.models import File as FileModel
 from sleep_scoring_web.db.models import Marker, RawActivityData, SleepMetric, UserAnnotation
 from sleep_scoring_web.schemas import ManualNonwearPeriod, MarkerResponse, MarkerUpdateRequest, SleepMetrics, SleepPeriod
 from sleep_scoring_web.schemas.enums import AlgorithmType, MarkerCategory, MarkerLimits, MarkerType, VerificationStatus
-
-if TYPE_CHECKING:
-    from sleep_scoring_web.api.deps import CurrentUser, DbSession
 
 router = APIRouter()
 

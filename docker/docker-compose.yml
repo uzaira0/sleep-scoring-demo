@@ -1,0 +1,143 @@
+# =============================================================================
+# Sleep Scoring Web Application - Docker Compose
+# =============================================================================
+#
+# Port Assignments (chosen to avoid conflicts with monorepo services):
+#   5434  - PostgreSQL (dedicated instance)
+#   8500  - Backend API (FastAPI)
+#   8501  - Frontend (Nginx + React)
+#
+# Ports in use elsewhere in monorepo (DO NOT USE):
+#   3000-3002  - Dagster, Grafana, Screenshot Annotator
+#   5432-5433  - PostgreSQL instances
+#   6379       - Redis
+#   8000-8002  - Various backend APIs
+#   8080-8083  - Label Studio, Adminer, etc.
+#   8765       - iOS Screenshot Cropper
+#   8888       - Jupyter Lab
+#   9090       - Prometheus
+#
+# Usage:
+#   cd docker
+#   docker compose up -d              # Start all services
+#   docker compose up -d --build      # Rebuild and start
+#   docker compose down               # Stop all services
+#   docker compose logs -f backend    # Follow backend logs
+#
+# =============================================================================
+
+name: sleep-scoring-web
+
+services:
+  # ===========================================================================
+  # Database
+  # ===========================================================================
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: sleep-scoring-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sleepscoring}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sleepscoring_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-sleep_scoring}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5434}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sleepscoring}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - sleep-scoring-network
+
+  # ===========================================================================
+  # Backend API
+  # ===========================================================================
+
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/backend/Dockerfile
+    container_name: sleep-scoring-backend
+    environment:
+      # Database
+      USE_SQLITE: "false"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-sleepscoring}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sleepscoring_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-sleep_scoring}
+
+      # Authentication
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production-use-32-char-key}
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+
+      # Application
+      PYTHONUNBUFFERED: 1
+      DEBUG: ${DEBUG:-false}
+      CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost:8501"]}'
+    volumes:
+      # Mount data directory for CSV files to scan on startup
+      - ../data:/app/data
+      # Mount uploads directory for file uploads
+      - ../uploads:/app/uploads
+    ports:
+      - "${BACKEND_PORT:-8500}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - sleep-scoring-network
+
+  # ===========================================================================
+  # Frontend
+  # ===========================================================================
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/frontend/Dockerfile
+      args:
+        VITE_API_BASE_URL: /api/v1
+    container_name: sleep-scoring-frontend
+    ports:
+      - "${FRONTEND_PORT:-8501}:80"
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - sleep-scoring-network
+
+# =============================================================================
+# Networks
+# =============================================================================
+
+networks:
+  sleep-scoring-network:
+    driver: bridge
+    name: sleep-scoring-network
+
+# =============================================================================
+# Volumes
+# =============================================================================
+
+volumes:
+  postgres_data:
+    name: sleep-scoring-postgres-data

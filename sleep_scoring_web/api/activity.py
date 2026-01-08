@@ -1,0 +1,157 @@
+"""
+Activity data API endpoints.
+
+Provides endpoints for retrieving activity data in columnar format.
+
+Note: We intentionally avoid `from __future__ import annotations` here
+because FastAPI's dependency injection needs actual types, not string
+annotations. Using Annotated types requires runtime resolution.
+"""
+
+import calendar
+from datetime import date, datetime, timedelta
+
+from fastapi import APIRouter, HTTPException, Query, status
+from sqlalchemy import and_, select
+
+from sleep_scoring_web.api.deps import CurrentUser, DbSession
+from sleep_scoring_web.db.models import File as FileModel
+from sleep_scoring_web.db.models import RawActivityData
+from sleep_scoring_web.schemas import ActivityDataColumnar, ActivityDataResponse
+
+router = APIRouter()
+
+
+def naive_to_unix(dt: datetime) -> float:
+    """
+    Convert naive datetime to Unix timestamp WITHOUT timezone interpretation.
+
+    Uses calendar.timegm which treats the datetime as UTC without conversion.
+    This ensures that "12:00" in the database displays as "12:00" to the user,
+    regardless of server or client timezone.
+    """
+    return float(calendar.timegm(dt.timetuple()))
+
+
+@router.get("/{file_id}/{analysis_date}", response_model=ActivityDataResponse)
+async def get_activity_data(
+    file_id: int,
+    analysis_date: date,
+    db: DbSession,
+    current_user: CurrentUser,
+    view_hours: int = Query(default=24, ge=12, le=48, description="Hours of data to return (12-48)"),
+) -> ActivityDataResponse:
+    """
+    Get activity data for a specific file and date.
+
+    Returns data in columnar format for efficient transfer.
+    The view window starts from analysis_date at 12:00 (noon) and extends for view_hours.
+    """
+    # Verify file exists
+    result = await db.execute(select(FileModel).where(FileModel.id == file_id))
+    file = result.scalar_one_or_none()
+
+    if not file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found",
+        )
+
+    # Calculate time window based on view mode (matches desktop app logic):
+    # - 24hr view: noon-to-noon (12:00 PM current day to 12:00 PM next day)
+    # - 48hr view: midnight-to-midnight (00:00 current day to 00:00 two days later)
+    if view_hours == 48:
+        # 48hr view: midnight to midnight+48h
+        start_time = datetime.combine(analysis_date, datetime.min.time())
+        end_time = start_time + timedelta(hours=48)
+    else:
+        # 24hr view: noon to noon
+        start_time = datetime.combine(analysis_date, datetime.min.time()) + timedelta(hours=12)
+        end_time = start_time + timedelta(hours=24)
+
+    # Query activity data within time window
+    result = await db.execute(
+        select(RawActivityData)
+        .where(
+            and_(
+                RawActivityData.file_id == file_id,
+                RawActivityData.timestamp >= start_time,
+                RawActivityData.timestamp < end_time,
+            )
+        )
+        .order_by(RawActivityData.timestamp)
+    )
+    activity_rows = result.scalars().all()
+
+    # Convert to columnar format
+    timestamps: list[float] = []
+    axis_x: list[int] = []
+    axis_y: list[int] = []
+    axis_z: list[int] = []
+    vector_magnitude: list[int] = []
+
+    for row in activity_rows:
+        timestamps.append(naive_to_unix(row.timestamp))
+        axis_x.append(row.axis_x or 0)
+        axis_y.append(row.axis_y or 0)
+        axis_z.append(row.axis_z or 0)
+        vector_magnitude.append(row.vector_magnitude or 0)
+
+    columnar_data = ActivityDataColumnar(
+        timestamps=timestamps,
+        axis_x=axis_x,
+        axis_y=axis_y,
+        axis_z=axis_z,
+        vector_magnitude=vector_magnitude,
+    )
+
+    # Get available dates for navigation
+    from sqlalchemy import distinct, func
+
+    dates_result = await db.execute(
+        select(distinct(func.date(RawActivityData.timestamp)))
+        .where(RawActivityData.file_id == file_id)
+        .order_by(func.date(RawActivityData.timestamp))
+    )
+    available_dates = [str(d) for d in dates_result.scalars().all()]
+
+    # Find current date index
+    current_date_str = str(analysis_date)
+    current_date_index = available_dates.index(current_date_str) if current_date_str in available_dates else 0
+
+    return ActivityDataResponse(
+        data=columnar_data,
+        available_dates=available_dates,
+        current_date_index=current_date_index,
+        file_id=file_id,
+        analysis_date=str(analysis_date),
+        view_start=naive_to_unix(start_time),
+        view_end=naive_to_unix(end_time),
+    )
+
+
+@router.get("/{file_id}/{analysis_date}/sadeh", response_model=ActivityDataResponse)
+async def get_activity_data_with_sadeh(
+    file_id: int,
+    analysis_date: date,
+    db: DbSession,
+    current_user: CurrentUser,
+    view_hours: int = Query(default=24, ge=12, le=48),
+) -> ActivityDataResponse:
+    """
+    Get activity data with Sadeh algorithm results.
+
+    Returns data with pre-calculated sleep scoring (1=sleep, 0=wake).
+    """
+    # Get base activity data
+    response = await get_activity_data(file_id, analysis_date, db, current_user, view_hours)
+
+    # Run Sadeh algorithm on the data
+    if response.data.axis_y:
+        from sleep_scoring_web.services.algorithms.sadeh import SadehAlgorithm
+
+        algorithm = SadehAlgorithm()
+        results = algorithm.score(response.data.axis_y)
+        response.algorithm_results = results
+
+    return response

@@ -7,7 +7,8 @@ These models are the single source of truth for API request/response shapes.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from datetime import date, datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -18,9 +19,6 @@ from .enums import (
     NonwearDataSource,
     VerificationStatus,
 )
-
-if TYPE_CHECKING:
-    from datetime import date, datetime
 
 # =============================================================================
 # User Models (for FastAPI-Users)
