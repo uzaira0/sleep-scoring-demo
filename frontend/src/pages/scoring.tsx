@@ -9,7 +9,6 @@ import { Input } from "@/components/ui/input";
 import { useSleepScoringStore, useMarkers } from "@/store";
 import { ActivityPlot } from "@/components/activity-plot";
 import { MarkerDataTable } from "@/components/marker-data-table";
-import { MetricsPanel } from "@/components/metrics-panel";
 import { useKeyboardShortcuts, useMarkerAutoSave, useMarkerLoad } from "@/hooks";
 import type { FileInfo, FileListResponse, ActivityDataResponse } from "@/api/types";
 
@@ -84,7 +83,7 @@ export function ScoringPage() {
   useMarkerAutoSave();
 
   // Load markers from database when file/date changes
-  const { isLoading: isLoadingMarkers, metrics } = useMarkerLoad();
+  const { isLoading: isLoadingMarkers } = useMarkerLoad();
 
   // Use individual selectors to avoid object recreation
   const currentFileId = useSleepScoringStore((state) => state.currentFileId);
@@ -653,12 +652,6 @@ export function ScoringPage() {
               </CardContent>
             </Card>
 
-            {/* Metrics Panel */}
-            <MetricsPanel
-              metrics={markerMode === "sleep" && selectedPeriodIndex !== null ? metrics[selectedPeriodIndex] ?? null : null}
-              periodIndex={markerMode === "sleep" ? selectedPeriodIndex : null}
-              isLoading={isLoadingMarkers}
-            />
           </div>
         </div>
 
