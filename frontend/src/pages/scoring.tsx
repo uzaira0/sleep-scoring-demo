@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { useSleepScoringStore, useMarkers } from "@/store";
 import { ActivityPlot } from "@/components/activity-plot";
 import { MarkerDataTable } from "@/components/marker-data-table";
+import { PopoutTableDialog } from "@/components/popout-table-dialog";
 import { useKeyboardShortcuts, useMarkerAutoSave, useMarkerLoad } from "@/hooks";
 import type { FileInfo, FileListResponse, ActivityDataResponse } from "@/api/types";
 
@@ -82,6 +83,8 @@ export function ScoringPage() {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [popoutDialogOpen, setPopoutDialogOpen] = useState(false);
+  const [popoutHighlightType, setPopoutHighlightType] = useState<"onset" | "offset">("onset");
 
   // Enable keyboard shortcuts
   useKeyboardShortcuts();
@@ -542,7 +545,13 @@ export function ScoringPage() {
         {/* Left Data Table - Onset/Start */}
         <Card className="w-64 flex-none flex flex-col overflow-hidden">
           <CardContent className="flex-1 p-0 overflow-hidden">
-            <MarkerDataTable type="onset" />
+            <MarkerDataTable
+              type="onset"
+              onOpenPopout={() => {
+                setPopoutHighlightType("onset");
+                setPopoutDialogOpen(true);
+              }}
+            />
           </CardContent>
         </Card>
 
@@ -677,10 +686,23 @@ export function ScoringPage() {
         {/* Right Data Table - Offset/End */}
         <Card className="w-64 flex-none flex flex-col overflow-hidden">
           <CardContent className="flex-1 p-0 overflow-hidden">
-            <MarkerDataTable type="offset" />
+            <MarkerDataTable
+              type="offset"
+              onOpenPopout={() => {
+                setPopoutHighlightType("offset");
+                setPopoutDialogOpen(true);
+              }}
+            />
           </CardContent>
         </Card>
       </div>
+
+      {/* Popout Table Dialog */}
+      <PopoutTableDialog
+        open={popoutDialogOpen}
+        onOpenChange={setPopoutDialogOpen}
+        highlightType={popoutHighlightType}
+      />
     </div>
   );
 }

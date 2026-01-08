@@ -44,6 +44,8 @@ class OnsetOffsetDataPoint(BaseModel):
     axis_y: int
     vector_magnitude: int
     algorithm_result: int | None = None  # 0=wake, 1=sleep
+    choi_result: int | None = None  # 0=wear, 1=nonwear
+    is_nonwear: bool = False  # Manual nonwear marker overlap
 
 
 class OnsetOffsetTableResponse(BaseModel):
@@ -358,7 +360,7 @@ async def get_onset_offset_data(
     period_index: int,
     db: DbSession,
     current_user: CurrentUser,
-    window_minutes: Annotated[int, Query(ge=5, le=60)] = 30,
+    window_minutes: Annotated[int, Query(ge=5, le=120)] = 100,
 ) -> OnsetOffsetTableResponse:
     """
     Get activity data around a marker for onset/offset tables.
@@ -420,15 +422,62 @@ async def get_onset_offset_data(
     )
     offset_rows = offset_result.scalars().all()
 
-    # Convert to response format
+    # Get nonwear markers to check overlap
+    nonwear_result = await db.execute(
+        select(Marker).where(
+            and_(
+                Marker.file_id == file_id,
+                Marker.analysis_date == analysis_date,
+                Marker.marker_category == MarkerCategory.NONWEAR,
+            )
+        )
+    )
+    nonwear_markers = nonwear_result.scalars().all()
+
+    def is_in_nonwear(ts: float) -> bool:
+        """Check if timestamp falls within any nonwear marker."""
+        for nw in nonwear_markers:
+            if nw.start_timestamp and nw.end_timestamp:
+                if nw.start_timestamp <= ts <= nw.end_timestamp:
+                    return True
+        return False
+
+    # Run algorithms on the data ranges
+    from sleep_scoring_web.services.algorithms.choi import ChoiNonwearAlgorithm
+    from sleep_scoring_web.services.algorithms.sadeh import SadehAlgorithm
+
+    def compute_algorithm_results(rows: list[RawActivityData]) -> tuple[list[int], list[int]]:
+        """Compute Sadeh and Choi results for a set of rows."""
+        if not rows:
+            return [], []
+
+        axis_y_data = [row.axis_y or 0 for row in rows]
+
+        # Sadeh algorithm
+        sadeh = SadehAlgorithm()
+        sleep_results = sadeh.score(axis_y_data)
+
+        # Choi nonwear detection
+        choi = ChoiNonwearAlgorithm()
+        choi_results = choi.detect(axis_y_data)
+
+        return sleep_results, choi_results
+
+    onset_sleep, onset_choi = compute_algorithm_results(onset_rows)
+    offset_sleep, offset_choi = compute_algorithm_results(offset_rows)
+
+    # Convert to response format with all columns
     onset_data = [
         OnsetOffsetDataPoint(
             timestamp=naive_to_unix(row.timestamp),
             datetime_str=row.timestamp.strftime("%H:%M:%S"),
             axis_y=row.axis_y or 0,
             vector_magnitude=row.vector_magnitude or 0,
+            algorithm_result=onset_sleep[i] if i < len(onset_sleep) else None,
+            choi_result=onset_choi[i] if i < len(onset_choi) else None,
+            is_nonwear=is_in_nonwear(naive_to_unix(row.timestamp)),
         )
-        for row in onset_rows
+        for i, row in enumerate(onset_rows)
     ]
 
     offset_data = [
@@ -437,14 +486,132 @@ async def get_onset_offset_data(
             datetime_str=row.timestamp.strftime("%H:%M:%S"),
             axis_y=row.axis_y or 0,
             vector_magnitude=row.vector_magnitude or 0,
+            algorithm_result=offset_sleep[i] if i < len(offset_sleep) else None,
+            choi_result=offset_choi[i] if i < len(offset_choi) else None,
+            is_nonwear=is_in_nonwear(naive_to_unix(row.timestamp)),
         )
-        for row in offset_rows
+        for i, row in enumerate(offset_rows)
     ]
 
     return OnsetOffsetTableResponse(
         onset_data=onset_data,
         offset_data=offset_data,
         period_index=period_index,
+    )
+
+
+class FullTableDataPoint(BaseModel):
+    """Single data point for full 48h table."""
+
+    timestamp: float
+    datetime_str: str
+    axis_y: int
+    vector_magnitude: int
+    algorithm_result: int | None = None
+    choi_result: int | None = None
+    is_nonwear: bool = False
+
+
+class FullTableResponse(BaseModel):
+    """Response with full 48h of data for popout table."""
+
+    data: list[FullTableDataPoint] = Field(default_factory=list)
+    total_rows: int = 0
+    start_time: str | None = None
+    end_time: str | None = None
+
+
+@router.get("/{file_id}/{analysis_date}/table-full", response_model=FullTableResponse)
+async def get_full_table_data(
+    file_id: int,
+    analysis_date: date,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> FullTableResponse:
+    """
+    Get full 48h of activity data for popout table display.
+
+    Returns all epochs from noon of analysis_date to noon of next day.
+    Includes algorithm results and nonwear detection.
+    """
+    # Verify file exists
+    file_result = await db.execute(select(FileModel).where(FileModel.id == file_id))
+    file = file_result.scalar_one_or_none()
+
+    if not file:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    # Get 24h of data (noon to noon)
+    start_time = datetime.combine(analysis_date, datetime.min.time()) + timedelta(hours=12)
+    end_time = start_time + timedelta(hours=24)
+
+    activity_result = await db.execute(
+        select(RawActivityData)
+        .where(
+            and_(
+                RawActivityData.file_id == file_id,
+                RawActivityData.timestamp >= start_time,
+                RawActivityData.timestamp < end_time,
+            )
+        )
+        .order_by(RawActivityData.timestamp)
+    )
+    rows = activity_result.scalars().all()
+
+    if not rows:
+        return FullTableResponse(data=[], total_rows=0)
+
+    # Get nonwear markers
+    nonwear_result = await db.execute(
+        select(Marker).where(
+            and_(
+                Marker.file_id == file_id,
+                Marker.analysis_date == analysis_date,
+                Marker.marker_category == MarkerCategory.NONWEAR,
+            )
+        )
+    )
+    nonwear_markers = nonwear_result.scalars().all()
+
+    def is_in_nonwear(ts: float) -> bool:
+        """Check if timestamp falls within any nonwear marker."""
+        for nw in nonwear_markers:
+            if nw.start_timestamp and nw.end_timestamp:
+                if nw.start_timestamp <= ts <= nw.end_timestamp:
+                    return True
+        return False
+
+    # Run algorithms on full data
+    from sleep_scoring_web.services.algorithms.choi import ChoiNonwearAlgorithm
+    from sleep_scoring_web.services.algorithms.sadeh import SadehAlgorithm
+
+    axis_y_data = [row.axis_y or 0 for row in rows]
+
+    sadeh = SadehAlgorithm()
+    sleep_results = sadeh.score(axis_y_data)
+
+    choi = ChoiNonwearAlgorithm()
+    choi_results = choi.detect(axis_y_data)
+
+    # Convert to response format
+    data = [
+        FullTableDataPoint(
+            timestamp=naive_to_unix(row.timestamp),
+            datetime_str=row.timestamp.strftime("%H:%M:%S"),
+            axis_y=row.axis_y or 0,
+            vector_magnitude=row.vector_magnitude or 0,
+            algorithm_result=sleep_results[i] if i < len(sleep_results) else None,
+            choi_result=choi_results[i] if i < len(choi_results) else None,
+            is_nonwear=is_in_nonwear(naive_to_unix(row.timestamp)),
+        )
+        for i, row in enumerate(rows)
+    ]
+
+    return FullTableResponse(
+        data=data,
+        total_rows=len(data),
+        start_time=rows[0].timestamp.strftime("%Y-%m-%d %H:%M:%S") if rows else None,
+        end_time=rows[-1].timestamp.strftime("%Y-%m-%d %H:%M:%S") if rows else None,
     )
 
 
