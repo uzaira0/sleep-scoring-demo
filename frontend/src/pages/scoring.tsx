@@ -24,6 +24,13 @@ const VIEW_MODE_OPTIONS = [
   { value: "48", label: "48h" },
 ];
 
+const ALGORITHM_OPTIONS = [
+  { value: "sadeh_1994_actilife", label: "Sadeh (ActiLife)" },
+  { value: "sadeh_1994_original", label: "Sadeh (Original)" },
+  { value: "cole_kripke_1992_actilife", label: "Cole-Kripke (ActiLife)" },
+  { value: "cole_kripke_1992_original", label: "Cole-Kripke (Original)" },
+];
+
 // Types are imported from @/api/types (generated from backend OpenAPI schema)
 
 async function fetchWithAuth<T>(url: string, options?: RequestInit): Promise<T> {
@@ -94,7 +101,9 @@ export function ScoringPage() {
   const isLoading = useSleepScoringStore((state) => state.isLoading);
   const preferredDisplayColumn = useSleepScoringStore((state) => state.preferredDisplayColumn);
   const viewModeHours = useSleepScoringStore((state) => state.viewModeHours);
+  const currentAlgorithm = useSleepScoringStore((state) => state.currentAlgorithm);
   const setPreferredDisplayColumn = useSleepScoringStore((state) => state.setPreferredDisplayColumn);
+  const setCurrentAlgorithm = useSleepScoringStore((state) => state.setCurrentAlgorithm);
   const setViewModeHours = useSleepScoringStore((state) => state.setViewModeHours);
 
   const currentDate = availableDates[currentDateIndex] ?? null;
@@ -222,13 +231,13 @@ export function ScoringPage() {
     }
   }, [datesData]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch activity data for current date (use Sadeh endpoint for algorithm results)
+  // Fetch activity data for current date with selected algorithm
   const { data: activityData, isLoading: activityLoading } = useQuery({
-    queryKey: ["activity", currentFileId, currentDate, viewModeHours],
+    queryKey: ["activity", currentFileId, currentDate, viewModeHours, currentAlgorithm],
     queryFn: async () => {
       setLoading(true);
       return fetchWithAuth<ActivityDataResponse>(
-        `/api/v1/activity/${currentFileId}/${currentDate}/sadeh?view_hours=${viewModeHours}`
+        `/api/v1/activity/${currentFileId}/${currentDate}/score?view_hours=${viewModeHours}&algorithm=${currentAlgorithm}`
       );
     },
     enabled: !!currentFileId && !!currentDate,
@@ -336,7 +345,7 @@ export function ScoringPage() {
           </Button>
         </div>
 
-        {/* Activity source and view mode */}
+        {/* Activity source, algorithm, and view mode */}
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
             <BarChart3 className="h-4 w-4 text-muted-foreground" />
@@ -346,6 +355,15 @@ export function ScoringPage() {
               value={preferredDisplayColumn}
               onChange={(e) => setPreferredDisplayColumn(e.target.value as "axis_x" | "axis_y" | "axis_z" | "vector_magnitude")}
               className="w-[160px]"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Label className="text-sm">Algorithm:</Label>
+            <Select
+              options={ALGORITHM_OPTIONS}
+              value={currentAlgorithm}
+              onChange={(e) => setCurrentAlgorithm(e.target.value)}
+              className="w-[180px]"
             />
           </div>
           <div className="flex items-center gap-2">

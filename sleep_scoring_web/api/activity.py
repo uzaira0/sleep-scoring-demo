@@ -130,6 +130,47 @@ async def get_activity_data(
     )
 
 
+@router.get("/{file_id}/{analysis_date}/score", response_model=ActivityDataResponse)
+async def get_activity_data_with_scoring(
+    file_id: int,
+    analysis_date: date,
+    db: DbSession,
+    current_user: CurrentUser,
+    view_hours: int = Query(default=24, ge=12, le=48),
+    algorithm: str = Query(default="sadeh_1994_actilife", description="Sleep scoring algorithm to use"),
+) -> ActivityDataResponse:
+    """
+    Get activity data with sleep scoring algorithm results.
+
+    Returns data with pre-calculated sleep scoring (1=sleep, 0=wake).
+
+    Available algorithms:
+    - sadeh_1994_actilife (default): Sadeh 1994 with ActiLife scaling
+    - sadeh_1994_original: Sadeh 1994 original paper version
+    - cole_kripke_1992_actilife: Cole-Kripke 1992 with ActiLife scaling
+    - cole_kripke_1992_original: Cole-Kripke 1992 original paper version
+    """
+    from sleep_scoring_web.services.algorithms import ALGORITHM_TYPES, create_algorithm
+
+    # Validate algorithm type
+    if algorithm not in ALGORITHM_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown algorithm: {algorithm}. Available: {ALGORITHM_TYPES}",
+        )
+
+    # Get base activity data
+    response = await get_activity_data(file_id, analysis_date, db, current_user, view_hours)
+
+    # Run algorithm on the data
+    if response.data.axis_y:
+        scorer = create_algorithm(algorithm)
+        results = scorer.score(response.data.axis_y)
+        response.algorithm_results = results
+
+    return response
+
+
 @router.get("/{file_id}/{analysis_date}/sadeh", response_model=ActivityDataResponse)
 async def get_activity_data_with_sadeh(
     file_id: int,
@@ -141,17 +182,13 @@ async def get_activity_data_with_sadeh(
     """
     Get activity data with Sadeh algorithm results.
 
-    Returns data with pre-calculated sleep scoring (1=sleep, 0=wake).
+    DEPRECATED: Use /{file_id}/{analysis_date}/score?algorithm=sadeh_1994_actilife instead.
     """
-    # Get base activity data
-    response = await get_activity_data(file_id, analysis_date, db, current_user, view_hours)
-
-    # Run Sadeh algorithm on the data
-    if response.data.axis_y:
-        from sleep_scoring_web.services.algorithms.sadeh import SadehAlgorithm
-
-        algorithm = SadehAlgorithm()
-        results = algorithm.score(response.data.axis_y)
-        response.algorithm_results = results
-
-    return response
+    return await get_activity_data_with_scoring(
+        file_id=file_id,
+        analysis_date=analysis_date,
+        db=db,
+        current_user=current_user,
+        view_hours=view_hours,
+        algorithm="sadeh_1994_actilife",
+    )
