@@ -20,8 +20,7 @@ test.describe("Nonwear Visualization", () => {
     await page.fill('input[name="username"]', "admin");
     await page.fill('input[name="password"]', "admin");
     await page.click('button[type="submit"]');
-    await page.waitForURL("**/files");
-    await page.goto("http://localhost:8501/scoring");
+    await page.waitForURL("**/scoring");
     await page.waitForSelector(".uplot", { timeout: 10000 });
   }
 

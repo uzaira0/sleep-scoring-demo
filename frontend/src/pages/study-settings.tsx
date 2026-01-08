@@ -8,18 +8,19 @@ import { useSleepScoringStore } from "@/store";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { settingsApi } from "@/api/client";
+import { ALGORITHM_TYPES, SLEEP_DETECTION_RULES } from "@/api/types";
 
 const ALGORITHM_OPTIONS = [
-  { value: "sadeh_1994_actilife", label: "Sadeh (1994) ActiLife - Recommended" },
-  { value: "sadeh_1994_original", label: "Sadeh (1994) Original" },
-  { value: "cole_kripke_1992_actilife", label: "Cole-Kripke (1992) ActiLife" },
-  { value: "cole_kripke_1992_original", label: "Cole-Kripke (1992) Original" },
+  { value: ALGORITHM_TYPES.SADEH_1994_ACTILIFE, label: "Sadeh (1994) ActiLife - Recommended" },
+  { value: ALGORITHM_TYPES.SADEH_1994_ORIGINAL, label: "Sadeh (1994) Original" },
+  { value: ALGORITHM_TYPES.COLE_KRIPKE_1992_ACTILIFE, label: "Cole-Kripke (1992) ActiLife" },
+  { value: ALGORITHM_TYPES.COLE_KRIPKE_1992_ORIGINAL, label: "Cole-Kripke (1992) Original" },
 ];
 
 const SLEEP_DETECTION_OPTIONS = [
-  { value: "consecutive_onset3s_offset5s", label: "3-min Onset / 5-min Offset (Default)" },
-  { value: "consecutive_onset5s_offset10s", label: "5-min Onset / 10-min Offset" },
-  { value: "tudor_locke_2014", label: "Tudor-Locke (2014)" },
+  { value: SLEEP_DETECTION_RULES.CONSECUTIVE_3S_5S, label: "3-min Onset / 5-min Offset (Default)" },
+  { value: SLEEP_DETECTION_RULES.CONSECUTIVE_5S_10S, label: "5-min Onset / 10-min Offset" },
+  { value: SLEEP_DETECTION_RULES.TUDOR_LOCKE_2014, label: "Tudor-Locke (2014)" },
 ];
 
 export function StudySettingsPage() {
@@ -366,16 +367,16 @@ export function StudySettingsPage() {
             <div className="flex items-start gap-2">
               <Info className="h-4 w-4 text-blue-500 mt-0.5 flex-shrink-0" />
               <div>
-                {sleepDetectionRule === "consecutive_onset3s_offset5s" && (
+                {sleepDetectionRule === SLEEP_DETECTION_RULES.CONSECUTIVE_3S_5S && (
                   <>Sleep onset after 3 consecutive minutes of sleep. Sleep offset after 5 consecutive minutes of wake.</>
                 )}
-                {sleepDetectionRule === "consecutive_onset5s_offset10s" && (
+                {sleepDetectionRule === SLEEP_DETECTION_RULES.CONSECUTIVE_5S_10S && (
                   <>Sleep onset after 5 consecutive minutes of sleep. Sleep offset after 10 consecutive minutes of wake.</>
                 )}
-                {sleepDetectionRule === "tudor_locke_2014" && (
+                {sleepDetectionRule === SLEEP_DETECTION_RULES.TUDOR_LOCKE_2014 && (
                   <>Tudor-Locke (2014) algorithm for sleep period detection with validated parameters.</>
                 )}
-                {!["consecutive_onset3s_offset5s", "consecutive_onset5s_offset10s", "tudor_locke_2014"].includes(sleepDetectionRule) && (
+                {![SLEEP_DETECTION_RULES.CONSECUTIVE_3S_5S, SLEEP_DETECTION_RULES.CONSECUTIVE_5S_10S, SLEEP_DETECTION_RULES.TUDOR_LOCKE_2014].includes(sleepDetectionRule) && (
                   <>Select a detection rule above.</>
                 )}
               </div>

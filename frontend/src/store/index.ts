@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { devtools, persist } from "zustand/middleware";
 import { useShallow } from "zustand/react/shallow";
-import { MARKER_TYPES, type MarkerType } from "@/api/types";
+import { MARKER_TYPES, ALGORITHM_TYPES, SLEEP_DETECTION_RULES, type MarkerType } from "@/api/types";
 
 /**
  * User authentication state
@@ -256,10 +256,10 @@ export const useSleepScoringStore = create<SleepScoringState>()(
         // Initial preferences
         preferredDisplayColumn: "axis_y",
         viewModeHours: 24,
-        currentAlgorithm: "sadeh_1994_actilife",
+        currentAlgorithm: ALGORITHM_TYPES.SADEH_1994_ACTILIFE,
 
         // Initial study settings
-        sleepDetectionRule: "consecutive_onset3s_offset5s",
+        sleepDetectionRule: SLEEP_DETECTION_RULES.CONSECUTIVE_3S_5S,
         nightStartHour: "21:00",
         nightEndHour: "09:00",
 

@@ -17,8 +17,6 @@ test.describe("Marker Data Tables", () => {
     await page.fill('input[name="username"]', "admin");
     await page.fill('input[name="password"]', "admin");
     await page.click('button[type="submit"]');
-    await page.waitForURL("**/files");
-    await page.goto("http://localhost:8501/scoring");
     await page.waitForURL("**/scoring");
   }
 
@@ -106,8 +104,6 @@ test.describe("Popout Table Dialog", () => {
     await page.fill('input[name="username"]', "admin");
     await page.fill('input[name="password"]', "admin");
     await page.click('button[type="submit"]');
-    await page.waitForURL("**/files");
-    await page.goto("http://localhost:8501/scoring");
     await page.waitForURL("**/scoring");
   }
 

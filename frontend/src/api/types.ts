@@ -129,3 +129,17 @@ export const FILE_STATUSES = {
   READY: "ready" as const,
   FAILED: "failed" as const,
 } satisfies Record<string, FileStatus>;
+
+export const ALGORITHM_TYPES = {
+  SADEH_1994_ORIGINAL: "sadeh_1994_original" as const,
+  SADEH_1994_ACTILIFE: "sadeh_1994_actilife" as const,
+  COLE_KRIPKE_1992_ORIGINAL: "cole_kripke_1992_original" as const,
+  COLE_KRIPKE_1992_ACTILIFE: "cole_kripke_1992_actilife" as const,
+  MANUAL: "manual" as const,
+} satisfies Record<string, AlgorithmType>;
+
+export const SLEEP_DETECTION_RULES = {
+  CONSECUTIVE_3S_5S: "consecutive_onset3s_offset5s" as const,
+  CONSECUTIVE_5S_10S: "consecutive_onset5s_offset10s" as const,
+  TUDOR_LOCKE_2014: "tudor_locke_2014" as const,
+} as const;

@@ -17,10 +17,7 @@ test.describe("Export Page", () => {
     await page.fill('input[name="username"]', "admin");
     await page.fill('input[name="password"]', "admin");
     await page.click('button[type="submit"]');
-    // Login redirects to /files first
-    await page.waitForURL("**/files");
-    // Then navigate to scoring
-    await page.goto("http://localhost:8501/scoring");
+    // Login redirects to scoring page
     await page.waitForURL("**/scoring");
   }
 

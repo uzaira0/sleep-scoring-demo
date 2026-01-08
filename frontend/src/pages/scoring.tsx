@@ -14,7 +14,7 @@ import { ColorLegendDialog, ColorLegendButton } from "@/components/color-legend-
 import { DiaryPanel } from "@/components/diary-panel";
 import { useKeyboardShortcuts, useMarkerAutoSave, useMarkerLoad } from "@/hooks";
 import type { FileInfo, FileListResponse, ActivityDataResponse } from "@/api/types";
-import { MARKER_TYPES } from "@/api/types";
+import { MARKER_TYPES, ALGORITHM_TYPES } from "@/api/types";
 
 const ACTIVITY_SOURCE_OPTIONS = [
   { value: "axis_y", label: "Y-Axis (Vertical)" },
@@ -29,10 +29,10 @@ const VIEW_MODE_OPTIONS = [
 ];
 
 const ALGORITHM_OPTIONS = [
-  { value: "sadeh_1994_actilife", label: "Sadeh (ActiLife)" },
-  { value: "sadeh_1994_original", label: "Sadeh (Original)" },
-  { value: "cole_kripke_1992_actilife", label: "Cole-Kripke (ActiLife)" },
-  { value: "cole_kripke_1992_original", label: "Cole-Kripke (Original)" },
+  { value: ALGORITHM_TYPES.SADEH_1994_ACTILIFE, label: "Sadeh (ActiLife)" },
+  { value: ALGORITHM_TYPES.SADEH_1994_ORIGINAL, label: "Sadeh (Original)" },
+  { value: ALGORITHM_TYPES.COLE_KRIPKE_1992_ACTILIFE, label: "Cole-Kripke (ActiLife)" },
+  { value: ALGORITHM_TYPES.COLE_KRIPKE_1992_ORIGINAL, label: "Cole-Kripke (Original)" },
 ];
 
 const MARKER_TYPE_OPTIONS = [

@@ -7,7 +7,7 @@ test.describe("Settings Persistence", () => {
     await page.getByLabel(/username/i).fill("admin");
     await page.getByLabel(/password/i).fill("admin");
     await page.getByRole("button", { name: /sign in/i }).click();
-    await page.waitForURL(/\/files/);
+    await page.waitForURL(/\/scoring/);
   });
 
   test("should display study settings page", async ({ page }) => {

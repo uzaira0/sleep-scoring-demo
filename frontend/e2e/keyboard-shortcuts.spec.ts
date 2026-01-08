@@ -17,8 +17,6 @@ test.describe("Keyboard Shortcuts", () => {
     await page.fill('input[name="username"]', "admin");
     await page.fill('input[name="password"]', "admin");
     await page.click('button[type="submit"]');
-    await page.waitForURL("**/files");
-    await page.goto("http://localhost:8501/scoring");
     await page.waitForURL("**/scoring");
   }
 
@@ -125,8 +123,6 @@ test.describe("Marker Type Selector", () => {
     await page.fill('input[name="username"]', "admin");
     await page.fill('input[name="password"]', "admin");
     await page.click('button[type="submit"]');
-    await page.waitForURL("**/files");
-    await page.goto("http://localhost:8501/scoring");
     await page.waitForURL("**/scoring");
   }
 
@@ -166,8 +162,6 @@ test.describe("Color Legend Dialog", () => {
     await page.fill('input[name="username"]', "admin");
     await page.fill('input[name="password"]', "admin");
     await page.click('button[type="submit"]');
-    await page.waitForURL("**/files");
-    await page.goto("http://localhost:8501/scoring");
     await page.waitForURL("**/scoring");
   }
 
