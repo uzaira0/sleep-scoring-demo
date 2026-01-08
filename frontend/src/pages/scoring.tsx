@@ -12,6 +12,7 @@ import { MarkerDataTable } from "@/components/marker-data-table";
 import { PopoutTableDialog } from "@/components/popout-table-dialog";
 import { ColorLegendDialog, ColorLegendButton } from "@/components/color-legend-dialog";
 import { DiaryPanel } from "@/components/diary-panel";
+import { MetricsPanel } from "@/components/metrics-panel";
 import { useKeyboardShortcuts, useMarkerAutoSave, useMarkerLoad } from "@/hooks";
 import type { FileInfo, FileListResponse, ActivityDataResponse } from "@/api/types";
 import { MARKER_TYPES, ALGORITHM_TYPES } from "@/api/types";
@@ -102,7 +103,7 @@ export function ScoringPage() {
   useMarkerAutoSave();
 
   // Load markers from database when file/date changes
-  const { isLoading: isLoadingMarkers } = useMarkerLoad();
+  const { isLoading: isLoadingMarkers, metrics } = useMarkerLoad();
 
   // Use individual selectors to avoid object recreation
   const currentFileId = useSleepScoringStore((state) => state.currentFileId);
@@ -703,6 +704,15 @@ export function ScoringPage() {
                 )}
               </CardContent>
             </Card>
+
+            {/* Metrics Panel */}
+            <div className="w-56 flex-none">
+              <MetricsPanel
+                metrics={metrics}
+                selectedPeriodIndex={markerMode === "sleep" ? selectedPeriodIndex : null}
+                compact
+              />
+            </div>
 
             {/* Diary Panel */}
             <div className="w-56 flex-none">
