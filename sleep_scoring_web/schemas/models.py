@@ -304,3 +304,54 @@ class ResolveDisputeRequest(BaseModel):
     final_sleep_markers: list[SleepPeriod]
     final_nonwear_markers: list[ManualNonwearPeriod] = Field(default_factory=list)
     resolution_notes: str | None = None
+
+
+# =============================================================================
+# Export Models
+# =============================================================================
+
+
+class ExportColumnCategory(BaseModel):
+    """Category of export columns (e.g., Participant Info, Sleep Metrics)."""
+
+    name: str = Field(description="Category display name")
+    columns: list[str] = Field(default_factory=list, description="Column names in this category")
+
+
+class ExportColumnInfo(BaseModel):
+    """Information about an available export column."""
+
+    name: str = Field(description="Column name as it appears in CSV")
+    category: str = Field(description="Category for grouping in UI")
+    description: str | None = Field(default=None, description="Human-readable description")
+    data_type: str = Field(default="string", description="Data type: string, number, datetime")
+    is_default: bool = Field(default=True, description="Whether included in default export")
+
+
+class ExportColumnsResponse(BaseModel):
+    """Response listing all available export columns."""
+
+    columns: list[ExportColumnInfo] = Field(default_factory=list)
+    categories: list[ExportColumnCategory] = Field(default_factory=list)
+
+
+class ExportRequest(BaseModel):
+    """Request to generate a CSV export."""
+
+    file_ids: list[int] = Field(description="File IDs to include in export")
+    date_range: tuple[date, date] | None = Field(default=None, description="Optional date range filter")
+    columns: list[str] | None = Field(default=None, description="Columns to include (None = all)")
+    include_header: bool = Field(default=True, description="Include CSV header row")
+    include_metadata: bool = Field(default=False, description="Include metadata comments at top")
+    export_nonwear_separate: bool = Field(default=False, description="Export nonwear markers to separate file")
+
+
+class ExportResponse(BaseModel):
+    """Response after generating an export."""
+
+    success: bool
+    filename: str | None = None
+    row_count: int = 0
+    file_count: int = 0
+    message: str = ""
+    warnings: list[str] = Field(default_factory=list)

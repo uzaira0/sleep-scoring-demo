@@ -18,6 +18,11 @@ from .enums import (
 from .models import (
     ActivityDataColumnar,
     ActivityDataResponse,
+    ExportColumnCategory,
+    ExportColumnInfo,
+    ExportColumnsResponse,
+    ExportRequest,
+    ExportResponse,
     FileInfo,
     FileListResponse,
     FileUploadResponse,
@@ -37,10 +42,18 @@ __all__ = [
     "ActivityDataResponse",
     # Enums
     "AlgorithmType",
+    # Export
+    "ExportColumnCategory",
+    "ExportColumnInfo",
+    "ExportColumnsResponse",
+    "ExportRequest",
+    "ExportResponse",
+    # Files
     "FileInfo",
     "FileListResponse",
     "FileStatus",
     "FileUploadResponse",
+    # Markers
     "ManualNonwearPeriod",
     "MarkerCategory",
     "MarkerResponse",
@@ -50,6 +63,7 @@ __all__ = [
     "SleepMetrics",
     "SleepPeriod",
     "SleepPeriodDetectorType",
+    # Users
     "UserCreate",
     "UserRead",
     "UserRole",
