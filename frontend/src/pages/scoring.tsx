@@ -253,6 +253,7 @@ export function ScoringPage() {
         axisZ: activityData.data.axis_z,
         vectorMagnitude: activityData.data.vector_magnitude,
         algorithmResults: activityData.algorithm_results ?? null,
+        nonwearResults: activityData.nonwear_results ?? null,
         viewStart: activityData.view_start,
         viewEnd: activityData.view_end,
       });

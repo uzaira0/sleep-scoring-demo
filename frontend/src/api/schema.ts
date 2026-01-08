@@ -308,6 +308,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/activity/{file_id}/{analysis_date}/score": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Activity Data With Scoring
+         * @description Get activity data with sleep scoring algorithm results.
+         *
+         *     Returns data with:
+         *     - Sleep scoring results (1=sleep, 0=wake)
+         *     - Choi nonwear detection results (1=nonwear, 0=wear)
+         *
+         *     Available algorithms:
+         *     - sadeh_1994_actilife (default): Sadeh 1994 with ActiLife scaling
+         *     - sadeh_1994_original: Sadeh 1994 original paper version
+         *     - cole_kripke_1992_actilife: Cole-Kripke 1992 with ActiLife scaling
+         *     - cole_kripke_1992_original: Cole-Kripke 1992 original paper version
+         */
+        get: operations["get_activity_data_with_scoring_api_v1_activity__file_id___analysis_date__score_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/activity/{file_id}/{analysis_date}/sadeh": {
         parameters: {
             query?: never;
@@ -319,7 +349,7 @@ export interface paths {
          * Get Activity Data With Sadeh
          * @description Get activity data with Sadeh algorithm results.
          *
-         *     Returns data with pre-calculated sleep scoring (1=sleep, 0=wake).
+         *     DEPRECATED: Use /{file_id}/{analysis_date}/score?algorithm=sadeh_1994_actilife instead.
          */
         get: operations["get_activity_data_with_sadeh_api_v1_activity__file_id___analysis_date__sadeh_get"];
         put?: never;
@@ -443,6 +473,8 @@ export interface components {
             current_date_index: number;
             /** Algorithm Results */
             algorithm_results?: number[] | null;
+            /** Nonwear Results */
+            nonwear_results?: number[] | null;
             /** File Id */
             file_id: number;
             /** Analysis Date */
@@ -1260,6 +1292,42 @@ export interface operations {
             query?: {
                 /** @description Hours of data to return (12-48) */
                 view_hours?: number;
+            };
+            header?: never;
+            path: {
+                file_id: number;
+                analysis_date: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityDataResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_activity_data_with_scoring_api_v1_activity__file_id___analysis_date__score_get: {
+        parameters: {
+            query?: {
+                view_hours?: number;
+                /** @description Sleep scoring algorithm to use */
+                algorithm?: string;
             };
             header?: never;
             path: {

@@ -142,7 +142,9 @@ async def get_activity_data_with_scoring(
     """
     Get activity data with sleep scoring algorithm results.
 
-    Returns data with pre-calculated sleep scoring (1=sleep, 0=wake).
+    Returns data with:
+    - Sleep scoring results (1=sleep, 0=wake)
+    - Choi nonwear detection results (1=nonwear, 0=wear)
 
     Available algorithms:
     - sadeh_1994_actilife (default): Sadeh 1994 with ActiLife scaling
@@ -150,7 +152,7 @@ async def get_activity_data_with_scoring(
     - cole_kripke_1992_actilife: Cole-Kripke 1992 with ActiLife scaling
     - cole_kripke_1992_original: Cole-Kripke 1992 original paper version
     """
-    from sleep_scoring_web.services.algorithms import ALGORITHM_TYPES, create_algorithm
+    from sleep_scoring_web.services.algorithms import ALGORITHM_TYPES, ChoiAlgorithm, create_algorithm
 
     # Validate algorithm type
     if algorithm not in ALGORITHM_TYPES:
@@ -162,11 +164,17 @@ async def get_activity_data_with_scoring(
     # Get base activity data
     response = await get_activity_data(file_id, analysis_date, db, current_user, view_hours)
 
-    # Run algorithm on the data
+    # Run sleep scoring algorithm on the data
     if response.data.axis_y:
         scorer = create_algorithm(algorithm)
         results = scorer.score(response.data.axis_y)
         response.algorithm_results = results
+
+        # Run Choi nonwear detection (uses vector magnitude if available, else axis_y)
+        choi = ChoiAlgorithm()
+        # Prefer vector_magnitude for nonwear detection, fall back to axis_y
+        nonwear_data = response.data.vector_magnitude if response.data.vector_magnitude else response.data.axis_y
+        response.nonwear_results = choi.detect_mask(nonwear_data)
 
     return response
 

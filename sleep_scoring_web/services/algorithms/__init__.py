@@ -4,6 +4,7 @@ Sleep scoring algorithms.
 Contains algorithm implementations ported from the desktop app.
 """
 
+from .choi import ChoiAlgorithm
 from .cole_kripke import ColeKripkeAlgorithm
 from .factory import (
     ALGORITHM_TYPES,
@@ -17,6 +18,7 @@ from .sadeh import SadehAlgorithm
 __all__ = [
     "AlgorithmType",
     "ALGORITHM_TYPES",
+    "ChoiAlgorithm",
     "ColeKripkeAlgorithm",
     "SadehAlgorithm",
     "SleepScoringAlgorithm",

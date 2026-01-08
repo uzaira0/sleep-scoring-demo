@@ -209,7 +209,8 @@ class ActivityDataResponse(BaseModel):
     data: ActivityDataColumnar
     available_dates: list[str] = Field(default_factory=list)
     current_date_index: int = 0
-    algorithm_results: list[int] | None = None
+    algorithm_results: list[int] | None = None  # Sleep scoring results (1=sleep, 0=wake)
+    nonwear_results: list[int] | None = None  # Choi nonwear detection (1=nonwear, 0=wear)
     file_id: int
     analysis_date: str
     # Expected view range (for setting axis bounds even if data is missing)
