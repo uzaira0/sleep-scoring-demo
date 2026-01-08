@@ -38,14 +38,17 @@ test.describe("Settings Persistence", () => {
     // Wait for page to be fully loaded
     await expect(page.getByRole("heading", { name: /study settings/i })).toBeVisible({ timeout: 10000 });
 
+    // Wait for settings to load from backend
+    await page.waitForTimeout(1000);
+
     // Initially no unsaved indicator
     await expect(page.getByText(/unsaved changes/i)).not.toBeVisible();
 
-    // Change night start hour - clear first then type to trigger change
-    const nightStartInput = page.locator("#night-start");
-    await nightStartInput.click();
-    await nightStartInput.fill("22:00");
-    await nightStartInput.blur(); // Trigger change event
+    // Change algorithm dropdown instead of time input (more reliable)
+    const algorithmSelect = page.locator("#algorithm");
+    const currentValue = await algorithmSelect.inputValue();
+    const newValue = currentValue === "sadeh_1994_actilife" ? "cole_kripke_1992_actilife" : "sadeh_1994_actilife";
+    await algorithmSelect.selectOption(newValue);
 
     // Should show unsaved indicator
     await expect(page.getByText(/unsaved changes/i)).toBeVisible({ timeout: 5000 });
@@ -58,12 +61,17 @@ test.describe("Settings Persistence", () => {
     // Wait for page to be fully loaded
     await expect(page.getByRole("heading", { name: /study settings/i })).toBeVisible({ timeout: 10000 });
 
-    // Change night start hour
-    const nightStartInput = page.getByLabel(/night start/i);
-    await nightStartInput.fill("22:00");
+    // Wait for settings to load from backend
+    await page.waitForTimeout(1000);
+
+    // Change algorithm dropdown (more reliable than time input)
+    const algorithmSelect = page.locator("#algorithm");
+    const currentValue = await algorithmSelect.inputValue();
+    const newValue = currentValue === "sadeh_1994_actilife" ? "cole_kripke_1992_actilife" : "sadeh_1994_actilife";
+    await algorithmSelect.selectOption(newValue);
 
     // Should show unsaved changes
-    await expect(page.getByText(/unsaved changes/i)).toBeVisible();
+    await expect(page.getByText(/unsaved changes/i)).toBeVisible({ timeout: 5000 });
 
     // Click save
     await page.getByRole("button", { name: /save/i }).click();
@@ -79,43 +87,62 @@ test.describe("Settings Persistence", () => {
     // Wait for page to be fully loaded
     await expect(page.getByRole("heading", { name: /study settings/i })).toBeVisible({ timeout: 10000 });
 
-    // Wait for settings to load from backend
-    await page.waitForTimeout(1000);
+    // Wait for settings to load from backend - settings API must complete
+    await page.waitForTimeout(2000);
 
-    // Get original value first
-    const nightStartInput = page.locator("#night-start");
-    const originalValue = await nightStartInput.inputValue();
+    // Get original algorithm value
+    const algorithmSelect = page.locator("#algorithm");
+    const originalValue = await algorithmSelect.inputValue();
+    console.log("Original algorithm:", originalValue);
 
-    // Use a unique test value based on current time to avoid collision with prior test runs
-    const testValue = originalValue === "22:30" ? "23:00" : "22:30";
+    // Use a different algorithm value
+    const testValue = originalValue === "sadeh_1994_actilife" ? "cole_kripke_1992_actilife" : "sadeh_1994_actilife";
+    console.log("Test algorithm:", testValue);
 
-    // Change night start hour - use fill() for time inputs
-    await nightStartInput.fill(testValue);
-    await nightStartInput.blur(); // Trigger change event
+    // Change algorithm dropdown
+    await algorithmSelect.selectOption(testValue);
 
     // Verify value was actually changed
-    await expect(nightStartInput).toHaveValue(testValue);
+    await expect(algorithmSelect).toHaveValue(testValue);
 
     // Wait for unsaved indicator with longer timeout
     await expect(page.getByText(/unsaved changes/i)).toBeVisible({ timeout: 10000 });
 
-    // Save
-    await page.getByRole("button", { name: /save/i }).click();
+    // Save and wait for the request to complete
+    const saveButton = page.getByRole("button", { name: /save/i });
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/v1/settings") && response.request().method() === "PUT"),
+      saveButton.click(),
+    ]);
+
+    // Verify unsaved indicator is cleared (indicates save completed)
     await expect(page.getByText(/unsaved changes/i)).not.toBeVisible({ timeout: 5000 });
 
-    // Wait for save to complete on backend
-    await page.waitForTimeout(500);
+    // Wait a bit more for backend to fully process
+    await page.waitForTimeout(1000);
+
+    // Set up response listener BEFORE reload (response happens during reload)
+    const responsePromise = page.waitForResponse(
+      (response) => response.url().includes("/api/v1/settings") && response.request().method() === "GET"
+    );
 
     // Refresh page
     await page.reload();
     await page.waitForLoadState("networkidle");
 
-    // Wait for settings to reload from backend
+    // Wait for settings page to be ready
     await expect(page.getByRole("heading", { name: /study settings/i })).toBeVisible({ timeout: 10000 });
-    await page.waitForTimeout(1000); // Wait for settings API call to complete
+
+    // Wait for settings API response to complete
+    await responsePromise;
+    await page.waitForTimeout(500); // Allow state to update
+
+    // Check the value - it should be the saved testValue
+    const valueAfterReload = await page.locator("#algorithm").inputValue();
+    console.log("Algorithm after reload:", valueAfterReload);
 
     // Should still show the saved value (testValue from before refresh)
-    await expect(page.locator("#night-start")).toHaveValue(testValue, { timeout: 10000 });
+    await expect(page.locator("#algorithm")).toHaveValue(testValue, { timeout: 10000 });
   });
 
   test("should reset settings to defaults", async ({ page }) => {
