@@ -141,3 +141,131 @@ export const authApi = {
     return response.json();
   },
 };
+
+/**
+ * Settings API calls
+ */
+export const settingsApi = {
+  async getSettings() {
+    return fetchWithAuth<import("./types").UserSettingsResponse>("/api/v1/settings");
+  },
+
+  async updateSettings(data: import("./types").UserSettingsUpdate) {
+    const token = useSleepScoringStore.getState().accessToken;
+    const response = await fetch("/api/v1/settings", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        useSleepScoringStore.getState().clearAuth();
+      }
+      const error = await response.json().catch(() => ({ detail: "Request failed" }));
+      throw new Error(error.detail || `HTTP ${response.status}`);
+    }
+
+    return response.json() as Promise<import("./types").UserSettingsResponse>;
+  },
+
+  async resetSettings() {
+    const token = useSleepScoringStore.getState().accessToken;
+    const response = await fetch("/api/v1/settings", {
+      method: "DELETE",
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+
+    if (!response.ok && response.status !== 204) {
+      if (response.status === 401) {
+        useSleepScoringStore.getState().clearAuth();
+      }
+      const error = await response.json().catch(() => ({ detail: "Request failed" }));
+      throw new Error(error.detail || `HTTP ${response.status}`);
+    }
+  },
+};
+
+/**
+ * Diary API calls
+ */
+export const diaryApi = {
+  async getDiaryEntry(fileId: number, date: string) {
+    return fetchWithAuth<import("./types").DiaryEntryResponse | null>(
+      `/api/v1/diary/${fileId}/${date}`
+    );
+  },
+
+  async updateDiaryEntry(
+    fileId: number,
+    date: string,
+    data: import("./types").DiaryEntryCreate
+  ) {
+    const token = useSleepScoringStore.getState().accessToken;
+    const response = await fetch(`/api/v1/diary/${fileId}/${date}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        useSleepScoringStore.getState().clearAuth();
+      }
+      const error = await response.json().catch(() => ({ detail: "Request failed" }));
+      throw new Error(error.detail || `HTTP ${response.status}`);
+    }
+
+    return response.json() as Promise<import("./types").DiaryEntryResponse>;
+  },
+
+  async deleteDiaryEntry(fileId: number, date: string) {
+    const token = useSleepScoringStore.getState().accessToken;
+    const response = await fetch(`/api/v1/diary/${fileId}/${date}`, {
+      method: "DELETE",
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+
+    if (!response.ok && response.status !== 204) {
+      if (response.status === 401) {
+        useSleepScoringStore.getState().clearAuth();
+      }
+      const error = await response.json().catch(() => ({ detail: "Request failed" }));
+      throw new Error(error.detail || `HTTP ${response.status}`);
+    }
+  },
+
+  async uploadDiaryCsv(fileId: number, file: File) {
+    const token = useSleepScoringStore.getState().accessToken;
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await fetch(`/api/v1/diary/${fileId}/upload`, {
+      method: "POST",
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        useSleepScoringStore.getState().clearAuth();
+      }
+      const error = await response.json().catch(() => ({ detail: "Upload failed" }));
+      throw new Error(error.detail || `HTTP ${response.status}`);
+    }
+
+    return response.json() as Promise<import("./types").DiaryUploadResponse>;
+  },
+};

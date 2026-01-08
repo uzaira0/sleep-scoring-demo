@@ -11,6 +11,7 @@ import { ActivityPlot } from "@/components/activity-plot";
 import { MarkerDataTable } from "@/components/marker-data-table";
 import { PopoutTableDialog } from "@/components/popout-table-dialog";
 import { ColorLegendDialog, ColorLegendButton } from "@/components/color-legend-dialog";
+import { DiaryPanel } from "@/components/diary-panel";
 import { useKeyboardShortcuts, useMarkerAutoSave, useMarkerLoad } from "@/hooks";
 import type { FileInfo, FileListResponse, ActivityDataResponse } from "@/api/types";
 import { MARKER_TYPES } from "@/api/types";
@@ -702,6 +703,11 @@ export function ScoringPage() {
                 )}
               </CardContent>
             </Card>
+
+            {/* Diary Panel */}
+            <div className="w-56 flex-none">
+              <DiaryPanel compact />
+            </div>
 
           </div>
         </div>
