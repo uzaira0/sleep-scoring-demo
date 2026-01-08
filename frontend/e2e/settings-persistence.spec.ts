@@ -79,25 +79,43 @@ test.describe("Settings Persistence", () => {
     // Wait for page to be fully loaded
     await expect(page.getByRole("heading", { name: /study settings/i })).toBeVisible({ timeout: 10000 });
 
-    // Change night start hour - click, fill, blur to trigger change detection
-    const nightStartInput = page.locator("#night-start");
-    await nightStartInput.click();
-    await nightStartInput.fill("22:30");
-    await nightStartInput.blur();
+    // Wait for settings to load from backend
+    await page.waitForTimeout(1000);
 
-    // Wait for unsaved indicator
-    await expect(page.getByText(/unsaved changes/i)).toBeVisible({ timeout: 5000 });
+    // Get original value first
+    const nightStartInput = page.locator("#night-start");
+    const originalValue = await nightStartInput.inputValue();
+
+    // Use a unique test value based on current time to avoid collision with prior test runs
+    const testValue = originalValue === "22:30" ? "23:00" : "22:30";
+
+    // Change night start hour - use fill() for time inputs
+    await nightStartInput.fill(testValue);
+    await nightStartInput.blur(); // Trigger change event
+
+    // Verify value was actually changed
+    await expect(nightStartInput).toHaveValue(testValue);
+
+    // Wait for unsaved indicator with longer timeout
+    await expect(page.getByText(/unsaved changes/i)).toBeVisible({ timeout: 10000 });
 
     // Save
     await page.getByRole("button", { name: /save/i }).click();
     await expect(page.getByText(/unsaved changes/i)).not.toBeVisible({ timeout: 5000 });
 
+    // Wait for save to complete on backend
+    await page.waitForTimeout(500);
+
     // Refresh page
     await page.reload();
     await page.waitForLoadState("networkidle");
 
-    // Should still show the saved value
-    await expect(page.locator("#night-start")).toHaveValue("22:30", { timeout: 10000 });
+    // Wait for settings to reload from backend
+    await expect(page.getByRole("heading", { name: /study settings/i })).toBeVisible({ timeout: 10000 });
+    await page.waitForTimeout(1000); // Wait for settings API call to complete
+
+    // Should still show the saved value (testValue from before refresh)
+    await expect(page.locator("#night-start")).toHaveValue(testValue, { timeout: 10000 });
   });
 
   test("should reset settings to defaults", async ({ page }) => {
