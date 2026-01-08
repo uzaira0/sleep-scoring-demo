@@ -10,8 +10,10 @@ import { useSleepScoringStore, useMarkers } from "@/store";
 import { ActivityPlot } from "@/components/activity-plot";
 import { MarkerDataTable } from "@/components/marker-data-table";
 import { PopoutTableDialog } from "@/components/popout-table-dialog";
+import { ColorLegendDialog, ColorLegendButton } from "@/components/color-legend-dialog";
 import { useKeyboardShortcuts, useMarkerAutoSave, useMarkerLoad } from "@/hooks";
 import type { FileInfo, FileListResponse, ActivityDataResponse } from "@/api/types";
+import { MARKER_TYPES } from "@/api/types";
 
 const ACTIVITY_SOURCE_OPTIONS = [
   { value: "axis_y", label: "Y-Axis (Vertical)" },
@@ -30,6 +32,11 @@ const ALGORITHM_OPTIONS = [
   { value: "sadeh_1994_original", label: "Sadeh (Original)" },
   { value: "cole_kripke_1992_actilife", label: "Cole-Kripke (ActiLife)" },
   { value: "cole_kripke_1992_original", label: "Cole-Kripke (Original)" },
+];
+
+const MARKER_TYPE_OPTIONS = [
+  { value: MARKER_TYPES.MAIN_SLEEP, label: "Main Sleep" },
+  { value: MARKER_TYPES.NAP, label: "Nap" },
 ];
 
 // Types are imported from @/api/types (generated from backend OpenAPI schema)
@@ -85,6 +92,7 @@ export function ScoringPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [popoutDialogOpen, setPopoutDialogOpen] = useState(false);
   const [popoutHighlightType, setPopoutHighlightType] = useState<"onset" | "offset">("onset");
+  const [colorLegendOpen, setColorLegendOpen] = useState(false);
 
   // Enable keyboard shortcuts
   useKeyboardShortcuts();
@@ -132,6 +140,7 @@ export function ScoringPage() {
     setSelectedPeriod,
     deleteMarker,
     cancelMarkerCreation,
+    updateMarker,
   } = useMarkers();
 
   // Fetch files list
@@ -409,6 +418,7 @@ export function ScoringPage() {
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
+          <ColorLegendButton onClick={() => setColorLegendOpen(true)} />
         </div>
       </div>
 
@@ -491,6 +501,19 @@ export function ScoringPage() {
                   sleepMarkers[selectedPeriodIndex].onsetTimestamp,
                   sleepMarkers[selectedPeriodIndex].offsetTimestamp
                 )}
+              </div>
+              <div className="flex items-center gap-2 ml-4">
+                <Label className="text-sm">Type:</Label>
+                <Select
+                  options={MARKER_TYPE_OPTIONS}
+                  value={sleepMarkers[selectedPeriodIndex].markerType}
+                  onChange={(e) => {
+                    updateMarker("sleep", selectedPeriodIndex, {
+                      markerType: e.target.value as typeof MARKER_TYPES.MAIN_SLEEP | typeof MARKER_TYPES.NAP,
+                    });
+                  }}
+                  className="w-[120px]"
+                />
               </div>
             </>
           )}
@@ -702,6 +725,12 @@ export function ScoringPage() {
         open={popoutDialogOpen}
         onOpenChange={setPopoutDialogOpen}
         highlightType={popoutHighlightType}
+      />
+
+      {/* Color Legend Dialog */}
+      <ColorLegendDialog
+        open={colorLegendOpen}
+        onOpenChange={setColorLegendOpen}
       />
     </div>
   );

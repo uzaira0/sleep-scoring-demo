@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { devtools, persist } from "zustand/middleware";
 import { useShallow } from "zustand/react/shallow";
+import { MARKER_TYPES, type MarkerType } from "@/api/types";
 
 /**
  * User authentication state
@@ -64,7 +65,7 @@ interface MarkerState {
     onsetTimestamp: number | null;
     offsetTimestamp: number | null;
     markerIndex: number;
-    markerType: "MAIN_SLEEP" | "NAP";
+    markerType: MarkerType;
   }>;
   nonwearMarkers: Array<{
     startTimestamp: number | null;
@@ -167,7 +168,7 @@ interface SleepScoringState
   addSleepMarker: (
     onsetTimestamp: number,
     offsetTimestamp: number,
-    markerType?: "MAIN_SLEEP" | "NAP"
+    markerType?: MarkerType
   ) => void;
   addNonwearMarker: (startTimestamp: number, endTimestamp: number) => void;
   updateMarker: (
@@ -178,6 +179,7 @@ interface SleepScoringState
       offsetTimestamp: number;
       startTimestamp: number;
       endTimestamp: number;
+      markerType: MarkerType;
     }>
   ) => void;
   deleteMarker: (category: "sleep" | "nonwear", index: number) => void;
@@ -372,13 +374,13 @@ export const useSleepScoringStore = create<SleepScoringState>()(
 
             if (markerMode === "sleep") {
               // Determine marker type: first is MAIN_SLEEP, others are NAP
-              const markerType = sleepMarkers.length === 0 ? "MAIN_SLEEP" : "NAP";
+              const markerType = sleepMarkers.length === 0 ? MARKER_TYPES.MAIN_SLEEP : MARKER_TYPES.NAP;
               const newMarkerIndex = sleepMarkers.length;
               const newMarker = {
                 onsetTimestamp: onset,
                 offsetTimestamp: offset,
                 markerIndex: newMarkerIndex,
-                markerType: markerType as "MAIN_SLEEP" | "NAP",
+                markerType,
               };
               set({
                 sleepMarkers: [...sleepMarkers, newMarker],
@@ -415,7 +417,7 @@ export const useSleepScoringStore = create<SleepScoringState>()(
             onsetTimestamp,
             offsetTimestamp,
             markerIndex: sleepMarkers.length,
-            markerType: markerType ?? (sleepMarkers.length === 0 ? "MAIN_SLEEP" : "NAP") as "MAIN_SLEEP" | "NAP",
+            markerType: markerType ?? (sleepMarkers.length === 0 ? MARKER_TYPES.MAIN_SLEEP : MARKER_TYPES.NAP),
           };
           set({
             sleepMarkers: [...sleepMarkers, newMarker],
