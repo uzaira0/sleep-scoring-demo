@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import and_, delete, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from sleep_scoring_web.api.deps import CurrentUser, DbSession
+from sleep_scoring_web.api.deps import DbSession, Username, VerifiedPassword
 from sleep_scoring_web.db.models import File as FileModel
 from sleep_scoring_web.db.models import Marker, RawActivityData, SleepMetric, UserAnnotation
 from sleep_scoring_web.schemas import ManualNonwearPeriod, MarkerResponse, MarkerUpdateRequest, SleepMetrics, SleepPeriod
@@ -88,7 +88,7 @@ async def get_markers(
     file_id: int,
     analysis_date: date,
     db: DbSession,
-    current_user: CurrentUser,
+    _: VerifiedPassword,
     include_algorithm: Annotated[bool, Query(description="Include Sadeh algorithm results")] = True,
 ) -> MarkersWithMetricsResponse:
     """
@@ -226,7 +226,8 @@ async def save_markers(
     analysis_date: date,
     request: MarkerUpdateRequest,
     db: DbSession,
-    current_user: CurrentUser,
+    _: VerifiedPassword,
+    username: Username,
     background_tasks: BackgroundTasks,
 ) -> SaveStatusResponse:
     """
@@ -265,7 +266,7 @@ async def save_markers(
                     start_timestamp=marker.onset_timestamp,
                     end_timestamp=marker.offset_timestamp,
                     period_index=marker.marker_index or (i + 1),
-                    created_by_id=current_user.id,
+                    created_by=username,
                 )
                 db.add(db_marker)
                 sleep_count += 1
@@ -283,7 +284,7 @@ async def save_markers(
                     start_timestamp=marker.start_timestamp,
                     end_timestamp=marker.end_timestamp,
                     period_index=marker.marker_index or (i + 1),
-                    created_by_id=current_user.id,
+                    created_by=username,
                 )
                 db.add(db_marker)
                 nonwear_count += 1
@@ -295,7 +296,7 @@ async def save_markers(
         _update_user_annotation,
         file_id=file_id,
         analysis_date=analysis_date,
-        user_id=current_user.id,
+        username=username,
         sleep_markers=request.sleep_markers,
         nonwear_markers=request.nonwear_markers,
         algorithm_used=request.algorithm_used,
@@ -309,7 +310,7 @@ async def save_markers(
             file_id=file_id,
             analysis_date=analysis_date,
             sleep_markers=request.sleep_markers,
-            user_id=current_user.id,
+            username=username,
         )
 
     return SaveStatusResponse(
@@ -326,7 +327,7 @@ async def delete_marker(
     analysis_date: date,
     period_index: int,
     db: DbSession,
-    current_user: CurrentUser,
+    _: VerifiedPassword,
     marker_category: Annotated[MarkerCategory, Query()] = MarkerCategory.SLEEP,
 ) -> dict[str, Any]:
     """Delete a specific marker period."""
@@ -359,7 +360,7 @@ async def get_onset_offset_data(
     analysis_date: date,
     period_index: int,
     db: DbSession,
-    current_user: CurrentUser,
+    _: VerifiedPassword,
     window_minutes: Annotated[int, Query(ge=5, le=120)] = 100,
 ) -> OnsetOffsetTableResponse:
     """
@@ -526,7 +527,7 @@ async def get_full_table_data(
     file_id: int,
     analysis_date: date,
     db: DbSession,
-    current_user: CurrentUser,
+    _: VerifiedPassword,
 ) -> FullTableResponse:
     """
     Get full 48h of activity data for popout table display.
@@ -623,7 +624,7 @@ async def get_full_table_data(
 async def _update_user_annotation(
     file_id: int,
     analysis_date: date,
-    user_id: int,
+    username: str,
     sleep_markers: list[SleepPeriod] | None,
     nonwear_markers: list[ManualNonwearPeriod] | None,
     algorithm_used: AlgorithmType | None,
@@ -643,7 +644,7 @@ async def _update_user_annotation(
                 and_(
                     UserAnnotation.file_id == file_id,
                     UserAnnotation.analysis_date == analysis_date,
-                    UserAnnotation.user_id == user_id,
+                    UserAnnotation.username == username,
                 )
             )
         )
@@ -659,7 +660,7 @@ async def _update_user_annotation(
             annotation = UserAnnotation(
                 file_id=file_id,
                 analysis_date=analysis_date,
-                user_id=user_id,
+                username=username,
                 sleep_markers_json=sleep_json,
                 nonwear_markers_json=nonwear_json,
                 algorithm_used=algorithm_used.value if algorithm_used else None,
@@ -675,7 +676,7 @@ async def _calculate_and_store_metrics(
     file_id: int,
     analysis_date: date,
     sleep_markers: list[SleepPeriod],
-    user_id: int,
+    username: str,
 ) -> None:
     """
     Calculate and store Tudor-Locke sleep metrics for each complete period.
@@ -796,7 +797,7 @@ async def _calculate_and_store_metrics(
                     nonzero_epochs=metrics["nonzero_epochs"],
                     # Algorithm info
                     algorithm_type=AlgorithmType.SADEH_1994_ACTILIFE.value,
-                    scored_by_user_id=user_id,
+                    scored_by=username,
                     verification_status=VerificationStatus.DRAFT.value,
                 )
                 db.add(sleep_metric)

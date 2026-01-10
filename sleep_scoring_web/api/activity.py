@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import and_, select
 
-from sleep_scoring_web.api.deps import CurrentUser, DbSession
+from sleep_scoring_web.api.deps import DbSession, VerifiedPassword
 from sleep_scoring_web.db.models import File as FileModel
 from sleep_scoring_web.db.models import RawActivityData
 from sleep_scoring_web.schemas import ActivityDataColumnar, ActivityDataResponse
@@ -38,7 +38,7 @@ async def get_activity_data(
     file_id: int,
     analysis_date: date,
     db: DbSession,
-    current_user: CurrentUser,
+    _: VerifiedPassword,
     view_hours: int = Query(default=24, ge=12, le=48, description="Hours of data to return (12-48)"),
 ) -> ActivityDataResponse:
     """
@@ -135,7 +135,7 @@ async def get_activity_data_with_scoring(
     file_id: int,
     analysis_date: date,
     db: DbSession,
-    current_user: CurrentUser,
+    _: VerifiedPassword,
     view_hours: int = Query(default=24, ge=12, le=48),
     algorithm: str = Query(default="sadeh_1994_actilife", description="Sleep scoring algorithm to use"),
 ) -> ActivityDataResponse:
@@ -161,8 +161,8 @@ async def get_activity_data_with_scoring(
             detail=f"Unknown algorithm: {algorithm}. Available: {ALGORITHM_TYPES}",
         )
 
-    # Get base activity data
-    response = await get_activity_data(file_id, analysis_date, db, current_user, view_hours)
+    # Get base activity data (auth already checked by dependency)
+    response = await get_activity_data(file_id, analysis_date, db, "", view_hours)
 
     # Run sleep scoring algorithm on the data
     if response.data.axis_y:
@@ -184,7 +184,7 @@ async def get_activity_data_with_sadeh(
     file_id: int,
     analysis_date: date,
     db: DbSession,
-    current_user: CurrentUser,
+    _: VerifiedPassword,
     view_hours: int = Query(default=24, ge=12, le=48),
 ) -> ActivityDataResponse:
     """
@@ -196,7 +196,7 @@ async def get_activity_data_with_sadeh(
         file_id=file_id,
         analysis_date=analysis_date,
         db=db,
-        current_user=current_user,
+        _="",  # Auth already verified at route level
         view_hours=view_hours,
         algorithm="sadeh_1994_actilife",
     )

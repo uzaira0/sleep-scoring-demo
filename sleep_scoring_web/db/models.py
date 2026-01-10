@@ -1,8 +1,9 @@
 """
 SQLAlchemy ORM models for Sleep Scoring Web.
 
-Database schema matches the plan document with tables for:
-- Users (authentication and roles)
+Database schema with tables for:
+- Users (session-based auth with roles)
+- Sessions (session storage for authentication)
 - Files (uploaded activity data files)
 - RawActivityData (epoch-level activity data)
 - Markers (sleep and nonwear markers)
@@ -13,6 +14,7 @@ Database schema matches the plan document with tables for:
 from __future__ import annotations
 
 from datetime import datetime
+from enum import Enum
 from typing import Any
 
 from sqlalchemy import (
@@ -28,7 +30,15 @@ from sqlalchemy import (
     Text,
     func,
 )
+from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+class UserRole(str, Enum):
+    """User role for authorization."""
+
+    ADMIN = "admin"
+    ANNOTATOR = "annotator"
 
 
 class Base(DeclarativeBase):
@@ -38,22 +48,33 @@ class Base(DeclarativeBase):
 
 
 class User(Base):
-    """User model for authentication."""
+    """User account for session-based authentication."""
 
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
-    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
-    role: Mapped[str] = mapped_column(String(20), nullable=False, default="annotator")
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+    role: Mapped[UserRole] = mapped_column(SQLEnum(UserRole, native_enum=False), default=UserRole.ANNOTATOR, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    # Relationships
-    uploaded_files: Mapped[list[File]] = relationship("File", back_populates="uploaded_by")
-    annotations: Mapped[list[UserAnnotation]] = relationship("UserAnnotation", back_populates="user")
+
+class Session(Base):
+    """
+    Session storage for cookie-based site-wide authentication.
+
+    Used by SessionAuthMiddleware to store session tokens.
+    """
+
+    __tablename__ = "sessions"
+
+    token: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    username: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_activity: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class File(Base):
@@ -72,11 +93,11 @@ class File(Base):
     end_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
-    uploaded_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    # Honor-system username tracking
+    uploaded_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
     uploaded_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     # Relationships
-    uploaded_by: Mapped[User | None] = relationship("User", back_populates="uploaded_files")
     activity_data: Mapped[list[RawActivityData]] = relationship("RawActivityData", back_populates="file", cascade="all, delete-orphan")
     markers: Mapped[list[Marker]] = relationship("Marker", back_populates="file", cascade="all, delete-orphan")
     annotations: Mapped[list[UserAnnotation]] = relationship("UserAnnotation", back_populates="file", cascade="all, delete-orphan")
@@ -120,7 +141,8 @@ class Marker(Base):
     end_timestamp: Mapped[float | None] = mapped_column(Float, nullable=True)
     period_index: Mapped[int] = mapped_column(Integer, default=1)
 
-    created_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    # Honor-system username tracking
+    created_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -138,7 +160,9 @@ class UserAnnotation(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     file_id: Mapped[int] = mapped_column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
     analysis_date: Mapped[datetime] = mapped_column(Date, nullable=False)
-    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+
+    # Honor-system username (for consensus tracking)
+    username: Mapped[str] = mapped_column(String(100), nullable=False)
 
     # Marker data stored as JSON for flexibility
     sleep_markers_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
@@ -154,9 +178,8 @@ class UserAnnotation(Base):
 
     # Relationships
     file: Mapped[File] = relationship("File", back_populates="annotations")
-    user: Mapped[User] = relationship("User", back_populates="annotations")
 
-    __table_args__ = (Index("ix_user_annotations_file_date_user", "file_id", "analysis_date", "user_id", unique=True),)
+    __table_args__ = (Index("ix_user_annotations_file_date_user", "file_id", "analysis_date", "username", unique=True),)
 
 
 class SleepMetric(Base):
@@ -206,7 +229,7 @@ class SleepMetric(Base):
 
     # Algorithm info
     algorithm_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    scored_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    scored_by: Mapped[str | None] = mapped_column(String(100), nullable=True)  # Honor-system username
     verification_status: Mapped[str] = mapped_column(String(50), default="draft")
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
@@ -249,7 +272,8 @@ class ResolvedAnnotation(Base):
     final_sleep_markers_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
     final_nonwear_markers_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
 
-    resolved_by_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    # Honor-system username
+    resolved_by: Mapped[str] = mapped_column(String(100), nullable=False)
     resolved_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     resolution_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -282,8 +306,8 @@ class DiaryEntry(Base):
     number_of_awakenings: Mapped[int | None] = mapped_column(Integer, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Import metadata
-    imported_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    # Honor-system username
+    imported_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
     imported_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     # Relationships
@@ -296,13 +320,13 @@ class UserSettings(Base):
     """
     User-specific settings and preferences.
 
-    Persists settings that were previously only stored in localStorage.
+    Keyed by username (honor system).
     """
 
     __tablename__ = "user_settings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
+    username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
 
     # Study settings
     sleep_detection_rule: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -324,6 +348,3 @@ class UserSettings(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
-
-    # Relationships
-    user: Mapped[User] = relationship("User")

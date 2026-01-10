@@ -20,6 +20,7 @@ from sleep_scoring_app.core.constants import (
     ActivityDataPreference,
     AlgorithmType,
     DirectoryName,
+    ExportColumn,
     NonwearAlgorithm,
     get_backup_filename,
     sanitize_filename_component,
@@ -472,6 +473,8 @@ class ExportManager:
         from sleep_scoring_app.services.nonwear_service import NonwearDataService
 
         warnings = []
+        failure_count = 0
+        total_files = len(sleep_metrics_list)
 
         # Get service instances
         data_manager = DataManager(database_manager=self.db_manager)
@@ -492,17 +495,14 @@ class ExportManager:
                 filename = metrics.filename
 
                 # Load activity data ONCE per file (cache hit or miss)
+                # FIX: Load ALL activity data for the file without time constraints.
+                # The previous implementation only loaded data for ONE date's time range,
+                # causing metrics calculation to fail for all other dates of the same file.
+                # Per-period filtering (below) extracts the correct subset for each period.
                 if filename not in activity_data_cache:
-                    # Find the full time range needed for all periods in this file
-                    # Complete periods are guaranteed to have non-None timestamps
-                    all_starts = [datetime.fromtimestamp(p.onset_timestamp) for p in complete_periods if p.onset_timestamp is not None]
-                    all_ends = [datetime.fromtimestamp(p.offset_timestamp) for p in complete_periods if p.offset_timestamp is not None]
-                    earliest_start = min(all_starts) - timedelta(minutes=5)  # 5 min buffer for Sadeh
-                    latest_end = max(all_ends) + timedelta(minutes=5)
-
-                    # Load AXIS_Y data for Sadeh
+                    # Load ALL AXIS_Y data for Sadeh (no time constraints)
                     timestamps, axis_y_values = self.db_manager.load_raw_activity_data(
-                        filename=filename, start_time=earliest_start, end_time=latest_end, activity_column=ActivityDataPreference.AXIS_Y
+                        filename=filename, start_time=None, end_time=None, activity_column=ActivityDataPreference.AXIS_Y
                     )
 
                     if not timestamps or not axis_y_values:
@@ -514,13 +514,13 @@ class ExportManager:
                         activity_data_cache[filename] = ([], [], [])
                         continue
 
-                    # Also load vector magnitude for Choi algorithm
+                    # Also load ALL vector magnitude for Choi algorithm (no time constraints)
                     _, vector_magnitude = self.db_manager.load_raw_activity_data(
-                        filename=filename, start_time=earliest_start, end_time=latest_end, activity_column=ActivityDataPreference.VECTOR_MAGNITUDE
+                        filename=filename, start_time=None, end_time=None, activity_column=ActivityDataPreference.VECTOR_MAGNITUDE
                     )
 
                     activity_data_cache[filename] = (timestamps, axis_y_values, vector_magnitude or [])
-                    logger.debug("Cached activity data for %s (%d epochs)", filename, len(timestamps))
+                    logger.debug("Cached ALL activity data for %s (%d epochs covering full file)", filename, len(timestamps))
 
                 # Get cached data
                 cached_timestamps, cached_axis_y, cached_vector_mag = activity_data_cache[filename]
@@ -537,10 +537,11 @@ class ExportManager:
                     period_end = datetime.fromtimestamp(period.offset_timestamp) + timedelta(minutes=5)
 
                     # Filter cached data to the period's time range
+                    # Note: cached_timestamps are guaranteed to be datetime objects
+                    # from load_raw_activity_data() which parses from ISO format
                     indices = []
                     for i, ts in enumerate(cached_timestamps):
-                        ts_dt = ts if isinstance(ts, datetime) else datetime.fromtimestamp(ts)
-                        if period_start <= ts_dt <= period_end:
+                        if period_start <= ts <= period_end:
                             indices.append(i)
 
                     if not indices:
@@ -550,8 +551,8 @@ class ExportManager:
                     axis_y_values = [cached_axis_y[i] for i in indices]
                     vector_magnitude = [cached_vector_mag[i] for i in indices] if cached_vector_mag else []
 
-                    # Convert datetime timestamps to Unix timestamps for compatibility
-                    unix_timestamps = [ts.timestamp() if isinstance(ts, datetime) else ts for ts in timestamps]
+                    # Convert datetime timestamps to Unix timestamps for metrics calculation
+                    unix_timestamps = [ts.timestamp() for ts in timestamps]
 
                     # Get the algorithm from metrics or use default
                     algorithm_id = metrics.sleep_algorithm_name or AlgorithmFactory.get_default_algorithm_id()
@@ -638,21 +639,24 @@ class ExportManager:
                             continue
 
                         # Store calculated metrics for this specific period
+                        # CRITICAL: Use ExportColumn keys to match to_export_dict() keys
+                        # so that row.update() in to_export_dict_list() properly overwrites
+                        # the main sleep values with period-specific values for naps
                         period_metrics_for_storage = {
-                            "total_sleep_time": period_metrics.get("Total Sleep Time (TST)"),
-                            "sleep_efficiency": period_metrics.get("Efficiency"),
-                            "total_minutes_in_bed": period_metrics.get("Total Minutes in Bed"),
-                            "waso": period_metrics.get("Wake After Sleep Onset (WASO)"),
-                            "awakenings": period_metrics.get("Number of Awakenings"),
-                            "average_awakening_length": period_metrics.get("Average Awakening Length"),
-                            "total_activity": period_metrics.get("Total Counts"),
-                            "movement_index": period_metrics.get("Movement Index"),
-                            "fragmentation_index": period_metrics.get("Fragmentation Index"),
-                            "sleep_fragmentation_index": period_metrics.get("Sleep Fragmentation Index"),
-                            "sadeh_onset": period_metrics.get("Sadeh Algorithm Value at Sleep Onset"),
-                            "sadeh_offset": period_metrics.get("Sadeh Algorithm Value at Sleep Offset"),
-                            "overlapping_nonwear_minutes_algorithm": period_metrics.get("Overlapping Nonwear Minutes (Algorithm)"),
-                            "overlapping_nonwear_minutes_sensor": period_metrics.get("Overlapping Nonwear Minutes (Sensor)"),
+                            ExportColumn.TOTAL_SLEEP_TIME: period_metrics.get("Total Sleep Time (TST)"),
+                            ExportColumn.EFFICIENCY: period_metrics.get("Efficiency"),
+                            ExportColumn.TOTAL_MINUTES_IN_BED: period_metrics.get("Total Minutes in Bed"),
+                            ExportColumn.WASO: period_metrics.get("Wake After Sleep Onset (WASO)"),
+                            ExportColumn.NUMBER_OF_AWAKENINGS: period_metrics.get("Number of Awakenings"),
+                            ExportColumn.AVERAGE_AWAKENING_LENGTH: period_metrics.get("Average Awakening Length"),
+                            ExportColumn.TOTAL_COUNTS: period_metrics.get("Total Counts"),
+                            ExportColumn.MOVEMENT_INDEX: period_metrics.get("Movement Index"),
+                            ExportColumn.FRAGMENTATION_INDEX: period_metrics.get("Fragmentation Index"),
+                            ExportColumn.SLEEP_FRAGMENTATION_INDEX: period_metrics.get("Sleep Fragmentation Index"),
+                            ExportColumn.SADEH_ONSET: period_metrics.get("Sadeh Algorithm Value at Sleep Onset"),
+                            ExportColumn.SADEH_OFFSET: period_metrics.get("Sadeh Algorithm Value at Sleep Offset"),
+                            ExportColumn.OVERLAPPING_NONWEAR_MINUTES_ALGORITHM: period_metrics.get("Overlapping Nonwear Minutes (Algorithm)"),
+                            ExportColumn.OVERLAPPING_NONWEAR_MINUTES_SENSOR: period_metrics.get("Overlapping Nonwear Minutes (Sensor)"),
                         }
 
                         # Store metrics for this period (works for both main sleep and naps)
@@ -683,12 +687,19 @@ class ExportManager:
             except Exception as e:
                 import traceback
 
+                failure_count += 1
                 warning_msg = f"Error calculating metrics for {metrics.filename}: {e}"
                 warnings.append(warning_msg)
                 logger.warning(warning_msg)
                 logger.warning("Full traceback: %s", traceback.format_exc())
                 # Continue with export even if calculation fails for one file
                 continue
+
+        # Add summary warning if there were failures so user is aware of partial export
+        if failure_count > 0:
+            summary_msg = f"EXPORT WARNING: {failure_count} of {total_files} files had metrics calculation errors. Check log for details."
+            warnings.insert(0, summary_msg)  # Put at start so it's visible
+            logger.warning(summary_msg)
 
         return warnings
 
@@ -736,8 +747,10 @@ class ExportManager:
 
                 # Add each nonwear period as a row
                 for i, period in enumerate(complete_periods, start=1):
-                    # Complete periods guaranteed to have non-None timestamps
+                    # Defensive check: get_complete_periods() should only return periods
+                    # with both timestamps set, but we guard against edge cases
                     if period.start_timestamp is None or period.end_timestamp is None:
+                        logger.warning("Skipping incomplete nonwear period %d for %s", i, filename)
                         continue
                     start_dt = datetime.fromtimestamp(period.start_timestamp)
                     end_dt = datetime.fromtimestamp(period.end_timestamp)

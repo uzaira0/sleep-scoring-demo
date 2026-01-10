@@ -24,16 +24,12 @@ from .models import (
     ExportRequest,
     ExportResponse,
     FileInfo,
-    FileListResponse,
     FileUploadResponse,
     ManualNonwearPeriod,
     MarkerResponse,
     MarkerUpdateRequest,
     SleepMetrics,
     SleepPeriod,
-    UserCreate,
-    UserRead,
-    UserUpdate,
 )
 
 __all__ = [
@@ -50,7 +46,6 @@ __all__ = [
     "ExportResponse",
     # Files
     "FileInfo",
-    "FileListResponse",
     "FileStatus",
     "FileUploadResponse",
     # Markers
@@ -63,10 +58,7 @@ __all__ = [
     "SleepMetrics",
     "SleepPeriod",
     "SleepPeriodDetectorType",
-    # Users
-    "UserCreate",
-    "UserRead",
+    # Auth enums
     "UserRole",
-    "UserUpdate",
     "VerificationStatus",
 ]

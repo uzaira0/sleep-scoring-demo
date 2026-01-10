@@ -12,9 +12,8 @@ describe("SleepScoringStore", () => {
   // Reset store before each test
   beforeEach(() => {
     useSleepScoringStore.setState({
-      accessToken: null,
-      refreshToken: null,
-      user: null,
+      sitePassword: null,
+      username: "anonymous",
       isAuthenticated: false,
       currentFileId: null,
       currentFilename: null,
@@ -38,49 +37,39 @@ describe("SleepScoringStore", () => {
     });
   });
 
-  describe("Auth state", () => {
+  describe("Auth state (site password model)", () => {
     it("should start with unauthenticated state", () => {
       const state = useSleepScoringStore.getState();
 
       expect(state.isAuthenticated).toBe(false);
-      expect(state.accessToken).toBeNull();
-      expect(state.user).toBeNull();
+      expect(state.sitePassword).toBeNull();
+      expect(state.username).toBe("anonymous");
     });
 
     it("should set auth state correctly", () => {
       const { setAuth } = useSleepScoringStore.getState();
 
-      setAuth("test-token", "refresh-token", {
-        id: 1,
-        email: "test@example.com",
-        username: "testuser",
-        role: "admin",
-      });
+      setAuth("test-password", "testuser");
 
       const state = useSleepScoringStore.getState();
       expect(state.isAuthenticated).toBe(true);
-      expect(state.accessToken).toBe("test-token");
-      expect(state.user?.username).toBe("testuser");
+      expect(state.sitePassword).toBe("test-password");
+      expect(state.username).toBe("testuser");
     });
 
     it("should clear auth state correctly", () => {
       const { setAuth, clearAuth } = useSleepScoringStore.getState();
 
       // First set auth
-      setAuth("test-token", "refresh-token", {
-        id: 1,
-        email: "test@example.com",
-        username: "testuser",
-        role: "admin",
-      });
+      setAuth("test-password", "testuser");
 
       // Then clear it
       clearAuth();
 
       const state = useSleepScoringStore.getState();
       expect(state.isAuthenticated).toBe(false);
-      expect(state.accessToken).toBeNull();
-      expect(state.user).toBeNull();
+      expect(state.sitePassword).toBeNull();
+      expect(state.username).toBe("anonymous");
     });
   });
 

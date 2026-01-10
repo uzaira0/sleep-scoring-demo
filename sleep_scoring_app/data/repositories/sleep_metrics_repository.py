@@ -21,6 +21,7 @@ from sleep_scoring_app.core.dataclasses import (
     SleepMetrics,
     SleepPeriod,
 )
+from sleep_scoring_app.utils.participant_extractor import extract_participant_info
 from sleep_scoring_app.core.exceptions import DatabaseError, ErrorCodes, ValidationError
 from sleep_scoring_app.core.validation import InputValidator
 from sleep_scoring_app.data.repositories.base_repository import BaseRepository
@@ -157,42 +158,35 @@ class SleepMetricsRepository(BaseRepository):
                         (metrics.filename, metrics.analysis_date),
                     )
 
-                    for i, period in enumerate(
-                        [
-                            metrics.daily_sleep_markers.period_1,
-                            metrics.daily_sleep_markers.period_2,
-                            metrics.daily_sleep_markers.period_3,
-                            metrics.daily_sleep_markers.period_4,
-                        ],
-                        1,
-                    ):
-                        if period is not None and period.is_complete:
-                            duration_minutes = int(period.duration_minutes) if period.duration_minutes else None
+                    # Use get_complete_periods() to only save complete periods
+                    # and use period.marker_index instead of enumeration to preserve actual indices
+                    for period in metrics.daily_sleep_markers.get_complete_periods():
+                        duration_minutes = int(period.duration_minutes) if period.duration_minutes else None
 
-                            conn.execute(
-                                f"""
-                                INSERT INTO {markers_table} (
-                                    {self._validate_column_name(DatabaseColumn.FILENAME)},
-                                    {self._validate_column_name(DatabaseColumn.PARTICIPANT_ID)},
-                                    {self._validate_column_name(DatabaseColumn.ANALYSIS_DATE)},
-                                    {self._validate_column_name(DatabaseColumn.MARKER_INDEX)},
-                                    {self._validate_column_name(DatabaseColumn.ONSET_TIMESTAMP)},
-                                    {self._validate_column_name(DatabaseColumn.OFFSET_TIMESTAMP)},
-                                    {self._validate_column_name(DatabaseColumn.DURATION_MINUTES)},
-                                    {self._validate_column_name(DatabaseColumn.MARKER_TYPE)}
-                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                                """,
-                                (
-                                    metrics.filename,
-                                    metrics.participant.numerical_id,
-                                    metrics.analysis_date,
-                                    i,
-                                    period.onset_timestamp,
-                                    period.offset_timestamp,
-                                    duration_minutes,
-                                    period.marker_type,
-                                ),
-                            )
+                        conn.execute(
+                            f"""
+                            INSERT INTO {markers_table} (
+                                {self._validate_column_name(DatabaseColumn.FILENAME)},
+                                {self._validate_column_name(DatabaseColumn.PARTICIPANT_ID)},
+                                {self._validate_column_name(DatabaseColumn.ANALYSIS_DATE)},
+                                {self._validate_column_name(DatabaseColumn.MARKER_INDEX)},
+                                {self._validate_column_name(DatabaseColumn.ONSET_TIMESTAMP)},
+                                {self._validate_column_name(DatabaseColumn.OFFSET_TIMESTAMP)},
+                                {self._validate_column_name(DatabaseColumn.DURATION_MINUTES)},
+                                {self._validate_column_name(DatabaseColumn.MARKER_TYPE)}
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                metrics.filename,
+                                metrics.participant.numerical_id,
+                                metrics.analysis_date,
+                                period.marker_index,  # Use actual marker_index, not enumeration
+                                period.onset_timestamp,
+                                period.offset_timestamp,
+                                duration_minutes,
+                                period.marker_type,
+                            ),
+                        )
 
                     conn.commit()
                     logger.info("Atomically saved metrics and markers for %s on %s", metrics.filename, metrics.analysis_date)
@@ -372,25 +366,34 @@ class SleepMetricsRepository(BaseRepository):
             except (KeyError, IndexError):
                 return default
 
-        if not safe_get(DatabaseColumn.FILENAME):
+        filename = safe_get(DatabaseColumn.FILENAME)
+        if not filename:
             msg = "Database row missing filename"
             raise ValidationError(msg, ErrorCodes.MISSING_REQUIRED)
 
-        numerical_id = InputValidator.validate_string(
-            safe_get(DatabaseColumn.PARTICIPANT_ID) or "Unknown",
-            min_length=1,
-            name="participant_id",
-        )
-        timepoint = safe_get(DatabaseColumn.PARTICIPANT_TIMEPOINT) or "BO"
-        group = safe_get(DatabaseColumn.PARTICIPANT_GROUP) or "G1"
-        full_id = f"{numerical_id} {timepoint} {group}" if numerical_id != "UNKNOWN" else "UNKNOWN BO G1"
+        # Re-extract participant info from filename to ensure correct values
+        # This fixes data that was saved with wrong timepoint/group defaults
+        participant = extract_participant_info(filename)
 
-        participant = ParticipantInfo(
-            numerical_id=numerical_id,
-            full_id=full_id,
-            group=group,
-            timepoint=timepoint,
-        )
+        # If extraction failed, fall back to database values
+        if participant.numerical_id == "UNKNOWN":
+            numerical_id = InputValidator.validate_string(
+                safe_get(DatabaseColumn.PARTICIPANT_ID) or "Unknown",
+                min_length=1,
+                name="participant_id",
+            )
+            timepoint = safe_get(DatabaseColumn.PARTICIPANT_TIMEPOINT) or "T1"
+            group = safe_get(DatabaseColumn.PARTICIPANT_GROUP) or "G1"
+            full_id = f"{numerical_id} {timepoint} {group}" if numerical_id != "UNKNOWN" else "UNKNOWN T1 G1"
+
+            participant = ParticipantInfo(
+                numerical_id=numerical_id,
+                full_id=full_id,
+                group=group,
+                timepoint=timepoint,
+                group_str=group,
+                timepoint_str=timepoint,
+            )
 
         onset_timestamp = safe_get(DatabaseColumn.ONSET_TIMESTAMP)
         offset_timestamp = safe_get(DatabaseColumn.OFFSET_TIMESTAMP)
@@ -489,14 +492,18 @@ class SleepMetricsRepository(BaseRepository):
         """Convert dictionary data to SleepMetrics object with validation."""
         self._validate_export_data(data)
 
+        # Get raw string values for export
+        group_str = data.get("Participant Group", "G1")
+        timepoint_str = data.get("Participant Timepoint", "T1")
+
         try:
-            group = ParticipantGroup(data.get("Participant Group", ParticipantGroup.GROUP_1))
+            group = ParticipantGroup(group_str)
         except ValueError:
             logger.warning("Invalid ParticipantGroup in database, using GROUP_1")
             group = ParticipantGroup.GROUP_1
 
         try:
-            timepoint = ParticipantTimepoint(data.get("Participant Timepoint", ParticipantTimepoint.T1))
+            timepoint = ParticipantTimepoint(timepoint_str)
         except ValueError:
             logger.warning("Invalid ParticipantTimepoint in database, using T1")
             timepoint = ParticipantTimepoint.T1
@@ -509,6 +516,8 @@ class SleepMetricsRepository(BaseRepository):
             ),
             group=group,
             timepoint=timepoint,
+            group_str=group_str,  # Set string representation for export
+            timepoint_str=timepoint_str,  # Set string representation for export
         )
 
         onset_timestamp = data.get("onset_timestamp")

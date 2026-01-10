@@ -4,17 +4,11 @@ import { useShallow } from "zustand/react/shallow";
 import { MARKER_TYPES, ALGORITHM_TYPES, SLEEP_DETECTION_RULES, type MarkerType } from "@/api/types";
 
 /**
- * User authentication state
+ * User authentication state (site password model)
  */
 interface AuthState {
-  accessToken: string | null;
-  refreshToken: string | null;
-  user: {
-    id: number;
-    email: string;
-    username: string;
-    role: string;
-  } | null;
+  sitePassword: string | null;
+  username: string;  // Honor system - for audit logging
   isAuthenticated: boolean;
 }
 
@@ -126,11 +120,7 @@ interface SleepScoringState
     StudySettingsState,
     DataSettingsState {
   // Auth actions
-  setAuth: (
-    accessToken: string,
-    refreshToken: string,
-    user: AuthState["user"]
-  ) => void;
+  setAuth: (sitePassword: string, username: string) => void;
   clearAuth: () => void;
 
   // File actions
@@ -214,10 +204,9 @@ export const useSleepScoringStore = create<SleepScoringState>()(
   devtools(
     persist(
       (set, get) => ({
-        // Initial auth state
-        accessToken: null,
-        refreshToken: null,
-        user: null,
+        // Initial auth state (site password model)
+        sitePassword: null,
+        username: "anonymous",
         isAuthenticated: false,
 
         // Initial file state
@@ -269,19 +258,17 @@ export const useSleepScoringStore = create<SleepScoringState>()(
         skipRows: 10,
 
         // Auth actions
-        setAuth: (accessToken, refreshToken, user) =>
+        setAuth: (sitePassword, username) =>
           set({
-            accessToken,
-            refreshToken,
-            user,
+            sitePassword,
+            username,
             isAuthenticated: true,
           }),
 
         clearAuth: () =>
           set({
-            accessToken: null,
-            refreshToken: null,
-            user: null,
+            sitePassword: null,
+            username: "anonymous",
             isAuthenticated: false,
           }),
 
@@ -501,9 +488,8 @@ export const useSleepScoringStore = create<SleepScoringState>()(
         name: "sleep-scoring-storage",
         partialize: (state) => ({
           // Only persist these fields
-          accessToken: state.accessToken,
-          refreshToken: state.refreshToken,
-          user: state.user,
+          sitePassword: state.sitePassword,
+          username: state.username,
           isAuthenticated: state.isAuthenticated,
           // Preferences
           preferredDisplayColumn: state.preferredDisplayColumn,
@@ -529,8 +515,8 @@ export const useSleepScoringStore = create<SleepScoringState>()(
 export const useAuth = () =>
   useSleepScoringStore(
     useShallow((state) => ({
-      accessToken: state.accessToken,
-      user: state.user,
+      sitePassword: state.sitePassword,
+      username: state.username,
       isAuthenticated: state.isAuthenticated,
       setAuth: state.setAuth,
       clearAuth: state.clearAuth,

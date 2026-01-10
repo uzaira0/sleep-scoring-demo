@@ -301,7 +301,7 @@ export function DiaryPanel({ compact = false }: DiaryPanelProps) {
                 {diaryEntry.notes}
               </p>
             )}
-            <Button variant="outline" size="sm" className="h-6 text-xs w-full mt-2" onClick={handleStartEdit}>
+            <Button variant="outline" size="sm" className="h-6 text-xs w-full mt-2" onClick={handleStartEdit} data-testid="diary-edit-btn">
               Edit
             </Button>
           </div>
@@ -309,7 +309,7 @@ export function DiaryPanel({ compact = false }: DiaryPanelProps) {
           /* No diary entry */
           <div className="text-center py-2">
             <p className="text-xs text-muted-foreground mb-2">No diary entry for this date</p>
-            <Button variant="outline" size="sm" className="h-6 text-xs" onClick={handleStartEdit}>
+            <Button variant="outline" size="sm" className="h-6 text-xs" onClick={handleStartEdit} data-testid="diary-add-btn">
               Add Entry
             </Button>
           </div>

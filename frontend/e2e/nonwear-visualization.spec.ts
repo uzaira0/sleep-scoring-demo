@@ -21,7 +21,8 @@ test.describe("Nonwear Visualization", () => {
     await page.fill('input[name="password"]', "admin");
     await page.click('button[type="submit"]');
     await page.waitForURL("**/scoring");
-    await page.waitForSelector(".uplot", { timeout: 10000 });
+    // Wait for the chart overlay to be visible (indicates chart is fully rendered)
+    await expect(page.locator(".u-over").first()).toBeVisible({ timeout: 15000 });
   }
 
   test("displays Choi-detected nonwear regions on plot", async ({ page }) => {
@@ -116,13 +117,16 @@ test.describe("Nonwear Visualization", () => {
     console.log(`Initial Choi regions: ${initialCount}`);
 
     // Navigate to next date using the date navigation buttons
+    // Wait for date navigation buttons to be visible first
     const nextDateBtn = page.locator('[data-testid="next-date-btn"]');
-    const hasNextBtn = (await nextDateBtn.count()) > 0;
+    const prevDateBtn = page.locator('[data-testid="prev-date-btn"]');
 
-    if (hasNextBtn) {
+    // Try to click next button if enabled
+    const isNextEnabled = await nextDateBtn.isEnabled().catch(() => false);
+
+    if (isNextEnabled) {
       await nextDateBtn.click();
-      await page.waitForSelector(".uplot", { timeout: 10000 });
-      await page.waitForTimeout(2000);
+      await expect(page.locator(".u-over").first()).toBeVisible({ timeout: 15000 });
 
       // Count may change with different date
       const afterDateChange = await page
@@ -130,12 +134,11 @@ test.describe("Nonwear Visualization", () => {
         .count();
       console.log(`Choi regions after date change: ${afterDateChange}`);
     } else {
-      // If no next button, try previous button
-      const prevDateBtn = page.locator('[data-testid="prev-date-btn"]');
-      if ((await prevDateBtn.count()) > 0) {
+      // If next is disabled, try previous button
+      const isPrevEnabled = await prevDateBtn.isEnabled().catch(() => false);
+      if (isPrevEnabled) {
         await prevDateBtn.click();
-        await page.waitForSelector(".uplot", { timeout: 10000 });
-        await page.waitForTimeout(2000);
+        await expect(page.locator(".u-over").first()).toBeVisible({ timeout: 15000 });
 
         const afterDateChange = await page
           .locator(".marker-region.choi-nonwear")

@@ -58,12 +58,26 @@ class ParticipantInfo:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ParticipantInfo:
         """Create from dictionary data."""
+        # Get group and timepoint values
+        group_val = data.get("participant_group", ParticipantGroup.GROUP_1)
+        timepoint_val = data.get("participant_timepoint", ParticipantTimepoint.T1)
+
+        # Convert to enums if strings
+        group_enum = ParticipantGroup(group_val) if isinstance(group_val, str) else group_val
+        timepoint_enum = ParticipantTimepoint(timepoint_val) if isinstance(timepoint_val, str) else timepoint_val
+
+        # Get string representations (use enum values if not provided)
+        group_str = data.get("group_str") or str(group_enum.value if hasattr(group_enum, "value") else group_enum)
+        timepoint_str = data.get("timepoint_str") or str(timepoint_enum.value if hasattr(timepoint_enum, "value") else timepoint_enum)
+
         return cls(
             numerical_id=data.get("numerical_participant_id", "Unknown"),
             full_id=data.get("full_participant_id", "Unknown T1 G1"),
-            group=ParticipantGroup(data.get("participant_group", ParticipantGroup.GROUP_1)),
-            timepoint=ParticipantTimepoint(data.get("participant_timepoint", ParticipantTimepoint.T1)),
+            group=group_enum,
+            timepoint=timepoint_enum,
             date=data.get("date", ""),
+            group_str=group_str,
+            timepoint_str=timepoint_str,
         )
 
     @classmethod

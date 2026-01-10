@@ -3,28 +3,52 @@ import type { paths } from "./schema";
 import { useSleepScoringStore } from "@/store";
 
 /**
+ * Get API base path.
+ * Auto-detects from window.location.pathname for deployment behind reverse proxy.
+ * E.g., if app is at /sleep-scoring/, API is at /sleep-scoring/api
+ */
+function getApiBase(): string {
+  if (typeof window === "undefined") return "/api";
+
+  // In development, API is at root
+  if (window.location.hostname === "localhost") {
+    return "/api";
+  }
+
+  // In production, derive from path
+  // E.g., /sleep-scoring/scoring -> base is /sleep-scoring
+  const pathParts = window.location.pathname.split("/").filter(Boolean);
+  if (pathParts.length > 0) {
+    return `/${pathParts[0]}/api`;
+  }
+  return "/api";
+}
+
+/**
  * Base API client for Sleep Scoring Web API.
  *
  * Uses openapi-fetch for type-safe API calls.
  * The schema is generated from the backend's OpenAPI spec.
  */
 const baseClient = createClient<paths>({
-  baseUrl: "",
+  baseUrl: getApiBase(),
 });
 
 /**
- * Middleware to add auth headers and handle 401 errors
+ * Middleware to add auth headers and handle 401 errors.
+ * Uses site password model with X-Site-Password and X-Username headers.
  */
 baseClient.use({
   onRequest: ({ request }) => {
-    const token = useSleepScoringStore.getState().accessToken;
-    if (token) {
-      request.headers.set("Authorization", `Bearer ${token}`);
+    const { sitePassword, username } = useSleepScoringStore.getState();
+    if (sitePassword) {
+      request.headers.set("X-Site-Password", sitePassword);
     }
+    request.headers.set("X-Username", username || "anonymous");
     return request;
   },
   onResponse: ({ response }) => {
-    // Clear auth on 401 Unauthorized (expired/invalid token)
+    // Clear auth on 401 Unauthorized (invalid password)
     if (response.status === 401) {
       useSleepScoringStore.getState().clearAuth();
     }
@@ -36,16 +60,17 @@ export const api = baseClient;
 
 /**
  * Helper function to fetch with authentication.
- * Automatically adds Authorization header using token from store.
+ * Automatically adds X-Site-Password and X-Username headers from store.
  */
 export async function fetchWithAuth<T>(url: string, options?: RequestInit): Promise<T> {
-  const token = useSleepScoringStore.getState().accessToken;
+  const { sitePassword, username } = useSleepScoringStore.getState();
 
   const response = await fetch(url, {
     ...options,
     headers: {
       ...options?.headers,
-      Authorization: token ? `Bearer ${token}` : "",
+      ...(sitePassword ? { "X-Site-Password": sitePassword } : {}),
+      "X-Username": username || "anonymous",
     },
   });
 
@@ -61,102 +86,73 @@ export async function fetchWithAuth<T>(url: string, options?: RequestInit): Prom
 }
 
 /**
- * Auth-specific API calls (no token required)
+ * Auth-specific API calls
  */
 export const authApi = {
-  async login(username: string, password: string) {
-    // OAuth2 password flow requires form data
-    const formData = new URLSearchParams();
-    formData.append("username", username);
-    formData.append("password", password);
-
-    const response = await fetch("/api/v1/auth/login", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || "Login failed");
-    }
-
-    return response.json() as Promise<{
-      access_token: string;
-      refresh_token: string;
-      token_type: string;
-    }>;
-  },
-
-  async register(email: string, username: string, password: string) {
-    const response = await fetch("/api/v1/auth/register", {
+  /**
+   * Verify site password.
+   * Returns session expiration info if valid.
+   */
+  async verifyPassword(password: string) {
+    const response = await fetch(`${getApiBase()}/auth/verify`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ email, username, password }),
+      body: JSON.stringify({ password }),
     });
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(error.detail || "Registration failed");
-    }
-
-    return response.json();
-  },
-
-  async refreshToken(refreshToken: string) {
-    const response = await fetch("/api/v1/auth/refresh", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
-
-    if (!response.ok) {
-      throw new Error("Token refresh failed");
+      throw new Error(error.detail || "Invalid password");
     }
 
     return response.json() as Promise<{
-      access_token: string;
-      refresh_token: string;
-      token_type: string;
+      valid: boolean;
+      session_expire_hours: number;
     }>;
   },
 
-  async getMe(token: string) {
-    const response = await fetch("/api/v1/auth/me", {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-
+  /**
+   * Check if auth is required (site password configured).
+   */
+  async getAuthStatus() {
+    const response = await fetch(`${getApiBase()}/auth/status`);
     if (!response.ok) {
-      throw new Error("Failed to get user info");
+      throw new Error("Failed to get auth status");
     }
-
-    return response.json();
+    return response.json() as Promise<{
+      auth_required: boolean;
+      session_expire_hours: number;
+    }>;
   },
 };
+
+/**
+ * Get auth headers for API calls
+ */
+function getAuthHeaders(): Record<string, string> {
+  const { sitePassword, username } = useSleepScoringStore.getState();
+  return {
+    ...(sitePassword ? { "X-Site-Password": sitePassword } : {}),
+    "X-Username": username || "anonymous",
+  };
+}
 
 /**
  * Settings API calls
  */
 export const settingsApi = {
   async getSettings() {
-    return fetchWithAuth<import("./types").UserSettingsResponse>("/api/v1/settings");
+    return fetchWithAuth<import("./types").UserSettingsResponse>(`${getApiBase()}/settings`);
   },
 
   async updateSettings(data: import("./types").UserSettingsUpdate) {
-    const token = useSleepScoringStore.getState().accessToken;
-    const response = await fetch("/api/v1/settings", {
+    const response = await fetch(`${getApiBase()}/settings`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...getAuthHeaders(),
       },
       body: JSON.stringify(data),
     });
@@ -173,12 +169,9 @@ export const settingsApi = {
   },
 
   async resetSettings() {
-    const token = useSleepScoringStore.getState().accessToken;
-    const response = await fetch("/api/v1/settings", {
+    const response = await fetch(`${getApiBase()}/settings`, {
       method: "DELETE",
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
+      headers: getAuthHeaders(),
     });
 
     if (!response.ok && response.status !== 204) {
@@ -197,7 +190,7 @@ export const settingsApi = {
 export const diaryApi = {
   async getDiaryEntry(fileId: number, date: string) {
     return fetchWithAuth<import("./types").DiaryEntryResponse | null>(
-      `/api/v1/diary/${fileId}/${date}`
+      `${getApiBase()}/diary/${fileId}/${date}`
     );
   },
 
@@ -206,12 +199,11 @@ export const diaryApi = {
     date: string,
     data: import("./types").DiaryEntryCreate
   ) {
-    const token = useSleepScoringStore.getState().accessToken;
-    const response = await fetch(`/api/v1/diary/${fileId}/${date}`, {
+    const response = await fetch(`${getApiBase()}/diary/${fileId}/${date}`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...getAuthHeaders(),
       },
       body: JSON.stringify(data),
     });
@@ -228,12 +220,9 @@ export const diaryApi = {
   },
 
   async deleteDiaryEntry(fileId: number, date: string) {
-    const token = useSleepScoringStore.getState().accessToken;
-    const response = await fetch(`/api/v1/diary/${fileId}/${date}`, {
+    const response = await fetch(`${getApiBase()}/diary/${fileId}/${date}`, {
       method: "DELETE",
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
+      headers: getAuthHeaders(),
     });
 
     if (!response.ok && response.status !== 204) {
@@ -246,15 +235,12 @@ export const diaryApi = {
   },
 
   async uploadDiaryCsv(fileId: number, file: File) {
-    const token = useSleepScoringStore.getState().accessToken;
     const formData = new FormData();
     formData.append("file", file);
 
-    const response = await fetch(`/api/v1/diary/${fileId}/upload`, {
+    const response = await fetch(`${getApiBase()}/diary/${fileId}/upload`, {
       method: "POST",
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
+      headers: getAuthHeaders(),
       body: formData,
     });
 
@@ -269,3 +255,6 @@ export const diaryApi = {
     return response.json() as Promise<import("./types").DiaryUploadResponse>;
   },
 };
+
+// Export getApiBase for use in other modules
+export { getApiBase };

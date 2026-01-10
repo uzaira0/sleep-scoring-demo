@@ -76,8 +76,8 @@ async def test_session(test_session_maker) -> AsyncGenerator[AsyncSession, None]
 @pytest_asyncio.fixture(scope="function")
 async def setup_db(test_session_maker):
     """Override the database session dependency and set up test users."""
-    from sleep_scoring_web.api.auth import get_password_hash
     from sleep_scoring_web.api.deps import get_db
+    from sleep_scoring_web.db.models import UserRole
 
     async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
         async with test_session_maker() as session:
@@ -90,20 +90,16 @@ async def setup_db(test_session_maker):
 
     app.dependency_overrides[get_db] = override_get_db
 
-    # Create test users
+    # Create test users (site password auth - no hashed passwords)
     async with test_session_maker() as session:
         admin_user = User(
-            email="admin@test.local",
             username="testadmin",
-            hashed_password=get_password_hash("testpass123"),
-            role="admin",
+            role=UserRole.ADMIN,
             is_active=True,
         )
         annotator_user = User(
-            email="annotator@test.local",
             username="testannotator",
-            hashed_password=get_password_hash("testpass123"),
-            role="annotator",
+            role=UserRole.ANNOTATOR,
             is_active=True,
         )
         session.add(admin_user)
@@ -129,42 +125,20 @@ async def client(setup_db) -> AsyncGenerator[AsyncClient, None]:
 
 
 # =============================================================================
-# Auth Token Fixtures
+# Auth Fixtures (Session-based)
 # =============================================================================
 
 
 @pytest_asyncio.fixture(scope="function")
-async def admin_token(client: AsyncClient) -> str:
-    """Get JWT token for admin user."""
-    response = await client.post(
-        "/api/v1/auth/login",
-        data={"username": "testadmin", "password": "testpass123"},
-    )
-    assert response.status_code == 200, f"Login failed: {response.text}"
-    return response.json()["access_token"]
+async def admin_auth_headers() -> dict[str, str]:
+    """Get auth headers for admin user (site password auth)."""
+    return {"X-Username": "testadmin", "X-Site-Password": "testpass"}
 
 
 @pytest_asyncio.fixture(scope="function")
-async def annotator_token(client: AsyncClient) -> str:
-    """Get JWT token for annotator user."""
-    response = await client.post(
-        "/api/v1/auth/login",
-        data={"username": "testannotator", "password": "testpass123"},
-    )
-    assert response.status_code == 200, f"Login failed: {response.text}"
-    return response.json()["access_token"]
-
-
-@pytest_asyncio.fixture(scope="function")
-async def admin_auth_headers(admin_token: str) -> dict[str, str]:
-    """Get auth headers for admin user."""
-    return {"Authorization": f"Bearer {admin_token}"}
-
-
-@pytest_asyncio.fixture(scope="function")
-async def annotator_auth_headers(annotator_token: str) -> dict[str, str]:
-    """Get auth headers for annotator user."""
-    return {"Authorization": f"Bearer {annotator_token}"}
+async def annotator_auth_headers() -> dict[str, str]:
+    """Get auth headers for annotator user (site password auth)."""
+    return {"X-Username": "testannotator", "X-Site-Password": "testpass"}
 
 
 # =============================================================================

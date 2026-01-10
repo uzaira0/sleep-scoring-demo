@@ -14,6 +14,7 @@ import { ColorLegendDialog, ColorLegendButton } from "@/components/color-legend-
 import { DiaryPanel } from "@/components/diary-panel";
 import { MetricsPanel } from "@/components/metrics-panel";
 import { useKeyboardShortcuts, useMarkerAutoSave, useMarkerLoad } from "@/hooks";
+import { getApiBase } from "@/api/client";
 import type { FileInfo, FileListResponse, ActivityDataResponse } from "@/api/types";
 import { MARKER_TYPES, ALGORITHM_TYPES } from "@/api/types";
 
@@ -44,12 +45,13 @@ const MARKER_TYPE_OPTIONS = [
 // Types are imported from @/api/types (generated from backend OpenAPI schema)
 
 async function fetchWithAuth<T>(url: string, options?: RequestInit): Promise<T> {
-  const token = useSleepScoringStore.getState().accessToken;
+  const { sitePassword, username } = useSleepScoringStore.getState();
   const response = await fetch(url, {
     ...options,
     headers: {
       ...options?.headers,
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(sitePassword ? { "X-Site-Password": sitePassword } : {}),
+      "X-Username": username || "anonymous",
     },
   });
   if (response.status === 401) {
@@ -148,14 +150,14 @@ export function ScoringPage() {
   // Fetch files list
   const { data: filesData, isLoading: filesLoading } = useQuery({
     queryKey: ["files"],
-    queryFn: () => fetchWithAuth<FileListResponse>("/api/v1/files"),
+    queryFn: () => fetchWithAuth<FileListResponse>(`${getApiBase()}/files`),
   });
 
   // Update available files when filesData changes
   useEffect(() => {
-    if (filesData?.files) {
+    if (filesData?.items) {
       setAvailableFiles(
-        filesData.files.map((f) => ({
+        filesData.items.map((f) => ({
           id: f.id,
           filename: f.filename,
           status: f.status,
@@ -164,8 +166,8 @@ export function ScoringPage() {
       );
 
       // Auto-select first file if none selected
-      if (!currentFileId && filesData.files.length > 0) {
-        const firstReadyFile = filesData.files.find((f) => f.status === "ready");
+      if (!currentFileId && filesData.items.length > 0) {
+        const firstReadyFile = filesData.items.find((f) => f.status === "ready");
         if (firstReadyFile) {
           setCurrentFile(firstReadyFile.id, firstReadyFile.filename);
         }
@@ -176,14 +178,15 @@ export function ScoringPage() {
   // Upload mutation
   const uploadMutation = useMutation({
     mutationFn: async (file: File) => {
-      const token = useSleepScoringStore.getState().accessToken;
+      const { sitePassword, username } = useSleepScoringStore.getState();
       const formData = new FormData();
       formData.append("file", file);
 
-      const response = await fetch("/api/v1/files/upload", {
+      const response = await fetch(`${getApiBase()}/files/upload`, {
         method: "POST",
         headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(sitePassword ? { "X-Site-Password": sitePassword } : {}),
+          "X-Username": username || "anonymous",
         },
         body: formData,
       });
@@ -223,7 +226,7 @@ export function ScoringPage() {
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
       const fileId = parseInt(e.target.value, 10);
-      const file = filesData?.files.find((f) => f.id === fileId);
+      const file = filesData?.items.find((f) => f.id === fileId);
       if (file && file.status === "ready") {
         setCurrentFile(file.id, file.filename);
       }
@@ -234,7 +237,7 @@ export function ScoringPage() {
   // Fetch available dates for the file
   const { data: datesData } = useQuery({
     queryKey: ["dates", currentFileId],
-    queryFn: () => fetchWithAuth<string[]>(`/api/v1/files/${currentFileId}/dates`),
+    queryFn: () => fetchWithAuth<string[]>(`${getApiBase()}/files/${currentFileId}/dates`),
     enabled: !!currentFileId,
   });
 
@@ -251,7 +254,7 @@ export function ScoringPage() {
     queryFn: async () => {
       setLoading(true);
       return fetchWithAuth<ActivityDataResponse>(
-        `/api/v1/activity/${currentFileId}/${currentDate}/score?view_hours=${viewModeHours}&algorithm=${currentAlgorithm}`
+        `${getApiBase()}/activity/${currentFileId}/${currentDate}/score?view_hours=${viewModeHours}&algorithm=${currentAlgorithm}`
       );
     },
     enabled: !!currentFileId && !!currentDate,
@@ -278,7 +281,7 @@ export function ScoringPage() {
   const canGoNext = currentDateIndex < availableDates.length - 1;
 
   // Build file options for dropdown
-  const fileOptions = (filesData?.files ?? [])
+  const fileOptions = (filesData?.items ?? [])
     .filter((f) => f.status === "ready")
     .map((f) => ({
       value: String(f.id),
@@ -287,7 +290,7 @@ export function ScoringPage() {
     }));
 
   // Show empty state if no files
-  if (!filesLoading && (!filesData?.files || filesData.files.length === 0)) {
+  if (!filesLoading && (!filesData?.items || filesData.items.length === 0)) {
     return (
       <div className="h-full flex flex-col items-center justify-center p-6">
         <FileText className="h-16 w-16 text-muted-foreground mb-4" />
@@ -399,6 +402,7 @@ export function ScoringPage() {
             size="icon"
             onClick={() => navigateDate(-1)}
             disabled={!canGoPrev || !currentFileId}
+            data-testid="prev-date-btn"
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -417,6 +421,7 @@ export function ScoringPage() {
             size="icon"
             onClick={() => navigateDate(1)}
             disabled={!canGoNext || !currentFileId}
+            data-testid="next-date-btn"
           >
             <ChevronRight className="h-4 w-4" />
           </Button>

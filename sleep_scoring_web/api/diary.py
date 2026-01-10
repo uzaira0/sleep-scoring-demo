@@ -4,23 +4,16 @@ Diary API endpoints for importing and retrieving sleep diary data.
 
 from datetime import date, datetime
 from io import StringIO
-from typing import Annotated
-
 import polars as pl
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import and_, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from sleep_scoring_web.api.deps import get_current_user, get_db
-from sleep_scoring_web.db.models import DiaryEntry, File as FileModel, User
+from sleep_scoring_web.api.deps import DbSession, Username, VerifiedPassword
+from sleep_scoring_web.db.models import DiaryEntry, File as FileModel
 
 
 router = APIRouter(prefix="/diary", tags=["diary"])
-
-# Type aliases for dependency injection
-DbSession = Annotated[AsyncSession, Depends(get_db)]
-CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
 # =============================================================================
@@ -78,7 +71,7 @@ async def get_diary_entry(
     file_id: int,
     analysis_date: date,
     db: DbSession,
-    current_user: CurrentUser,
+    _: VerifiedPassword,
 ) -> DiaryEntryResponse | None:
     """
     Get diary entry for a specific file and date.
@@ -107,7 +100,8 @@ async def update_diary_entry(
     analysis_date: date,
     entry_data: DiaryEntryCreate,
     db: DbSession,
-    current_user: CurrentUser,
+    _: VerifiedPassword,
+    username: Username,
 ) -> DiaryEntryResponse:
     """
     Create or update a diary entry for a specific file and date.
@@ -138,7 +132,7 @@ async def update_diary_entry(
         entry = DiaryEntry(
             file_id=file_id,
             analysis_date=analysis_date,
-            imported_by_id=current_user.id,
+            imported_by=username,
             **entry_data.model_dump(),
         )
         db.add(entry)
@@ -154,7 +148,7 @@ async def delete_diary_entry(
     file_id: int,
     analysis_date: date,
     db: DbSession,
-    current_user: CurrentUser,
+    _: VerifiedPassword,
 ) -> None:
     """Delete a diary entry."""
     result = await db.execute(
@@ -179,7 +173,8 @@ async def upload_diary_csv(
     file_id: int,
     file: UploadFile,
     db: DbSession,
-    current_user: CurrentUser,
+    _: VerifiedPassword,
+    username: Username,
 ) -> DiaryUploadResponse:
     """
     Upload a diary CSV file to import entries for a specific activity file.
@@ -284,7 +279,7 @@ async def upload_diary_csv(
                 entry = DiaryEntry(
                     file_id=file_id,
                     analysis_date=analysis_date,
-                    imported_by_id=current_user.id,
+                    imported_by=username,
                     **{k: v for k, v in entry_data.items() if v is not None},
                 )
                 db.add(entry)

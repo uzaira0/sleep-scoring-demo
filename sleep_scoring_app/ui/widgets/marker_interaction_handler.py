@@ -143,8 +143,15 @@ class MarkerInteractionHandler:
 
         new_pos = line.getPos()[0]
 
-        # Snap to nearest minute to avoid fractional seconds in database
-        snapped_pos = round(new_pos / 60) * 60
+        # BUG FIX: Snap to nearest DATA EPOCH, not just nearest minute based on visual position.
+        # This ensures the marker lands on an actual data point, matching table-click behavior.
+        # Previously: snapped_pos = round(new_pos / 60) * 60 (could miss actual epochs)
+        new_idx = self.plot_widget._find_closest_data_index(new_pos)
+        if new_idx is not None and new_idx < len(self.plot_widget.x_data):
+            snapped_pos = self.plot_widget.x_data[new_idx]
+        else:
+            # Fallback to minute rounding if no data index found
+            snapped_pos = round(new_pos / 60) * 60
         line.setPos(snapped_pos)
 
         # Update the period with new timestamp
@@ -299,8 +306,14 @@ class MarkerInteractionHandler:
 
         new_pos = line.getPos()[0]
 
-        # Snap to nearest minute
-        snapped_pos = round(new_pos / 60) * 60
+        # BUG FIX: Snap to nearest DATA EPOCH, not just nearest minute based on visual position.
+        # This ensures the marker lands on an actual data point, matching table-click behavior.
+        new_idx = self.plot_widget._find_closest_data_index(new_pos)
+        if new_idx is not None and new_idx < len(self.plot_widget.x_data):
+            snapped_pos = self.plot_widget.x_data[new_idx]
+        else:
+            # Fallback to minute rounding if no data index found
+            snapped_pos = round(new_pos / 60) * 60
         line.setPos(snapped_pos)
 
         if hasattr(line, "period") and line.period:  # KEEP: Duck typing plot/marker attributes

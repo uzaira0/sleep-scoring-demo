@@ -9,7 +9,7 @@ from datetime import date
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
-from sleep_scoring_web.api.deps import CurrentUser, DbSession
+from sleep_scoring_web.api.deps import DbSession, VerifiedPassword
 from sleep_scoring_web.schemas import (
     ExportColumnCategory,
     ExportColumnInfo,
@@ -28,7 +28,7 @@ router = APIRouter()
 
 @router.get("/columns", response_model=ExportColumnsResponse)
 async def get_export_columns(
-    current_user: CurrentUser,
+    _: VerifiedPassword,
 ) -> ExportColumnsResponse:
     """
     Get list of available export columns.
@@ -58,7 +58,7 @@ async def get_export_columns(
 async def generate_csv_export(
     request: ExportRequest,
     db: DbSession,
-    current_user: CurrentUser,
+    _: VerifiedPassword,
 ) -> ExportResponse:
     """
     Generate CSV export for specified files.
@@ -89,7 +89,7 @@ async def generate_csv_export(
 async def download_csv_export(
     request: ExportRequest,
     db: DbSession,
-    current_user: CurrentUser,
+    _: VerifiedPassword,
 ) -> StreamingResponse:
     """
     Generate and download CSV export.
@@ -113,7 +113,7 @@ async def download_csv_export(
             iter([error_content]),
             media_type="text/csv",
             headers={
-                "Content-Disposition": f'attachment; filename="export_error.csv"',
+                "Content-Disposition": 'attachment; filename="export_error.csv"',
             },
         )
 
@@ -130,7 +130,7 @@ async def download_csv_export(
 async def quick_export(
     file_ids: str = Query(description="Comma-separated file IDs"),
     db: DbSession = None,
-    current_user: CurrentUser = None,
+    _: VerifiedPassword = None,
     start_date: date | None = Query(default=None, description="Start date filter"),
     end_date: date | None = Query(default=None, description="End date filter"),
 ) -> StreamingResponse:

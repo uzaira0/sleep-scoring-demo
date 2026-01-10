@@ -1,25 +1,10 @@
 import { useRef, useEffect, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useSleepScoringStore, useMarkers } from "@/store";
-import { fetchWithAuth } from "@/api/client";
+import { useSleepScoringStore, useMarkers, useDates } from "@/store";
+import { fetchWithAuth, getApiBase } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Maximize2 } from "lucide-react";
-
-interface TableDataPoint {
-  timestamp: number;
-  datetime_str: string;
-  axis_y: number;
-  vector_magnitude: number;
-  algorithm_result: number | null;
-  choi_result: number | null;
-  is_nonwear: boolean;
-}
-
-interface TableResponse {
-  onset_data: TableDataPoint[];
-  offset_data: TableDataPoint[];
-  period_index: number;
-}
+import type { OnsetOffsetDataPoint, OnsetOffsetTableResponse } from "@/api/types";
 
 interface MarkerDataTableProps {
   /** For sleep: "onset" or "offset". For nonwear: maps to "start" or "end" */
@@ -34,11 +19,11 @@ interface MarkerDataTableProps {
  * Supports both sleep markers (onset/offset) and nonwear markers (start/end).
  */
 export function MarkerDataTable({ type, onOpenPopout }: MarkerDataTableProps) {
-  const currentFile = useSleepScoringStore((state) => state.currentFile);
-  const currentDate = useSleepScoringStore((state) => state.currentDate);
-  const token = useSleepScoringStore((state) => state.accessToken);
+  const currentFileId = useSleepScoringStore((state) => state.currentFileId);
+  const { currentDate } = useDates();
+  const isAuthenticated = useSleepScoringStore((state) => state.isAuthenticated);
 
-  const { sleepMarkers, nonwearMarkers, selectedPeriodIndex, markerMode, updateSleepMarker, updateNonwearMarker } = useMarkers();
+  const { sleepMarkers, nonwearMarkers, selectedPeriodIndex, markerMode, updateMarker } = useMarkers();
 
   const tableRef = useRef<HTMLDivElement>(null);
   const markerRowRef = useRef<HTMLTableRowElement>(null);
@@ -61,16 +46,16 @@ export function MarkerDataTable({ type, onOpenPopout }: MarkerDataTableProps) {
 
   // Fetch table data from API
   const { data: tableData, isLoading } = useQuery({
-    queryKey: ["marker-table", currentFile?.id, currentDate, selectedPeriodIndex, type],
+    queryKey: ["marker-table", currentFileId, currentDate, selectedPeriodIndex, type],
     queryFn: async () => {
-      if (!currentFile?.id || !currentDate || selectedPeriodIndex === null) {
+      if (!currentFileId || !currentDate || selectedPeriodIndex === null) {
         return null;
       }
-      const dateStr = currentDate.toISOString().split("T")[0];
-      const url = `/api/v1/markers/${currentFile.id}/${dateStr}/table/${selectedPeriodIndex + 1}?window_minutes=100`;
-      return fetchWithAuth<TableResponse>(url);
+      // currentDate is already a string like "2024-01-15"
+      const url = `${getApiBase()}/markers/${currentFileId}/${currentDate}/table/${selectedPeriodIndex + 1}?window_minutes=100`;
+      return fetchWithAuth<OnsetOffsetTableResponse>(url);
     },
-    enabled: !!token && !!currentFile?.id && !!currentDate && selectedPeriodIndex !== null,
+    enabled: isAuthenticated && !!currentFileId && !!currentDate && selectedPeriodIndex !== null,
     staleTime: 30000, // Cache for 30 seconds
   });
 
@@ -93,25 +78,25 @@ export function MarkerDataTable({ type, onOpenPopout }: MarkerDataTableProps) {
   }, [data, markerRowIndex]);
 
   // Handle click-to-move: update marker timestamp to clicked row
-  const handleRowClick = useCallback((row: TableDataPoint) => {
+  const handleRowClick = useCallback((row: OnsetOffsetDataPoint) => {
     if (selectedPeriodIndex === null) return;
 
     const newTimestamp = row.timestamp * 1000; // Convert to milliseconds
 
     if (markerMode === "sleep") {
       if (type === "onset") {
-        updateSleepMarker(selectedPeriodIndex, { onsetTimestamp: newTimestamp });
+        updateMarker("sleep", selectedPeriodIndex, { onsetTimestamp: newTimestamp });
       } else {
-        updateSleepMarker(selectedPeriodIndex, { offsetTimestamp: newTimestamp });
+        updateMarker("sleep", selectedPeriodIndex, { offsetTimestamp: newTimestamp });
       }
     } else {
       if (type === "onset") {
-        updateNonwearMarker(selectedPeriodIndex, { startTimestamp: newTimestamp });
+        updateMarker("nonwear", selectedPeriodIndex, { startTimestamp: newTimestamp });
       } else {
-        updateNonwearMarker(selectedPeriodIndex, { endTimestamp: newTimestamp });
+        updateMarker("nonwear", selectedPeriodIndex, { endTimestamp: newTimestamp });
       }
     }
-  }, [selectedPeriodIndex, markerMode, type, updateSleepMarker, updateNonwearMarker]);
+  }, [selectedPeriodIndex, markerMode, type, updateMarker]);
 
   // Colors based on marker mode
   const isSleepMode = markerMode === "sleep";

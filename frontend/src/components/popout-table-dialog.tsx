@@ -7,9 +7,10 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { useSleepScoringStore, useMarkers } from "@/store";
-import { fetchWithAuth } from "@/api/client";
+import { useSleepScoringStore, useMarkers, useDates } from "@/store";
+import { fetchWithAuth, getApiBase } from "@/api/client";
 
+// TODO: Generate these types from backend OpenAPI schema
 interface FullTableDataPoint {
   timestamp: number;
   datetime_str: string;
@@ -39,11 +40,11 @@ interface PopoutTableDialogProps {
  * Shows all epochs for the current analysis date.
  */
 export function PopoutTableDialog({ open, onOpenChange, highlightType = "onset" }: PopoutTableDialogProps) {
-  const currentFile = useSleepScoringStore((state) => state.currentFile);
-  const currentDate = useSleepScoringStore((state) => state.currentDate);
-  const token = useSleepScoringStore((state) => state.accessToken);
+  const currentFileId = useSleepScoringStore((state) => state.currentFileId);
+  const { currentDate } = useDates();
+  const isAuthenticated = useSleepScoringStore((state) => state.isAuthenticated);
 
-  const { sleepMarkers, selectedPeriodIndex, updateSleepMarker, markerMode } = useMarkers();
+  const { sleepMarkers, selectedPeriodIndex, updateMarker, markerMode } = useMarkers();
 
   const tableRef = useRef<HTMLDivElement>(null);
   const markerRowRef = useRef<HTMLTableRowElement>(null);
@@ -56,16 +57,16 @@ export function PopoutTableDialog({ open, onOpenChange, highlightType = "onset" 
 
   // Fetch full table data from API
   const { data: tableData, isLoading } = useQuery({
-    queryKey: ["full-table", currentFile?.id, currentDate],
+    queryKey: ["full-table", currentFileId, currentDate],
     queryFn: async () => {
-      if (!currentFile?.id || !currentDate) {
+      if (!currentFileId || !currentDate) {
         return null;
       }
-      const dateStr = currentDate.toISOString().split("T")[0];
-      const url = `/api/v1/markers/${currentFile.id}/${dateStr}/table-full`;
+      // currentDate is already a string like "2024-01-15"
+      const url = `${getApiBase()}/markers/${currentFileId}/${currentDate}/table-full`;
       return fetchWithAuth<FullTableResponse>(url);
     },
-    enabled: open && !!token && !!currentFile?.id && !!currentDate,
+    enabled: open && isAuthenticated && !!currentFileId && !!currentDate,
     staleTime: 60000, // Cache for 1 minute
   });
 
@@ -93,11 +94,11 @@ export function PopoutTableDialog({ open, onOpenChange, highlightType = "onset" 
     const newTimestamp = row.timestamp * 1000; // Convert to milliseconds
 
     if (highlightType === "onset") {
-      updateSleepMarker(selectedPeriodIndex, { onsetTimestamp: newTimestamp });
+      updateMarker("sleep", selectedPeriodIndex, { onsetTimestamp: newTimestamp });
     } else {
-      updateSleepMarker(selectedPeriodIndex, { offsetTimestamp: newTimestamp });
+      updateMarker("sleep", selectedPeriodIndex, { offsetTimestamp: newTimestamp });
     }
-  }, [selectedPeriodIndex, markerMode, highlightType, updateSleepMarker]);
+  }, [selectedPeriodIndex, markerMode, highlightType, updateMarker]);
 
   const data = tableData?.data ?? [];
 

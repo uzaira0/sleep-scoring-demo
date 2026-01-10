@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
+
+logger = logging.getLogger(__name__)
 
 from sleep_scoring_app.core.constants import (
     AlgorithmType,
@@ -179,11 +182,21 @@ class DailySleepMarkers:
         return [p for p in self.get_all_periods() if p.is_complete]
 
     def get_main_sleep(self) -> SleepPeriod | None:
-        """Get the longest sleep period (main sleep)."""
+        """Get the longest sleep period (main sleep).
+
+        Tie-breaking: When multiple periods have identical duration,
+        the one with the earliest onset_timestamp wins.
+        """
         complete_periods = self.get_complete_periods()
         if not complete_periods:
             return None
-        return max(complete_periods, key=lambda p: p.duration_seconds or 0)
+        # Primary sort: longest duration (descending via negation in min)
+        # Secondary sort: earliest onset (ascending, so negate to use with max)
+        # Using tuple comparison: (duration, -onset) where higher is "better"
+        return max(
+            complete_periods,
+            key=lambda p: (p.duration_seconds or 0, -(p.onset_timestamp or float("inf"))),
+        )
 
     def get_naps(self) -> list[SleepPeriod]:
         """Get all non-main sleep periods (naps)."""
@@ -570,7 +583,7 @@ class SleepMetrics:
 
     def to_export_dict(self) -> dict[str, Any]:
         """Convert to dictionary for CSV/JSON export with display-friendly keys."""
-        # Build full participant ID from components
+        # Build full participant ID from components using spaces (matching extract_participant_info format)
         full_participant_id = None
         if self.participant:
             parts = [self.participant.numerical_id]
@@ -578,7 +591,7 @@ class SleepMetrics:
                 parts.append(self.participant.timepoint_str)
             if self.participant.group_str:
                 parts.append(self.participant.group_str)
-            full_participant_id = "_".join(filter(None, parts))
+            full_participant_id = " ".join(filter(None, parts))
 
         return {
             ExportColumn.FULL_PARTICIPANT_ID: full_participant_id,
@@ -620,7 +633,7 @@ class SleepMetrics:
 
         # One row per complete period
         rows = []
-        for i, period in enumerate(complete_periods, 1):
+        for period in complete_periods:
             row = self.to_export_dict()
             row[ExportColumn.MARKER_INDEX] = period.marker_index
             row[ExportColumn.MARKER_TYPE] = period.marker_type.value if period.marker_type else None
@@ -636,8 +649,10 @@ class SleepMetrics:
                 row[ExportColumn.OFFSET_TIME] = offset_dt.strftime("%H:%M")
                 row[ExportColumn.OFFSET_DATE] = offset_dt.strftime("%Y-%m-%d")
 
-            # Get period-specific metrics if available
-            period_key = f"period_{i}_metrics"
+            # Get period-specific metrics using marker_index as key
+            # CRITICAL: Must match the key used in store_period_metrics() and
+            # _load_period_metrics_for_sleep_metrics() to ensure consistency
+            period_key = f"period_{period.marker_index}_metrics"
             if period_key in self._dynamic_fields:
                 row.update(self._dynamic_fields[period_key])
 
@@ -657,23 +672,34 @@ class SleepMetrics:
         """
         Store metrics for a specific sleep period.
 
+        Uses marker_index as the storage key to ensure consistency with:
+        - to_export_dict_list() which retrieves using marker_index
+        - _load_period_metrics_for_sleep_metrics() which loads from DB using marker_index
+
         Args:
             period: The SleepPeriod to store metrics for
             metrics_dict: Dictionary of metric values to store
 
         """
-        # Find the period's index in the complete periods list
-        complete_periods = self.daily_sleep_markers.get_complete_periods()
-        for i, p in enumerate(complete_periods, 1):
-            if p == period or (p.onset_timestamp == period.onset_timestamp and p.offset_timestamp == period.offset_timestamp):
-                period_key = f"period_{i}_metrics"
-                self._dynamic_fields[period_key] = metrics_dict
-                return
-
-        # If period not found, store with marker_index as fallback
+        # Use marker_index directly as the storage key for consistency
+        # This matches how DB loading and export retrieval work
         if period.marker_index is not None:
             period_key = f"period_{period.marker_index}_metrics"
             self._dynamic_fields[period_key] = metrics_dict
+            logger.debug(
+                "Stored metrics for period %d (onset=%s, offset=%s)",
+                period.marker_index,
+                period.onset_timestamp,
+                period.offset_timestamp,
+            )
+        else:
+            # Log warning if marker_index is missing - this shouldn't happen
+            # but helps debug if periods aren't set up correctly
+            logger.warning(
+                "Cannot store metrics: period has no marker_index (onset=%s, offset=%s)",
+                period.onset_timestamp,
+                period.offset_timestamp,
+            )
 
 
 __all__ = [

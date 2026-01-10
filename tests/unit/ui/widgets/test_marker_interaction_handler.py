@@ -232,13 +232,20 @@ class TestSleepMarkerDragFinished:
 
         mock_line.setPos.assert_called()
 
-    def test_snaps_position_to_nearest_minute(self, interaction_handler, mock_plot_widget: MagicMock, mock_line: MagicMock) -> None:
-        """Snaps position to nearest minute."""
+    def test_snaps_position_to_nearest_data_epoch(self, interaction_handler, mock_plot_widget: MagicMock, mock_line: MagicMock) -> None:
+        """Snaps position to nearest data epoch (not just minute boundary).
+
+        BUG FIX: Previously snapped to nearest minute via round(pos / 60) * 60,
+        but this could miss actual data epochs. Now snaps to x_data[closest_index].
+        """
         mock_line.getPos.return_value = (3625.0, 0)  # Not on minute boundary
+
+        # Mock _find_closest_data_index to return index 60, which maps to x_data[60] = 3600
+        mock_plot_widget._find_closest_data_index.return_value = 60
 
         interaction_handler.on_marker_drag_finished(mock_line)
 
-        # Should snap to 3600 (nearest minute)
+        # Should snap to x_data[60] = 3600 (nearest data epoch)
         mock_line.setPos.assert_called_with(3600)
 
     def test_triggers_full_redraw(self, interaction_handler, mock_plot_widget: MagicMock, mock_line: MagicMock) -> None:

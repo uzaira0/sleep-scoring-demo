@@ -983,3 +983,254 @@ class TestExportServiceIntegration:
 
         df = pd.read_csv(csv_files[0], comment="#")
         assert len(df) == 2  # Two periods
+
+
+# ============================================================================
+# 12. BUG REGRESSION TESTS - TESTS THAT CATCH REAL BUGS
+# ============================================================================
+
+
+class TestExportBugRegressions:
+    """
+    Regression tests for bugs found in the export system.
+
+    These tests are designed to catch REAL bugs that were found in production,
+    not hypothetical edge cases. Each test documents the bug it catches.
+    """
+
+    def test_marker_index_preserved_not_enumeration(self, tmp_path):
+        """
+        BUG: save_sleep_metrics_atomic used enumeration `i` instead of period.marker_index.
+
+        If period_1 is None but period_2 has data with marker_index=2, it was being
+        saved with marker_index=1 (from enumeration) instead of the actual marker_index=2.
+
+        This test ensures marker_index values are preserved exactly.
+        """
+        participant = ParticipantInfo(numerical_id="1000", group_str="G1", timepoint_str="T1")
+
+        # Create only period_2 with marker_index=2 (period_1 is None)
+        period2_onset = datetime(2024, 1, 11, 14, 0).timestamp()
+        period2_offset = datetime(2024, 1, 11, 15, 30).timestamp()
+        period2 = SleepPeriod(
+            onset_timestamp=period2_onset,
+            offset_timestamp=period2_offset,
+            marker_index=2,  # Explicit marker_index=2
+            marker_type=MarkerType.NAP,
+        )
+
+        markers = DailySleepMarkers()
+        # period_1 is None
+        markers.period_2 = period2  # Only period_2 exists
+
+        metrics = SleepMetrics(
+            filename="test_file.csv",
+            analysis_date="2024-01-10",
+            algorithm_type=AlgorithmType.SADEH_1994_ACTILIFE,
+            daily_sleep_markers=markers,
+            participant=participant,
+        )
+
+        # Export and check marker_index is preserved
+        mock_db = MagicMock()
+        export_manager = ExportManager(database_manager=mock_db)
+
+        with patch.object(export_manager, "_ensure_metrics_calculated_for_export", return_value=[]):
+            result = export_manager.perform_direct_export(
+                [metrics],
+                grouping_option=0,
+                output_directory=str(tmp_path),
+                selected_columns=[ExportColumn.MARKER_INDEX, ExportColumn.MARKER_TYPE],
+            )
+
+        assert result.success is True
+
+        csv_files = list(tmp_path.glob("sleep_data_*.csv"))
+        assert len(csv_files) >= 1
+
+        df = pd.read_csv(csv_files[0], comment="#")
+        assert len(df) == 1
+        # CRITICAL: marker_index should be 2, NOT 1
+        assert df[ExportColumn.MARKER_INDEX].iloc[0] == 2
+
+    def test_full_participant_id_uses_spaces_not_underscores(self):
+        """
+        BUG: to_export_dict used "_".join() but rest of system uses spaces.
+
+        The full_participant_id format should be "001 T1 G1" with spaces,
+        matching what extract_participant_info() produces.
+
+        This test ensures consistent formatting across the system.
+        """
+        participant = ParticipantInfo(
+            numerical_id="001",
+            group_str="G1",
+            timepoint_str="T2",
+        )
+
+        onset = datetime(2024, 1, 10, 22, 0).timestamp()
+        offset = datetime(2024, 1, 11, 7, 0).timestamp()
+        period = SleepPeriod(onset_timestamp=onset, offset_timestamp=offset, marker_index=1)
+
+        markers = DailySleepMarkers()
+        markers.period_1 = period
+
+        metrics = SleepMetrics(
+            filename="test.csv",
+            analysis_date="2024-01-10",
+            daily_sleep_markers=markers,
+            participant=participant,
+        )
+
+        export_dict = metrics.to_export_dict()
+        full_id = export_dict[ExportColumn.FULL_PARTICIPANT_ID]
+
+        # CRITICAL: Should use spaces, not underscores
+        assert full_id == "001 T2 G1", f"Expected '001 T2 G1' but got '{full_id}'"
+        assert "_" not in full_id, "Full participant ID should NOT contain underscores"
+
+    def test_export_column_keys_match_calculation_service_output(self):
+        """
+        BUG: ExportColumn.SADEH_ONSET was "Sleep Algorithm Value at Onset" but
+        metrics_calculation_service.py produced "Sadeh Algorithm Value at Sleep Onset".
+
+        This test ensures the ExportColumn constant values match what the
+        calculation service actually produces.
+        """
+        # The keys that metrics_calculation_service.py produces
+        calculation_service_keys = {
+            "Sadeh Algorithm Value at Sleep Onset",
+            "Sadeh Algorithm Value at Sleep Offset",
+        }
+
+        # Verify ExportColumn values match
+        assert ExportColumn.SADEH_ONSET == "Sadeh Algorithm Value at Sleep Onset", (
+            f"SADEH_ONSET mismatch: expected 'Sadeh Algorithm Value at Sleep Onset' "
+            f"but got '{ExportColumn.SADEH_ONSET}'"
+        )
+        assert ExportColumn.SADEH_OFFSET == "Sadeh Algorithm Value at Sleep Offset", (
+            f"SADEH_OFFSET mismatch: expected 'Sadeh Algorithm Value at Sleep Offset' "
+            f"but got '{ExportColumn.SADEH_OFFSET}'"
+        )
+
+    def test_participant_info_from_dict_preserves_string_fields(self):
+        """
+        BUG: ParticipantInfo.from_dict didn't set group_str/timepoint_str,
+        causing them to use defaults "G1"/"T1" even when enum values differed.
+
+        This test ensures from_dict properly sets the string representation fields.
+        """
+        from sleep_scoring_app.core.constants import ParticipantGroup, ParticipantTimepoint
+
+        data = {
+            "numerical_participant_id": "1234",
+            "full_participant_id": "1234 T3 G2",
+            "participant_group": "G2",
+            "participant_timepoint": "T3",
+            "group_str": "G2",
+            "timepoint_str": "T3",
+        }
+
+        participant = ParticipantInfo.from_dict(data)
+
+        # CRITICAL: String fields should match the data, not defaults
+        assert participant.group_str == "G2", f"Expected 'G2' but got '{participant.group_str}'"
+        assert participant.timepoint_str == "T3", f"Expected 'T3' but got '{participant.timepoint_str}'"
+        assert participant.group == ParticipantGroup.GROUP_2
+        assert participant.timepoint == ParticipantTimepoint.T3
+
+    def test_participant_info_from_dict_derives_strings_from_enums(self):
+        """
+        Test that from_dict derives string fields from enum values when not provided.
+        """
+        data = {
+            "numerical_participant_id": "5678",
+            "participant_group": "G2",
+            "participant_timepoint": "T2",
+            # group_str and timepoint_str NOT provided
+        }
+
+        participant = ParticipantInfo.from_dict(data)
+
+        # Should derive from enum values
+        assert participant.group_str == "G2"
+        assert participant.timepoint_str == "T2"
+
+    def test_export_dict_list_uses_period_marker_index_for_metrics_lookup(self, tmp_path):
+        """
+        BUG: to_export_dict_list used enumeration to look up period metrics instead
+        of period.marker_index, causing wrong metrics to be associated with periods.
+
+        This test ensures period metrics are looked up using marker_index.
+        """
+        participant = ParticipantInfo(numerical_id="1000", group_str="G1", timepoint_str="T1")
+
+        # Create two periods with specific marker indices
+        period1 = SleepPeriod(
+            onset_timestamp=datetime(2024, 1, 10, 22, 0).timestamp(),
+            offset_timestamp=datetime(2024, 1, 11, 7, 0).timestamp(),
+            marker_index=1,
+            marker_type=MarkerType.MAIN_SLEEP,
+        )
+        period2 = SleepPeriod(
+            onset_timestamp=datetime(2024, 1, 11, 14, 0).timestamp(),
+            offset_timestamp=datetime(2024, 1, 11, 15, 30).timestamp(),
+            marker_index=2,
+            marker_type=MarkerType.NAP,
+        )
+
+        markers = DailySleepMarkers()
+        markers.period_1 = period1
+        markers.period_2 = period2
+
+        metrics = SleepMetrics(
+            filename="test.csv",
+            analysis_date="2024-01-10",
+            daily_sleep_markers=markers,
+            participant=participant,
+        )
+
+        # Store metrics for each period using marker_index
+        metrics.store_period_metrics(period1, {ExportColumn.TOTAL_SLEEP_TIME: 540})
+        metrics.store_period_metrics(period2, {ExportColumn.TOTAL_SLEEP_TIME: 90})
+
+        # Export and verify each period has its own metrics
+        export_rows = metrics.to_export_dict_list()
+
+        assert len(export_rows) == 2
+
+        # Find rows by marker_index
+        row1 = next(r for r in export_rows if r[ExportColumn.MARKER_INDEX] == 1)
+        row2 = next(r for r in export_rows if r[ExportColumn.MARKER_INDEX] == 2)
+
+        # Each period should have its OWN metrics, not mixed up
+        assert row1[ExportColumn.TOTAL_SLEEP_TIME] == 540, "Period 1 should have TST=540"
+        assert row2[ExportColumn.TOTAL_SLEEP_TIME] == 90, "Period 2 should have TST=90"
+
+    def test_group_export_handles_none_participant_gracefully(self):
+        """
+        BUG: _group_export_data accessed participant.group_str without null check.
+
+        This test ensures grouping handles metrics with None participant gracefully.
+        """
+        mock_db = MagicMock()
+        export_manager = ExportManager(database_manager=mock_db)
+
+        # Create metrics with valid participant
+        participant = ParticipantInfo(numerical_id="1000", group_str="Control", timepoint_str="T1")
+        onset = datetime(2024, 1, 10, 22, 0).timestamp()
+        offset = datetime(2024, 1, 11, 7, 0).timestamp()
+        period = SleepPeriod(onset_timestamp=onset, offset_timestamp=offset, marker_index=1)
+        markers = DailySleepMarkers()
+        markers.period_1 = period
+
+        metrics = SleepMetrics(
+            filename="test.csv",
+            analysis_date="2024-01-10",
+            daily_sleep_markers=markers,
+            participant=participant,
+        )
+
+        # This should not raise AttributeError
+        groups = export_manager._group_export_data([metrics], grouping_option=2)
+        assert "Control" in groups

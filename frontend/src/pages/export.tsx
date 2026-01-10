@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { useSleepScoringStore } from "@/store";
-import { fetchWithAuth } from "@/api/client";
+import { fetchWithAuth, getApiBase } from "@/api/client";
 
 interface ExportColumnInfo {
   name: string;
@@ -38,8 +38,13 @@ interface FileInfo {
 }
 
 interface FileListResponse {
-  files: FileInfo[];
+  items: FileInfo[];
   total: number;
+  page: number;
+  page_size: number;
+  pages: number;
+  has_next: boolean;
+  has_prev: boolean;
 }
 
 interface ExportRequest {
@@ -51,7 +56,7 @@ interface ExportRequest {
 
 export function ExportPage() {
   const navigate = useNavigate();
-  const token = useSleepScoringStore((state) => state.accessToken);
+  const isAuthenticated = useSleepScoringStore((state) => state.isAuthenticated);
 
   // Selected files and columns state
   const [selectedFileIds, setSelectedFileIds] = useState<number[]>([]);
@@ -62,15 +67,15 @@ export function ExportPage() {
   // Fetch available files
   const { data: filesData, isLoading: filesLoading } = useQuery({
     queryKey: ["files"],
-    queryFn: () => fetchWithAuth<FileListResponse>("/api/v1/files"),
-    enabled: !!token,
+    queryFn: () => fetchWithAuth<FileListResponse>(`${getApiBase()}/files`),
+    enabled: isAuthenticated,
   });
 
   // Fetch available columns
   const { data: columnsData, isLoading: columnsLoading } = useQuery({
     queryKey: ["export-columns"],
-    queryFn: () => fetchWithAuth<ExportColumnsResponse>("/api/v1/export/columns"),
-    enabled: !!token,
+    queryFn: () => fetchWithAuth<ExportColumnsResponse>(`${getApiBase()}/export/columns`),
+    enabled: isAuthenticated,
   });
 
   // Initialize selected columns with defaults when data loads
@@ -86,11 +91,13 @@ export function ExportPage() {
   // Export mutation
   const exportMutation = useMutation({
     mutationFn: async (request: ExportRequest) => {
-      const response = await fetch("/api/v1/export/csv/download", {
+      const { sitePassword, username } = useSleepScoringStore.getState();
+      const response = await fetch(`${getApiBase()}/export/csv/download`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          ...(sitePassword ? { "X-Site-Password": sitePassword } : {}),
+          "X-Username": username || "anonymous",
         },
         body: JSON.stringify(request),
       });
@@ -133,8 +140,8 @@ export function ExportPage() {
 
   // Handle select all files
   const selectAllFiles = () => {
-    if (filesData?.files) {
-      setSelectedFileIds(filesData.files.map((f) => f.id));
+    if (filesData?.items) {
+      setSelectedFileIds(filesData.items.map((f) => f.id));
     }
   };
 
@@ -180,7 +187,7 @@ export function ExportPage() {
   };
 
   // Redirect if not logged in
-  if (!token) {
+  if (!isAuthenticated) {
     navigate("/login");
     return null;
   }
@@ -225,7 +232,7 @@ export function ExportPage() {
                 </Button>
               </div>
               <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                {filesData?.files.map((file) => (
+                {filesData?.items.map((file) => (
                   <div
                     key={file.id}
                     className="flex items-center space-x-2 p-2 hover:bg-muted rounded"
@@ -248,14 +255,14 @@ export function ExportPage() {
                     </Label>
                   </div>
                 ))}
-                {(!filesData?.files || filesData.files.length === 0) && (
+                {(!filesData?.items || filesData.items.length === 0) && (
                   <div className="text-muted-foreground py-4 text-center">
                     No files available
                   </div>
                 )}
               </div>
               <div className="mt-4 text-sm text-muted-foreground">
-                {selectedFileIds.length} of {filesData?.files.length || 0} files
+                {selectedFileIds.length} of {filesData?.items.length || 0} files
                 selected
               </div>
             </CardContent>

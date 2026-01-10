@@ -44,7 +44,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/auth/register": {
+    "/api/auth/verify": {
         parameters: {
             query?: never;
             header?: never;
@@ -54,57 +54,20 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Register
-         * @description Register a new user.
+         * Verify Password
+         * @description Verify the site password.
+         *
+         *     Returns valid=true if password matches SITE_PASSWORD env var.
+         *     If SITE_PASSWORD is empty, any password is accepted (dev mode).
          */
-        post: operations["register_api_v1_auth_register_post"];
+        post: operations["verify_password_api_auth_verify_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/auth/login": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Login
-         * @description Login and get JWT tokens.
-         */
-        post: operations["login_api_v1_auth_login_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Refresh Token
-         * @description Refresh access token using refresh token.
-         */
-        post: operations["refresh_token_api_v1_auth_refresh_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/me": {
+    "/api/auth/status": {
         parameters: {
             query?: never;
             header?: never;
@@ -112,10 +75,13 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Me
-         * @description Get current user information.
+         * Auth Status
+         * @description Check if authentication is required.
+         *
+         *     Returns whether site password is configured.
+         *     Useful for frontend to know if it should show login screen.
          */
-        get: operations["get_me_api_v1_auth_me_get"];
+        get: operations["auth_status_api_auth_status_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -124,7 +90,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/files/upload": {
+    "/api/files/upload": {
         parameters: {
             query?: never;
             header?: never;
@@ -140,14 +106,14 @@ export interface paths {
          *     The file will be parsed, validated, and stored in the database.
          *     Activity data will be extracted and made available for analysis.
          */
-        post: operations["upload_file_api_v1_files_upload_post"];
+        post: operations["upload_file_api_files_upload_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/files": {
+    "/api/files": {
         parameters: {
             query?: never;
             header?: never;
@@ -158,22 +124,22 @@ export interface paths {
          * List Files
          * @description List all uploaded files.
          */
-        get: operations["list_files_api_v1_files_get"];
+        get: operations["list_files_api_files_get"];
         put?: never;
         post?: never;
         /**
          * Delete All Files
-         * @description Delete all files from the database (admin only).
+         * @description Delete all files from the database.
          *
          *     Optionally filter by status (e.g., 'failed' to delete only failed files).
          */
-        delete: operations["delete_all_files_api_v1_files_delete"];
+        delete: operations["delete_all_files_api_files_delete"];
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/files/{file_id}": {
+    "/api/files/{file_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -184,20 +150,20 @@ export interface paths {
          * Get File
          * @description Get file metadata by ID.
          */
-        get: operations["get_file_api_v1_files__file_id__get"];
+        get: operations["get_file_api_files__file_id__get"];
         put?: never;
         post?: never;
         /**
          * Delete File
          * @description Delete a file and its associated data.
          */
-        delete: operations["delete_file_api_v1_files__file_id__delete"];
+        delete: operations["delete_file_api_files__file_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/files/{file_id}/dates": {
+    "/api/files/{file_id}/dates": {
         parameters: {
             query?: never;
             header?: never;
@@ -208,7 +174,7 @@ export interface paths {
          * Get File Dates
          * @description Get available dates for a file.
          */
-        get: operations["get_file_dates_api_v1_files__file_id__dates_get"];
+        get: operations["get_file_dates_api_files__file_id__dates_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -217,7 +183,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/files/scan": {
+    "/api/files/scan": {
         parameters: {
             query?: never;
             header?: never;
@@ -230,17 +196,17 @@ export interface paths {
          * Scan Data Directory
          * @description Start a background scan of the data directory for CSV files.
          *
-         *     Only admins can trigger a scan. Files already in the database are skipped.
+         *     Files already in the database are skipped.
          *     Returns immediately with scan status - poll GET /scan/status for progress.
          */
-        post: operations["scan_data_directory_api_v1_files_scan_post"];
+        post: operations["scan_data_directory_api_files_scan_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/files/scan/status": {
+    "/api/files/scan/status": {
         parameters: {
             query?: never;
             header?: never;
@@ -253,7 +219,7 @@ export interface paths {
          *
          *     Poll this endpoint to track import progress.
          */
-        get: operations["get_scan_status_api_v1_files_scan_status_get"];
+        get: operations["get_scan_status_api_files_scan_status_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -262,7 +228,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/files/watcher/status": {
+    "/api/files/watcher/status": {
         parameters: {
             query?: never;
             header?: never;
@@ -276,7 +242,7 @@ export interface paths {
          *     The file watcher monitors the data directory for new CSV files
          *     and automatically ingests them into the database.
          */
-        get: operations["get_watcher_status_api_v1_files_watcher_status_get"];
+        get: operations["get_watcher_status_api_files_watcher_status_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -285,7 +251,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/activity/{file_id}/{analysis_date}": {
+    "/api/activity/{file_id}/{analysis_date}": {
         parameters: {
             query?: never;
             header?: never;
@@ -299,7 +265,7 @@ export interface paths {
          *     Returns data in columnar format for efficient transfer.
          *     The view window starts from analysis_date at 12:00 (noon) and extends for view_hours.
          */
-        get: operations["get_activity_data_api_v1_activity__file_id___analysis_date__get"];
+        get: operations["get_activity_data_api_activity__file_id___analysis_date__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -308,7 +274,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/activity/{file_id}/{analysis_date}/score": {
+    "/api/activity/{file_id}/{analysis_date}/score": {
         parameters: {
             query?: never;
             header?: never;
@@ -329,7 +295,7 @@ export interface paths {
          *     - cole_kripke_1992_actilife: Cole-Kripke 1992 with ActiLife scaling
          *     - cole_kripke_1992_original: Cole-Kripke 1992 original paper version
          */
-        get: operations["get_activity_data_with_scoring_api_v1_activity__file_id___analysis_date__score_get"];
+        get: operations["get_activity_data_with_scoring_api_activity__file_id___analysis_date__score_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -338,7 +304,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/activity/{file_id}/{analysis_date}/sadeh": {
+    "/api/activity/{file_id}/{analysis_date}/sadeh": {
         parameters: {
             query?: never;
             header?: never;
@@ -351,7 +317,7 @@ export interface paths {
          *
          *     DEPRECATED: Use /{file_id}/{analysis_date}/score?algorithm=sadeh_1994_actilife instead.
          */
-        get: operations["get_activity_data_with_sadeh_api_v1_activity__file_id___analysis_date__sadeh_get"];
+        get: operations["get_activity_data_with_sadeh_api_activity__file_id___analysis_date__sadeh_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -360,7 +326,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/markers/{file_id}/{analysis_date}": {
+    "/api/markers/{file_id}/{analysis_date}": {
         parameters: {
             query?: never;
             header?: never;
@@ -374,7 +340,7 @@ export interface paths {
          *     Returns sleep markers, nonwear markers, and calculated metrics.
          *     Optionally includes algorithm results for overlay display.
          */
-        get: operations["get_markers_api_v1_markers__file_id___analysis_date__get"];
+        get: operations["get_markers_api_markers__file_id___analysis_date__get"];
         /**
          * Save Markers
          * @description Save markers for a specific file and date.
@@ -382,7 +348,7 @@ export interface paths {
          *     Replaces all existing markers for this file/date with the new ones.
          *     Triggers background calculation of sleep metrics.
          */
-        put: operations["save_markers_api_v1_markers__file_id___analysis_date__put"];
+        put: operations["save_markers_api_markers__file_id___analysis_date__put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -390,7 +356,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/markers/{file_id}/{analysis_date}/{period_index}": {
+    "/api/markers/{file_id}/{analysis_date}/{period_index}": {
         parameters: {
             query?: never;
             header?: never;
@@ -404,13 +370,13 @@ export interface paths {
          * Delete Marker
          * @description Delete a specific marker period.
          */
-        delete: operations["delete_marker_api_v1_markers__file_id___analysis_date___period_index__delete"];
+        delete: operations["delete_marker_api_markers__file_id___analysis_date___period_index__delete"];
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/markers/{file_id}/{analysis_date}/table/{period_index}": {
+    "/api/markers/{file_id}/{analysis_date}/table/{period_index}": {
         parameters: {
             query?: never;
             header?: never;
@@ -423,7 +389,7 @@ export interface paths {
          *
          *     Returns data points within window_minutes of the onset and offset timestamps.
          */
-        get: operations["get_onset_offset_data_api_v1_markers__file_id___analysis_date__table__period_index__get"];
+        get: operations["get_onset_offset_data_api_markers__file_id___analysis_date__table__period_index__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -432,7 +398,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/markers/{file_id}/{analysis_date}/table-full": {
+    "/api/markers/{file_id}/{analysis_date}/table-full": {
         parameters: {
             query?: never;
             header?: never;
@@ -446,7 +412,7 @@ export interface paths {
          *     Returns all epochs from noon of analysis_date to noon of next day.
          *     Includes algorithm results and nonwear detection.
          */
-        get: operations["get_full_table_data_api_v1_markers__file_id___analysis_date__table_full_get"];
+        get: operations["get_full_table_data_api_markers__file_id___analysis_date__table_full_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -455,7 +421,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/export/columns": {
+    "/api/export/columns": {
         parameters: {
             query?: never;
             header?: never;
@@ -468,7 +434,7 @@ export interface paths {
          *
          *     Returns all available columns with their metadata, grouped by category.
          */
-        get: operations["get_export_columns_api_v1_export_columns_get"];
+        get: operations["get_export_columns_api_export_columns_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -477,7 +443,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/export/csv": {
+    "/api/export/csv": {
         parameters: {
             query?: never;
             header?: never;
@@ -492,14 +458,14 @@ export interface paths {
          *
          *     Returns metadata about the export. Use /csv/download to get the actual file.
          */
-        post: operations["generate_csv_export_api_v1_export_csv_post"];
+        post: operations["generate_csv_export_api_export_csv_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/export/csv/download": {
+    "/api/export/csv/download": {
         parameters: {
             query?: never;
             header?: never;
@@ -514,14 +480,14 @@ export interface paths {
          *
          *     Returns the CSV file directly as a download.
          */
-        post: operations["download_csv_export_api_v1_export_csv_download_post"];
+        post: operations["download_csv_export_api_export_csv_download_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/export/csv/quick": {
+    "/api/export/csv/quick": {
         parameters: {
             query?: never;
             header?: never;
@@ -534,7 +500,7 @@ export interface paths {
          *
          *     Uses default columns and returns CSV directly.
          */
-        get: operations["quick_export_api_v1_export_csv_quick_get"];
+        get: operations["quick_export_api_export_csv_quick_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -543,7 +509,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/diary/{file_id}/{analysis_date}": {
+    "/api/diary/{file_id}/{analysis_date}": {
         parameters: {
             query?: never;
             header?: never;
@@ -556,24 +522,24 @@ export interface paths {
          *
          *     Returns None if no diary entry exists for the given file/date.
          */
-        get: operations["get_diary_entry_api_v1_diary__file_id___analysis_date__get"];
+        get: operations["get_diary_entry_api_diary__file_id___analysis_date__get"];
         /**
          * Update Diary Entry
          * @description Create or update a diary entry for a specific file and date.
          */
-        put: operations["update_diary_entry_api_v1_diary__file_id___analysis_date__put"];
+        put: operations["update_diary_entry_api_diary__file_id___analysis_date__put"];
         post?: never;
         /**
          * Delete Diary Entry
          * @description Delete a diary entry.
          */
-        delete: operations["delete_diary_entry_api_v1_diary__file_id___analysis_date__delete"];
+        delete: operations["delete_diary_entry_api_diary__file_id___analysis_date__delete"];
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/diary/{file_id}/upload": {
+    "/api/diary/{file_id}/upload": {
         parameters: {
             query?: never;
             header?: never;
@@ -597,14 +563,14 @@ export interface paths {
          *     - awakenings: Number of awakenings (optional)
          *     - notes: Free text notes (optional)
          */
-        post: operations["upload_diary_csv_api_v1_diary__file_id__upload_post"];
+        post: operations["upload_diary_csv_api_diary__file_id__upload_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/settings": {
+    "/api/settings": {
         parameters: {
             query?: never;
             header?: never;
@@ -617,7 +583,7 @@ export interface paths {
          *
          *     Returns default settings if no settings have been saved yet.
          */
-        get: operations["get_settings_api_v1_settings_get"];
+        get: operations["get_settings_api_settings_get"];
         /**
          * Update Settings
          * @description Update current user's settings.
@@ -625,7 +591,7 @@ export interface paths {
          *     Creates settings record if it doesn't exist.
          *     Only updates fields that are provided (non-None).
          */
-        put: operations["update_settings_api_v1_settings_put"];
+        put: operations["update_settings_api_settings_put"];
         post?: never;
         /**
          * Reset Settings
@@ -633,7 +599,7 @@ export interface paths {
          *
          *     Deletes the settings record, so next GET will return defaults.
          */
-        delete: operations["reset_settings_api_v1_settings_delete"];
+        delete: operations["reset_settings_api_settings_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -699,40 +665,26 @@ export interface components {
          * @enum {string}
          */
         AlgorithmType: "sadeh_1994_original" | "sadeh_1994_actilife" | "cole_kripke_1992_original" | "cole_kripke_1992_actilife" | "manual";
-        /** Body_login_api_v1_auth_login_post */
-        Body_login_api_v1_auth_login_post: {
-            /** Grant Type */
-            grant_type?: string | null;
-            /** Username */
-            username: string;
-            /**
-             * Password
-             * Format: password
-             */
-            password: string;
-            /**
-             * Scope
-             * @default
-             */
-            scope: string;
-            /** Client Id */
-            client_id?: string | null;
-            /**
-             * Client Secret
-             * Format: password
-             */
-            client_secret?: string | null;
+        /**
+         * AuthStatusResponse
+         * @description Response for auth status check.
+         */
+        AuthStatusResponse: {
+            /** Password Required */
+            password_required: boolean;
+            /** Session Expire Hours */
+            session_expire_hours: number;
         };
-        /** Body_upload_diary_csv_api_v1_diary__file_id__upload_post */
-        Body_upload_diary_csv_api_v1_diary__file_id__upload_post: {
+        /** Body_upload_diary_csv_api_diary__file_id__upload_post */
+        Body_upload_diary_csv_api_diary__file_id__upload_post: {
             /**
              * File
              * Format: binary
              */
             file: string;
         };
-        /** Body_upload_file_api_v1_files_upload_post */
-        Body_upload_file_api_v1_files_upload_post: {
+        /** Body_upload_file_api_files_upload_post */
+        Body_upload_file_api_files_upload_post: {
             /**
              * File
              * Format: binary
@@ -957,8 +909,8 @@ export interface components {
             start_time?: string | null;
             /** End Time */
             end_time?: string | null;
-            /** Uploaded By Id */
-            uploaded_by_id?: number | null;
+            /** Uploaded By */
+            uploaded_by?: string | null;
             /** Uploaded At */
             uploaded_at?: string | null;
         };
@@ -1150,6 +1102,26 @@ export interface components {
             period_index: number;
         };
         /**
+         * PasswordCheck
+         * @description Request body for password verification.
+         */
+        PasswordCheck: {
+            /** Password */
+            password: string;
+        };
+        /**
+         * PasswordCheckResponse
+         * @description Response for password verification.
+         */
+        PasswordCheckResponse: {
+            /** Valid */
+            valid: boolean;
+            /** Password Required */
+            password_required: boolean;
+            /** Session Expire Hours */
+            session_expire_hours: number;
+        };
+        /**
          * SaveStatusResponse
          * @description Response after saving markers.
          */
@@ -1235,70 +1207,6 @@ export interface components {
             marker_index: number;
             /** @default MAIN_SLEEP */
             marker_type: components["schemas"]["MarkerType"];
-        };
-        /**
-         * Token
-         * @description JWT token response.
-         */
-        Token: {
-            /** Access Token */
-            access_token: string;
-            /** Refresh Token */
-            refresh_token: string;
-            /**
-             * Token Type
-             * @default bearer
-             */
-            token_type: string;
-        };
-        /**
-         * TokenRefresh
-         * @description Token refresh request.
-         */
-        TokenRefresh: {
-            /** Refresh Token */
-            refresh_token: string;
-        };
-        /**
-         * UserCreate
-         * @description User creation request.
-         */
-        UserCreate: {
-            /** Email */
-            email: string;
-            /** Username */
-            username: string;
-            /** Password */
-            password: string;
-            /**
-             * Role
-             * @default annotator
-             */
-            role: string;
-        };
-        /**
-         * UserRead
-         * @description User response model.
-         */
-        UserRead: {
-            /** Id */
-            id: number;
-            /** Email */
-            email: string;
-            /** Username */
-            username: string;
-            /**
-             * Role
-             * @default annotator
-             */
-            role: string;
-            /**
-             * Is Active
-             * @default true
-             */
-            is_active: boolean;
-            /** Created At */
-            created_at?: string | null;
         };
         /**
          * UserSettingsResponse
@@ -1424,7 +1332,7 @@ export interface operations {
             };
         };
     };
-    register_api_v1_auth_register_post: {
+    verify_password_api_auth_verify_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -1433,40 +1341,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["UserCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UserRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    login_api_v1_auth_login_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/x-www-form-urlencoded": components["schemas"]["Body_login_api_v1_auth_login_post"];
+                "application/json": components["schemas"]["PasswordCheck"];
             };
         };
         responses: {
@@ -1476,7 +1351,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Token"];
+                    "application/json": components["schemas"]["PasswordCheckResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1490,40 +1365,7 @@ export interface operations {
             };
         };
     };
-    refresh_token_api_v1_auth_refresh_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TokenRefresh"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Token"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_me_api_v1_auth_me_get: {
+    auth_status_api_auth_status_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1538,21 +1380,24 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UserRead"];
+                    "application/json": components["schemas"]["AuthStatusResponse"];
                 };
             };
         };
     };
-    upload_file_api_v1_files_upload_post: {
+    upload_file_api_files_upload_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+                "X-Username"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "multipart/form-data": components["schemas"]["Body_upload_file_api_v1_files_upload_post"];
+                "multipart/form-data": components["schemas"]["Body_upload_file_api_files_upload_post"];
             };
         };
         responses: {
@@ -1576,13 +1421,15 @@ export interface operations {
             };
         };
     };
-    list_files_api_v1_files_get: {
+    list_files_api_files_get: {
         parameters: {
             query?: {
                 skip?: number;
                 limit?: number;
             };
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1608,12 +1455,14 @@ export interface operations {
             };
         };
     };
-    delete_all_files_api_v1_files_delete: {
+    delete_all_files_api_files_delete: {
         parameters: {
             query?: {
                 status_filter?: string | null;
             };
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1641,10 +1490,12 @@ export interface operations {
             };
         };
     };
-    get_file_api_v1_files__file_id__get: {
+    get_file_api_files__file_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+            };
             path: {
                 file_id: number;
             };
@@ -1672,10 +1523,12 @@ export interface operations {
             };
         };
     };
-    delete_file_api_v1_files__file_id__delete: {
+    delete_file_api_files__file_id__delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+            };
             path: {
                 file_id: number;
             };
@@ -1701,10 +1554,12 @@ export interface operations {
             };
         };
     };
-    get_file_dates_api_v1_files__file_id__dates_get: {
+    get_file_dates_api_files__file_id__dates_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+            };
             path: {
                 file_id: number;
             };
@@ -1732,10 +1587,13 @@ export interface operations {
             };
         };
     };
-    scan_data_directory_api_v1_files_scan_post: {
+    scan_data_directory_api_files_scan_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+                "X-Username"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1752,12 +1610,23 @@ export interface operations {
                     };
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    get_scan_status_api_v1_files_scan_status_get: {
+    get_scan_status_api_files_scan_status_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1774,12 +1643,23 @@ export interface operations {
                     };
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    get_watcher_status_api_v1_files_watcher_status_get: {
+    get_watcher_status_api_files_watcher_status_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1796,15 +1676,26 @@ export interface operations {
                     };
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    get_activity_data_api_v1_activity__file_id___analysis_date__get: {
+    get_activity_data_api_activity__file_id___analysis_date__get: {
         parameters: {
             query?: {
                 /** @description Hours of data to return (12-48) */
                 view_hours?: number;
             };
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+            };
             path: {
                 file_id: number;
                 analysis_date: string;
@@ -1833,14 +1724,16 @@ export interface operations {
             };
         };
     };
-    get_activity_data_with_scoring_api_v1_activity__file_id___analysis_date__score_get: {
+    get_activity_data_with_scoring_api_activity__file_id___analysis_date__score_get: {
         parameters: {
             query?: {
                 view_hours?: number;
                 /** @description Sleep scoring algorithm to use */
                 algorithm?: string;
             };
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+            };
             path: {
                 file_id: number;
                 analysis_date: string;
@@ -1869,12 +1762,14 @@ export interface operations {
             };
         };
     };
-    get_activity_data_with_sadeh_api_v1_activity__file_id___analysis_date__sadeh_get: {
+    get_activity_data_with_sadeh_api_activity__file_id___analysis_date__sadeh_get: {
         parameters: {
             query?: {
                 view_hours?: number;
             };
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+            };
             path: {
                 file_id: number;
                 analysis_date: string;
@@ -1903,13 +1798,15 @@ export interface operations {
             };
         };
     };
-    get_markers_api_v1_markers__file_id___analysis_date__get: {
+    get_markers_api_markers__file_id___analysis_date__get: {
         parameters: {
             query?: {
                 /** @description Include Sadeh algorithm results */
                 include_algorithm?: boolean;
             };
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+            };
             path: {
                 file_id: number;
                 analysis_date: string;
@@ -1938,10 +1835,13 @@ export interface operations {
             };
         };
     };
-    save_markers_api_v1_markers__file_id___analysis_date__put: {
+    save_markers_api_markers__file_id___analysis_date__put: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+                "X-Username"?: string | null;
+            };
             path: {
                 file_id: number;
                 analysis_date: string;
@@ -1974,12 +1874,14 @@ export interface operations {
             };
         };
     };
-    delete_marker_api_v1_markers__file_id___analysis_date___period_index__delete: {
+    delete_marker_api_markers__file_id___analysis_date___period_index__delete: {
         parameters: {
             query?: {
                 marker_category?: components["schemas"]["MarkerCategory"];
             };
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+            };
             path: {
                 file_id: number;
                 analysis_date: string;
@@ -2011,12 +1913,14 @@ export interface operations {
             };
         };
     };
-    get_onset_offset_data_api_v1_markers__file_id___analysis_date__table__period_index__get: {
+    get_onset_offset_data_api_markers__file_id___analysis_date__table__period_index__get: {
         parameters: {
             query?: {
                 window_minutes?: number;
             };
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+            };
             path: {
                 file_id: number;
                 analysis_date: string;
@@ -2046,10 +1950,12 @@ export interface operations {
             };
         };
     };
-    get_full_table_data_api_v1_markers__file_id___analysis_date__table_full_get: {
+    get_full_table_data_api_markers__file_id___analysis_date__table_full_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+            };
             path: {
                 file_id: number;
                 analysis_date: string;
@@ -2078,10 +1984,12 @@ export interface operations {
             };
         };
     };
-    get_export_columns_api_v1_export_columns_get: {
+    get_export_columns_api_export_columns_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2096,12 +2004,23 @@ export interface operations {
                     "application/json": components["schemas"]["ExportColumnsResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    generate_csv_export_api_v1_export_csv_post: {
+    generate_csv_export_api_export_csv_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2131,10 +2050,12 @@ export interface operations {
             };
         };
     };
-    download_csv_export_api_v1_export_csv_download_post: {
+    download_csv_export_api_export_csv_download_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2164,7 +2085,7 @@ export interface operations {
             };
         };
     };
-    quick_export_api_v1_export_csv_quick_get: {
+    quick_export_api_export_csv_quick_get: {
         parameters: {
             query: {
                 /** @description Comma-separated file IDs */
@@ -2174,7 +2095,9 @@ export interface operations {
                 /** @description End date filter */
                 end_date?: string | null;
             };
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2200,10 +2123,12 @@ export interface operations {
             };
         };
     };
-    get_diary_entry_api_v1_diary__file_id___analysis_date__get: {
+    get_diary_entry_api_diary__file_id___analysis_date__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+            };
             path: {
                 file_id: number;
                 analysis_date: string;
@@ -2232,10 +2157,13 @@ export interface operations {
             };
         };
     };
-    update_diary_entry_api_v1_diary__file_id___analysis_date__put: {
+    update_diary_entry_api_diary__file_id___analysis_date__put: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+                "X-Username"?: string | null;
+            };
             path: {
                 file_id: number;
                 analysis_date: string;
@@ -2268,10 +2196,12 @@ export interface operations {
             };
         };
     };
-    delete_diary_entry_api_v1_diary__file_id___analysis_date__delete: {
+    delete_diary_entry_api_diary__file_id___analysis_date__delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+            };
             path: {
                 file_id: number;
                 analysis_date: string;
@@ -2298,10 +2228,13 @@ export interface operations {
             };
         };
     };
-    upload_diary_csv_api_v1_diary__file_id__upload_post: {
+    upload_diary_csv_api_diary__file_id__upload_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+                "X-Username"?: string | null;
+            };
             path: {
                 file_id: number;
             };
@@ -2309,7 +2242,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "multipart/form-data": components["schemas"]["Body_upload_diary_csv_api_v1_diary__file_id__upload_post"];
+                "multipart/form-data": components["schemas"]["Body_upload_diary_csv_api_diary__file_id__upload_post"];
             };
         };
         responses: {
@@ -2333,10 +2266,13 @@ export interface operations {
             };
         };
     };
-    get_settings_api_v1_settings_get: {
+    get_settings_api_settings_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+                "X-Username"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2351,12 +2287,24 @@ export interface operations {
                     "application/json": components["schemas"]["UserSettingsResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    update_settings_api_v1_settings_put: {
+    update_settings_api_settings_put: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+                "X-Username"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2386,10 +2334,13 @@ export interface operations {
             };
         };
     };
-    reset_settings_api_v1_settings_delete: {
+    reset_settings_api_settings_delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Site-Password"?: string | null;
+                "X-Username"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2401,6 +2352,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

@@ -500,24 +500,39 @@ export function ActivityPlot() {
             });
           }, { passive: false });
 
-          // Pan with middle mouse or shift+drag
+          // Pan with any mouse button drag (left, middle, or shift+left)
           let isPanning = false;
           let panStartX = 0;
+          let panStartY = 0;
           let panStartMin = 0;
           let panStartMax = 0;
+          let hasDragged = false;
 
           u.over.addEventListener('mousedown', (e: MouseEvent) => {
-            if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
-              e.preventDefault();
-              isPanning = true;
+            // Allow panning with left button (0), middle button (1), or shift+left
+            if (e.button === 0 || e.button === 1) {
               panStartX = e.clientX;
+              panStartY = e.clientY;
               panStartMin = u.scales.x.min ?? 0;
               panStartMax = u.scales.x.max ?? 0;
-              u.over.style.cursor = 'grabbing';
+              hasDragged = false;
+              // Don't set isPanning yet - wait for actual drag movement
+              // This allows click events to still work for marker placement
             }
           });
 
           document.addEventListener('mousemove', (e: MouseEvent) => {
+            // Check if we should start panning (moved more than 5px threshold)
+            if (!isPanning && panStartX !== 0) {
+              const dx = Math.abs(e.clientX - panStartX);
+              const dy = Math.abs(e.clientY - panStartY);
+              if (dx > 5 || dy > 5) {
+                isPanning = true;
+                hasDragged = true;
+                u.over.style.cursor = 'grabbing';
+              }
+            }
+
             if (!isPanning) return;
             const dx = e.clientX - panStartX;
             const pxPerVal = (u.bbox.width / devicePixelRatio) / (panStartMax - panStartMin);
@@ -543,14 +558,20 @@ export function ActivityPlot() {
           });
 
           document.addEventListener('mouseup', () => {
-            if (isPanning) {
-              isPanning = false;
-              u.over.style.cursor = 'crosshair';
-            }
+            isPanning = false;
+            panStartX = 0;
+            panStartY = 0;
+            u.over.style.cursor = 'crosshair';
           });
 
-          // Click handler for marker placement - EXACT from benchmark.html
+          // Click handler for marker placement - only if not dragging
           u.over.addEventListener('click', (e: MouseEvent) => {
+            // Don't place marker if we were panning
+            if (hasDragged) {
+              hasDragged = false;
+              return;
+            }
+
             const rect = u.over.getBoundingClientRect();
             const left = e.clientX - rect.left;
 

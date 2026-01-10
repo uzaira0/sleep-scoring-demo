@@ -1,0 +1,81 @@
+# Sleep Scoring Web - Backend Dockerfile (Local Development)
+# Uses monorepo workspace for local builds before packages are published
+# Build context: monorepo root
+
+FROM python:3.12-slim AS builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv for fast package installation
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /build
+
+# Copy monorepo root files needed for workspace resolution
+COPY pyproject.toml ./
+COPY uv.lock ./
+
+# Copy app-specific files
+COPY apps/sleep-scoring-demo/pyproject.toml ./apps/sleep-scoring-demo/
+COPY apps/sleep-scoring-demo/uv.lock ./apps/sleep-scoring-demo/
+
+# Copy shared packages that sleep-scoring-demo depends on
+COPY packages/global-pass-honor-username-auth ./packages/global-pass-honor-username-auth
+COPY packages/deploy-toolkit ./packages/deploy-toolkit
+COPY packages/db-toolkit ./packages/db-toolkit
+COPY packages/fastapi-errors ./packages/fastapi-errors
+COPY packages/fastapi-pagination ./packages/fastapi-pagination
+COPY packages/fastapi-logging ./packages/fastapi-logging
+COPY packages/fastapi-files ./packages/fastapi-files
+COPY packages/fastapi-tasks ./packages/fastapi-tasks
+# TypeScript packages need placeholder pyproject.toml for workspace
+COPY packages/frontend-toolkit/pyproject.toml ./packages/frontend-toolkit/
+COPY packages/openapi-codegen/pyproject.toml ./packages/openapi-codegen/
+
+# Install dependencies using workspace resolution
+WORKDIR /build/apps/sleep-scoring-demo
+# Use uv sync with --no-editable to install workspace packages into the venv
+# (editable mode creates .pth files pointing to /build which won't exist in prod)
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --extra web --no-dev --no-editable
+# Move .venv to /opt/venv for production stage
+RUN mv .venv /opt/venv
+
+# =============================================================================
+# Production stage
+# =============================================================================
+FROM python:3.12-slim
+
+# Install runtime dependencies (curl for healthcheck)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copy application code (from monorepo context)
+COPY apps/sleep-scoring-demo/sleep_scoring_web ./sleep_scoring_web
+COPY apps/sleep-scoring-demo/sleep_scoring_app/core ./sleep_scoring_app/core
+
+# Create non-root user for security
+RUN useradd --create-home --shell /bin/bash appuser && \
+    chown -R appuser:appuser /app
+USER appuser
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Default command (use python -m to avoid hardcoded shebang paths)
+CMD ["python", "-m", "uvicorn", "sleep_scoring_web.main:app", "--host", "0.0.0.0", "--port", "8000"]

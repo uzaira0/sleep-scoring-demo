@@ -16,15 +16,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
+from fastapi_pagination import PaginatedResponse, PaginationParams
 from sqlalchemy import func, select
 
-from sleep_scoring_web.api.deps import CurrentUser, DbSession
+from sleep_scoring_web.api.deps import DbSession, Username, VerifiedPassword
 from sleep_scoring_web.config import settings
 from sleep_scoring_web.db.models import File as FileModel
 from sleep_scoring_web.db.models import RawActivityData
 from sleep_scoring_web.db.session import async_session_maker
-from sleep_scoring_web.schemas import FileInfo, FileListResponse, FileStatus, FileUploadResponse
+from sleep_scoring_web.schemas import FileInfo, FileStatus, FileUploadResponse
 from sleep_scoring_web.services.loaders.csv_loader import CSVLoaderService
 
 router = APIRouter()
@@ -142,7 +143,7 @@ async def bulk_insert_activity_data(
 async def import_file_from_disk_async(
     file_path: Path,
     db,
-    user_id: int,
+    username: str,
 ) -> FileUploadResponse | None:
     """Import a single file from disk into the database (async version)."""
     filename = file_path.name
@@ -159,7 +160,7 @@ async def import_file_from_disk_async(
         original_path=str(file_path.absolute()),
         file_type="csv" if filename.lower().endswith(".csv") else "xlsx",
         status=FileStatus.PROCESSING,
-        uploaded_by_id=user_id,
+        uploaded_by=username,
     )
     db.add(file_record)
     await db.commit()
@@ -204,7 +205,7 @@ async def import_file_from_disk_async(
         return None
 
 
-async def _async_scan_files(user_id: int, csv_files: list[Path]) -> None:
+async def _async_scan_files(username: str, csv_files: list[Path]) -> None:
     """
     Async file scan implementation.
 
@@ -216,7 +217,7 @@ async def _async_scan_files(user_id: int, csv_files: list[Path]) -> None:
         for file_path in csv_files:
             _scan_status.current_file = file_path.name
             try:
-                result = await import_file_from_disk_async(file_path, db, user_id)
+                result = await import_file_from_disk_async(file_path, db, username)
                 if result is None:
                     # Check if skipped or failed
                     existing = await db.execute(
@@ -239,7 +240,7 @@ async def _async_scan_files(user_id: int, csv_files: list[Path]) -> None:
     _scan_status.current_file = ""
 
 
-def _run_background_scan(user_id: int, csv_files: list[Path]) -> None:
+def _run_background_scan(username: str, csv_files: list[Path]) -> None:
     """
     Run file scan in background thread.
 
@@ -249,7 +250,7 @@ def _run_background_scan(user_id: int, csv_files: list[Path]) -> None:
     import anyio.from_thread
 
     try:
-        anyio.from_thread.run(_async_scan_files, user_id, csv_files)
+        anyio.from_thread.run(_async_scan_files, username, csv_files)
     except Exception as e:
         global _scan_status
         _scan_status.is_running = False
@@ -261,7 +262,8 @@ def _run_background_scan(user_id: int, csv_files: list[Path]) -> None:
 async def upload_file(
     file: Annotated[UploadFile, File(description="CSV file to upload")],
     db: DbSession,
-    current_user: CurrentUser,
+    _: VerifiedPassword,
+    username: Username,
 ) -> FileUploadResponse:
     """
     Upload a CSV file for processing.
@@ -311,7 +313,7 @@ async def upload_file(
         original_path=str(upload_path),
         file_type="csv" if filename.lower().endswith(".csv") else "xlsx",
         status=FileStatus.PROCESSING,
-        uploaded_by_id=current_user.id,
+        uploaded_by=username,
     )
     db.add(file_record)
     await db.commit()
@@ -359,41 +361,47 @@ async def upload_file(
         ) from e
 
 
-@router.get("", response_model=FileListResponse)
+@router.get("", response_model=PaginatedResponse[FileInfo])
 async def list_files(
     db: DbSession,
-    current_user: CurrentUser,
-    skip: int = 0,
-    limit: int = 100,
-) -> FileListResponse:
-    """List all uploaded files."""
+    _: VerifiedPassword,
+    pagination: PaginationParams = Depends(),
+) -> PaginatedResponse[FileInfo]:
+    """List all uploaded files with pagination."""
     # Get total count
     count_result = await db.execute(select(func.count(FileModel.id)))
     total = count_result.scalar() or 0
 
     # Get files with pagination
     result = await db.execute(
-        select(FileModel).order_by(FileModel.uploaded_at.desc()).offset(skip).limit(limit)
+        select(FileModel)
+        .order_by(FileModel.uploaded_at.desc())
+        .offset(pagination.offset)
+        .limit(pagination.limit)
     )
     files = result.scalars().all()
 
-    return FileListResponse(
-        files=[
-            FileInfo(
-                id=f.id,
-                filename=f.filename,
-                original_path=f.original_path,
-                file_type=f.file_type,
-                status=FileStatus(f.status),
-                row_count=f.row_count,
-                start_time=f.start_time,
-                end_time=f.end_time,
-                uploaded_by_id=f.uploaded_by_id,
-                uploaded_at=f.uploaded_at,
-            )
-            for f in files
-        ],
+    items = [
+        FileInfo(
+            id=f.id,
+            filename=f.filename,
+            original_path=f.original_path,
+            file_type=f.file_type,
+            status=FileStatus(f.status),
+            row_count=f.row_count,
+            start_time=f.start_time,
+            end_time=f.end_time,
+            uploaded_by=f.uploaded_by,
+            uploaded_at=f.uploaded_at,
+        )
+        for f in files
+    ]
+
+    return PaginatedResponse(
+        items=items,
         total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
     )
 
 
@@ -401,7 +409,7 @@ async def list_files(
 async def get_file(
     file_id: int,
     db: DbSession,
-    current_user: CurrentUser,
+    _: VerifiedPassword,
 ) -> FileInfo:
     """Get file metadata by ID."""
     result = await db.execute(select(FileModel).where(FileModel.id == file_id))
@@ -422,7 +430,7 @@ async def get_file(
         row_count=file.row_count,
         start_time=file.start_time,
         end_time=file.end_time,
-        uploaded_by_id=file.uploaded_by_id,
+        uploaded_by=file.uploaded_by,
         uploaded_at=file.uploaded_at,
     )
 
@@ -431,7 +439,7 @@ async def get_file(
 async def get_file_dates(
     file_id: int,
     db: DbSession,
-    current_user: CurrentUser,
+    _: VerifiedPassword,
 ) -> list[str]:
     """Get available dates for a file."""
     # Verify file exists
@@ -461,16 +469,9 @@ async def get_file_dates(
 async def delete_file(
     file_id: int,
     db: DbSession,
-    current_user: CurrentUser,
+    _: VerifiedPassword,
 ):
     """Delete a file and its associated data."""
-    # Only admins can delete files
-    if current_user.role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can delete files",
-        )
-
     result = await db.execute(select(FileModel).where(FileModel.id == file_id))
     file = result.scalar_one_or_none()
 
@@ -494,21 +495,14 @@ async def delete_file(
 @router.delete("", status_code=status.HTTP_200_OK, response_model=dict)
 async def delete_all_files(
     db: DbSession,
-    current_user: CurrentUser,
+    _: VerifiedPassword,
     status_filter: str | None = None,
 ) -> dict:
     """
-    Delete all files from the database (admin only).
+    Delete all files from the database.
 
     Optionally filter by status (e.g., 'failed' to delete only failed files).
     """
-    # Only admins can delete files
-    if current_user.role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can delete files",
-        )
-
     # Build query
     query = select(FileModel)
     if status_filter:
@@ -539,21 +533,16 @@ async def delete_all_files(
 @router.post("/scan", response_model=dict)
 async def scan_data_directory(
     background_tasks: BackgroundTasks,
-    current_user: CurrentUser,
+    _: VerifiedPassword,
+    username: Username,
 ) -> dict:
     """
     Start a background scan of the data directory for CSV files.
 
-    Only admins can trigger a scan. Files already in the database are skipped.
+    Files already in the database are skipped.
     Returns immediately with scan status - poll GET /scan/status for progress.
     """
     global _scan_status
-
-    if current_user.role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can scan for files",
-        )
 
     # Check if scan is already running
     if _scan_status.is_running:
@@ -592,7 +581,7 @@ async def scan_data_directory(
     _scan_status.error = None
 
     # Start background task
-    background_tasks.add_task(_run_background_scan, current_user.id, csv_files)
+    background_tasks.add_task(_run_background_scan, username, csv_files)
 
     return {
         "message": f"Background scan started for {len(csv_files)} files",
@@ -604,7 +593,7 @@ async def scan_data_directory(
 
 @router.get("/scan/status", response_model=dict)
 async def get_scan_status(
-    current_user: CurrentUser,
+    _: VerifiedPassword,
 ) -> dict:
     """
     Get the current status of the background file scan.
@@ -633,7 +622,7 @@ async def get_scan_status(
 
 @router.get("/watcher/status", response_model=dict)
 async def get_watcher_status(
-    current_user: CurrentUser,
+    _: VerifiedPassword,
 ) -> dict:
     """
     Get the current status of the automatic file watcher.

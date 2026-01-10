@@ -564,7 +564,11 @@ class DiaryImportOrchestrator:
                 participant_info = self._extract_participant_info_from_filename(filename)
 
             if participant_info is None:
-                participant_info = ParticipantInfo(numerical_id="UNKNOWN")
+                participant_info = ParticipantInfo(
+                    numerical_id="UNKNOWN",
+                    group_str="G1",  # Set string representation for export
+                    timepoint_str="T1",  # Set string representation for export
+                )
 
             conn.execute(
                 f"""

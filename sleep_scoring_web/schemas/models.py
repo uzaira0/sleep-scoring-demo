@@ -21,43 +21,6 @@ from .enums import (
 )
 
 # =============================================================================
-# User Models (for FastAPI-Users)
-# =============================================================================
-
-
-class UserRead(BaseModel):
-    """User response model."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    email: str
-    username: str
-    role: str = "annotator"
-    is_active: bool = True
-    created_at: datetime | None = None
-
-
-class UserCreate(BaseModel):
-    """User creation request."""
-
-    email: str
-    username: str
-    password: str
-    role: str = "annotator"
-
-
-class UserUpdate(BaseModel):
-    """User update request."""
-
-    email: str | None = None
-    username: str | None = None
-    password: str | None = None
-    role: str | None = None
-    is_active: bool | None = None
-
-
-# =============================================================================
 # Sleep Period & Marker Models
 # =============================================================================
 
@@ -236,7 +199,7 @@ class FileInfo(BaseModel):
     row_count: int | None = None
     start_time: datetime | None = None
     end_time: datetime | None = None
-    uploaded_by_id: int | None = None
+    uploaded_by: str | None = None
     uploaded_at: datetime | None = None
 
 
@@ -248,13 +211,6 @@ class FileUploadResponse(BaseModel):
     status: FileStatus
     row_count: int | None = None
     message: str = "File uploaded successfully"
-
-
-class FileListResponse(BaseModel):
-    """Response for file listing endpoint."""
-
-    files: list[FileInfo]
-    total: int
 
 
 # =============================================================================

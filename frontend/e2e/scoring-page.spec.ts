@@ -64,12 +64,16 @@ test.describe("Scoring Page", () => {
 
     // Get initial date index from the counter (e.g., "1/14")
     const dateCounter = page.locator("text=/\\(\\d+\\/\\d+\\)/").first();
+    await expect(dateCounter).toBeVisible({ timeout: 5000 });
     const initialCounter = await dateCounter.textContent();
 
-    // Click next date button (the ChevronRight button)
-    const nextButton = page.locator('button').filter({ has: page.locator('[class*="lucide-chevron-right"]') });
+    // Click next date button using data-testid
+    const nextButton = page.locator('[data-testid="next-date-btn"]');
+    await expect(nextButton).toBeVisible({ timeout: 5000 });
     await nextButton.click();
-    await page.waitForTimeout(1000);
+
+    // Wait for chart to re-render after date change
+    await expect(page.locator(".u-over").first()).toBeVisible({ timeout: 15000 });
 
     // Verify date counter changed
     const newCounter = await dateCounter.textContent();
@@ -82,7 +86,7 @@ test.describe("Scoring Page", () => {
 
     // Verify file dropdown is visible (first select is file dropdown)
     const fileSelect = page.locator('select').first();
-    await expect(fileSelect).toBeVisible();
+    await expect(fileSelect).toBeVisible({ timeout: 5000 });
 
     // Get initial selected value
     const initialValue = await fileSelect.inputValue();
@@ -96,7 +100,9 @@ test.describe("Scoring Page", () => {
       const secondOptionValue = await options[1].getAttribute('value');
       if (secondOptionValue && secondOptionValue !== initialValue) {
         await fileSelect.selectOption(secondOptionValue);
-        await page.waitForTimeout(2000);
+
+        // Wait for chart to re-render after file change
+        await expect(page.locator(".u-over").first()).toBeVisible({ timeout: 15000 });
 
         // Verify the selection changed
         const newValue = await fileSelect.inputValue();

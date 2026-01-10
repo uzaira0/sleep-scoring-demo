@@ -5,6 +5,7 @@ Handles calculation of sleep metrics from markers and algorithm results.
 
 from __future__ import annotations
 
+import bisect
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -174,20 +175,31 @@ class MetricsCalculationService:
             return None
 
     def _find_closest_data_index(self, x_data, timestamp):
-        """Find the index of the closest data point to the given timestamp."""
+        """Find the index of the closest data point to the given timestamp.
+
+        Uses binary search (O(log n)) instead of linear search (O(n)) for efficiency.
+        Assumes x_data is sorted in ascending order (which is guaranteed by
+        database queries that ORDER BY timestamp).
+        """
         if x_data is None or len(x_data) == 0:
             return None
 
-        min_diff = float("inf")
-        closest_idx = None
+        # Binary search to find insertion point
+        idx = bisect.bisect_left(x_data, timestamp)
 
-        for i, data_timestamp in enumerate(x_data):
-            diff = abs(data_timestamp - timestamp)
-            if diff < min_diff:
-                min_diff = diff
-                closest_idx = i
+        # Handle edge cases
+        if idx == 0:
+            return 0
+        if idx >= len(x_data):
+            return len(x_data) - 1
 
-        return closest_idx
+        # Compare neighbors to find closest
+        before = x_data[idx - 1]
+        after = x_data[idx]
+
+        if abs(timestamp - before) <= abs(after - timestamp):
+            return idx - 1
+        return idx
 
     def _dict_to_sleep_metrics(self, metrics_dict: dict, file_path: str | None = None) -> SleepMetrics:
         """Convert dictionary metrics to SleepMetrics object."""
@@ -208,6 +220,8 @@ class MetricsCalculationService:
             group=group,
             timepoint=timepoint,
             date=metrics_dict.get("Onset Date", ""),
+            group_str=group,  # Set string representation for export
+            timepoint_str=timepoint,  # Set string representation for export
         )
 
         # Create daily sleep markers from onset/offset data

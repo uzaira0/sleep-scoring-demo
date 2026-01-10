@@ -2,15 +2,14 @@
 User settings API endpoints for persisting preferences.
 """
 
-from typing import Annotated, Any
+from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from sleep_scoring_web.api.deps import get_current_user, get_db
-from sleep_scoring_web.db.models import User, UserSettings
+from sleep_scoring_web.api.deps import DbSession, Username, VerifiedPassword
+from sleep_scoring_web.db.models import UserSettings
 from sleep_scoring_web.schemas.enums import (
     ActivityDataPreference,
     AlgorithmType,
@@ -19,10 +18,6 @@ from sleep_scoring_web.schemas.enums import (
 
 
 router = APIRouter(prefix="/settings", tags=["settings"])
-
-# Type aliases for dependency injection
-DbSession = Annotated[AsyncSession, Depends(get_db)]
-CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
 # =============================================================================
@@ -106,7 +101,8 @@ def get_default_settings() -> UserSettingsResponse:
 @router.get("", response_model=UserSettingsResponse)
 async def get_settings(
     db: DbSession,
-    current_user: CurrentUser,
+    _: VerifiedPassword,
+    username: Username,
 ) -> UserSettingsResponse:
     """
     Get current user's settings.
@@ -114,7 +110,7 @@ async def get_settings(
     Returns default settings if no settings have been saved yet.
     """
     result = await db.execute(
-        select(UserSettings).where(UserSettings.user_id == current_user.id)
+        select(UserSettings).where(UserSettings.username == username)
     )
     settings = result.scalar_one_or_none()
 
@@ -139,7 +135,8 @@ async def get_settings(
 async def update_settings(
     settings_data: UserSettingsUpdate,
     db: DbSession,
-    current_user: CurrentUser,
+    _: VerifiedPassword,
+    username: Username,
 ) -> UserSettingsResponse:
     """
     Update current user's settings.
@@ -148,7 +145,7 @@ async def update_settings(
     Only updates fields that are provided (non-None).
     """
     result = await db.execute(
-        select(UserSettings).where(UserSettings.user_id == current_user.id)
+        select(UserSettings).where(UserSettings.username == username)
     )
     settings = result.scalar_one_or_none()
 
@@ -156,7 +153,7 @@ async def update_settings(
         # Create new settings record with defaults merged with provided values
         defaults = get_default_settings()
         settings = UserSettings(
-            user_id=current_user.id,
+            username=username,
             sleep_detection_rule=settings_data.sleep_detection_rule or defaults.sleep_detection_rule,
             night_start_hour=settings_data.night_start_hour or defaults.night_start_hour,
             night_end_hour=settings_data.night_end_hour or defaults.night_end_hour,
@@ -199,7 +196,8 @@ async def update_settings(
 @router.delete("", status_code=204)
 async def reset_settings(
     db: DbSession,
-    current_user: CurrentUser,
+    _: VerifiedPassword,
+    username: Username,
 ) -> None:
     """
     Reset user settings to defaults.
@@ -207,7 +205,7 @@ async def reset_settings(
     Deletes the settings record, so next GET will return defaults.
     """
     result = await db.execute(
-        select(UserSettings).where(UserSettings.user_id == current_user.id)
+        select(UserSettings).where(UserSettings.username == username)
     )
     settings = result.scalar_one_or_none()
 

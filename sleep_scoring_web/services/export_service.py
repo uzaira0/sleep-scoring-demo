@@ -197,7 +197,7 @@ class ExportService:
 
         except Exception as e:
             logger.exception("Export failed: %s", e)
-            result.errors.append(f"Export failed: {str(e)}")
+            result.errors.append(f"Export failed: {e!s}")
             return result
 
     async def _fetch_export_data(
@@ -322,7 +322,7 @@ class ExportService:
         return result.scalar_one_or_none()
 
     @staticmethod
-    def _format_number(value: float | int | None, precision: int = 2) -> str:
+    def _format_number(value: float | None, precision: int = 2) -> str:
         """Format number for CSV output."""
         if value is None:
             return ""

@@ -111,7 +111,7 @@ test.describe("Settings Persistence", () => {
     // Save and wait for the request to complete
     const saveButton = page.getByRole("button", { name: /save/i });
     await Promise.all([
-      page.waitForResponse((response) => response.url().includes("/api/v1/settings") && response.request().method() === "PUT"),
+      page.waitForResponse((response) => response.url().includes("/api/settings") && response.request().method() === "PUT"),
       saveButton.click(),
     ]);
 
@@ -123,7 +123,7 @@ test.describe("Settings Persistence", () => {
 
     // Set up response listener BEFORE reload (response happens during reload)
     const responsePromise = page.waitForResponse(
-      (response) => response.url().includes("/api/v1/settings") && response.request().method() === "GET"
+      (response) => response.url().includes("/api/settings") && response.request().method() === "GET"
     );
 
     // Refresh page

@@ -97,15 +97,27 @@ class AdjacentMarkersConnector:
         self._update_checkbox(store.state.show_adjacent_markers)
 
     def _on_state_change(self, old_state: UIState, new_state: UIState) -> None:
-        """React to adjacent markers visibility or date changes."""
+        """React to adjacent markers visibility or activity data changes.
+
+        BUG FIX: Previously reacted to date changes, but this caused adjacent markers
+        to be displayed BEFORE the plot data was loaded, only to be cleared when
+        set_data_and_restrictions() called self.clear(). Now we react to activity
+        data being loaded (activity_timestamps changes) since that's when the plot
+        is actually ready for markers.
+        """
         visibility_changed = old_state.show_adjacent_markers != new_state.show_adjacent_markers
-        date_changed = old_state.current_date_index != new_state.current_date_index
+        # React to activity data being loaded, not date changes
+        # This ensures adjacent markers are added AFTER set_data_and_restrictions clears the plot
+        data_loaded = (
+            old_state.activity_timestamps != new_state.activity_timestamps
+            and len(new_state.activity_timestamps) > 0
+        )
 
         if visibility_changed:
             self._update_checkbox(new_state.show_adjacent_markers)
             self._toggle_markers(new_state)
-        elif date_changed and new_state.show_adjacent_markers:
-            # Date changed with checkbox checked - reload
+        elif data_loaded and new_state.show_adjacent_markers:
+            # Data loaded with checkbox checked - display adjacent markers
             self._toggle_markers(new_state)
 
     def _update_checkbox(self, enabled: bool) -> None:

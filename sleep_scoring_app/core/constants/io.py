@@ -78,8 +78,9 @@ class ExportColumn(StrEnum):
     FRAGMENTATION_INDEX = "Fragmentation Index"
     SLEEP_FRAGMENTATION_INDEX = "Sleep Fragmentation Index"
     # Algorithm results (LEGACY - kept for Sadeh-specific exports)
-    SADEH_ONSET = "Sleep Algorithm Value at Onset"
-    SADEH_OFFSET = "Sleep Algorithm Value at Offset"
+    # NOTE: Keys must match what metrics_calculation_service.py produces
+    SADEH_ONSET = "Sadeh Algorithm Value at Sleep Onset"
+    SADEH_OFFSET = "Sadeh Algorithm Value at Sleep Offset"
     SADEH_DATA_SOURCE = "Sadeh_Data_Source"
     ACTILIFE_VS_CALCULATED_AGREEMENT = "ActiLife_vs_Calculated_Agreement_Percent"
     ACTILIFE_VS_CALCULATED_DISAGREEMENTS = "ActiLife_vs_Calculated_Disagreements"

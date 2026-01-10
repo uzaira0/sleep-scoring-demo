@@ -4,6 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
+### Desktop Application
+
 ```bash
 # Run application
 uv run python -m sleep_scoring_app
@@ -23,6 +25,43 @@ basedpyright
 # Build executable
 pyinstaller sleep-scoring-demo.spec
 ```
+
+### Web Application - Docker
+
+**Local Development** (uses monorepo workspace):
+```bash
+cd docker
+docker compose -f docker-compose.local.yml up -d --build
+docker compose -f docker-compose.local.yml logs -f backend
+docker compose -f docker-compose.local.yml down
+```
+
+**Production** (uses packages from GitHub Releases):
+```bash
+cd docker
+# Set the GitHub repo and package version
+export GITHUB_REPO=your-org/monorepo
+export PACKAGES_VERSION=0.1.0
+
+docker compose up -d --build
+docker compose logs -f backend
+docker compose down
+```
+
+**Publishing Packages** (run before production builds):
+```bash
+# Push a tag to trigger the publish workflow
+git tag packages-v0.1.0
+git push origin packages-v0.1.0
+
+# Or run manually in GitHub Actions
+# Workflow: "Publish Python Packages" -> Run workflow
+```
+
+**Access Points:**
+- Frontend: http://localhost:8501
+- Backend API: http://localhost:8500
+- API Docs: http://localhost:8500/docs
 
 ## Project Overview
 

@@ -59,8 +59,13 @@ services:
 
   backend:
     build:
+      # Context is the app directory (packages installed from GitHub Releases)
       context: ..
       dockerfile: docker/backend/Dockerfile
+      args:
+        # Override these in CI or .env for production
+        PACKAGES_VERSION: ${PACKAGES_VERSION:-0.1.0}
+        GITHUB_REPO: ${GITHUB_REPO:-your-org/monorepo}
     container_name: sleep-scoring-backend
     environment:
       # Database
@@ -109,7 +114,8 @@ services:
       context: ..
       dockerfile: docker/frontend/Dockerfile
       args:
-        VITE_API_BASE_URL: /api/v1
+        # API base URL - now uses /api without versioning
+        VITE_API_BASE_URL: /api
     container_name: sleep-scoring-frontend
     ports:
       - "${FRONTEND_PORT:-8501}:80"

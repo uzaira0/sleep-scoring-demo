@@ -12,8 +12,6 @@ from typing import TYPE_CHECKING, Protocol, Sequence
 from .cole_kripke import ColeKripkeAlgorithm
 from .sadeh import SadehAlgorithm
 
-if TYPE_CHECKING:
-    pass
 
 
 class SleepScoringAlgorithm(Protocol):

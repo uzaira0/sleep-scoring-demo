@@ -245,6 +245,16 @@ class NavigationConnector:
             tab.date_dropdown.setCurrentIndex(state.current_date_index)
             tab.date_dropdown.blockSignals(False)
 
+            # Update weekday label (BUG FIX: was previously in load_current_date() which
+            # is no longer called via Redux connectors - ActivityDataConnector handles data loading)
+            if 0 <= state.current_date_index < len(state.available_dates):
+                from datetime import date
+
+                date_str = state.available_dates[state.current_date_index]
+                current_date = date.fromisoformat(date_str)
+                weekday_str = current_date.strftime("%A")
+                tab.weekday_label.setText(f"Day: {weekday_str}")
+
         # Clear old markers before new data loads
         if state.current_date_index != -1:
             pw = self.main_window.plot_widget

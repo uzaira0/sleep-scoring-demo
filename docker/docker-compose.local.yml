@@ -1,0 +1,129 @@
+# =============================================================================
+# Sleep Scoring Web - Local Development Docker Compose
+# =============================================================================
+#
+# Uses monorepo workspace for builds (before packages are published to GitHub)
+#
+# Usage:
+#   cd docker
+#   docker compose -f docker-compose.local.yml up -d --build
+#
+# =============================================================================
+
+name: sleep-scoring-web-local
+
+services:
+  # ===========================================================================
+  # Database
+  # ===========================================================================
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: sleep-scoring-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sleepscoring}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sleepscoring_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-sleep_scoring}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5434}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sleepscoring}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - sleep-scoring-network
+
+  # ===========================================================================
+  # Backend API (Local Build)
+  # ===========================================================================
+
+  backend:
+    build:
+      # Context is monorepo root to access shared packages
+      context: ../../..
+      dockerfile: apps/sleep-scoring-demo/docker/backend/Dockerfile.local
+    container_name: sleep-scoring-backend
+    environment:
+      # Database
+      USE_SQLITE: "false"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-sleepscoring}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sleepscoring_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-sleep_scoring}
+
+      # Authentication
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production-use-32-char-key}
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+
+      # Application
+      PYTHONUNBUFFERED: 1
+      DEBUG: ${DEBUG:-false}
+      CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost:8501"]}'
+    volumes:
+      # Mount data directory for CSV files to scan on startup
+      - ../data:/app/data
+      # Mount uploads directory for file uploads
+      - ../uploads:/app/uploads
+    ports:
+      - "${BACKEND_PORT:-8500}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - sleep-scoring-network
+
+  # ===========================================================================
+  # Frontend
+  # ===========================================================================
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/frontend/Dockerfile
+      args:
+        # API base URL - now uses /api without versioning
+        VITE_API_BASE_URL: /api
+    container_name: sleep-scoring-frontend
+    ports:
+      - "${FRONTEND_PORT:-8501}:80"
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - sleep-scoring-network
+
+# =============================================================================
+# Networks
+# =============================================================================
+
+networks:
+  sleep-scoring-network:
+    driver: bridge
+    name: sleep-scoring-network
+
+# =============================================================================
+# Volumes
+# =============================================================================
+
+volumes:
+  postgres_data:
+    name: sleep-scoring-postgres-data

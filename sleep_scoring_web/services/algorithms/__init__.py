@@ -16,8 +16,8 @@ from .factory import (
 from .sadeh import SadehAlgorithm
 
 __all__ = [
-    "AlgorithmType",
     "ALGORITHM_TYPES",
+    "AlgorithmType",
     "ChoiAlgorithm",
     "ColeKripkeAlgorithm",
     "SadehAlgorithm",
