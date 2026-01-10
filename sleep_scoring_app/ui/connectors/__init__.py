@@ -21,6 +21,7 @@ Usage:
 """
 
 from .activity import ActivityDataConnector
+from .error import ErrorNotificationConnector
 from .file import FileListConnector, FileManagementConnector, FileSelectionLabelConnector, FileTableConnector
 from .manager import SideEffectConnector, StoreConnectorManager, connect_all_components
 from .marker import AdjacentMarkersConnector, AutoSaveConnector, MarkerModeConnector, MarkersConnector
@@ -35,6 +36,8 @@ from .ui_controls import AnalysisTabConnector, SignalsConnector, TimeFieldConnec
 __all__ = [
     # activity.py
     "ActivityDataConnector",
+    # error.py
+    "ErrorNotificationConnector",
     # marker.py
     "AdjacentMarkersConnector",
     # settings.py

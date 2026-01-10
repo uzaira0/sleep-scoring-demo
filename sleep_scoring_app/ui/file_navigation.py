@@ -15,7 +15,6 @@ from PyQt6.QtWidgets import QMessageBox
 from sleep_scoring_app.ui.store import Actions
 
 if TYPE_CHECKING:
-    from sleep_scoring_app.core.dataclasses import FileInfo
     from sleep_scoring_app.ui.protocols import (
         AppStateInterface,
         MainWindowProtocol,
@@ -29,15 +28,15 @@ logger = logging.getLogger(__name__)
 
 class FileNavigationManager:
     """
-    Manages file and date navigation for the main window.
+    Manages date navigation for the main window.
 
-    Responsibilities:
-    - Populate and update date dropdown
-    - Handle date selection changes
+    NOTE: File selection is handled by UIControlsConnector -> MainWindow.on_file_selected_from_table().
+    Navigation button state is handled by NavigationConnector.
+
+    Remaining responsibilities:
+    - Handle date selection changes (dropdown)
     - Navigate between dates (prev/next)
-    - Navigate between files (prev/next)
     - Check for unsaved markers before navigation
-    - Handle file selection from table
     """
 
     def __init__(
@@ -124,57 +123,3 @@ class FileNavigationManager:
 
         logger.info("=== _check_unsaved_markers (file_navigation) END - No unsaved markers ===")
         return False
-
-    def refresh_file_dropdown_indicators(self) -> None:
-        """Refresh file dropdown to show marker indicators."""
-        # Main window always has this method
-        self.parent._refresh_file_dropdown_indicators()
-
-    def update_navigation_buttons(self) -> None:
-        """Update navigation button states."""
-        # Analysis tab and navigation buttons always exist after UI setup
-        self.parent.analysis_tab.prev_date_btn.setEnabled(self.parent.current_date_index > 0)
-        self.parent.analysis_tab.next_date_btn.setEnabled(self.parent.current_date_index < len(self.parent.available_dates) - 1)
-
-    def on_file_selected_from_table(self, file_info: FileInfo) -> None:
-        """
-        Handle file selection from table widget using Redux pattern.
-        This is an 'Effect' that orchestrates data loading and store updates.
-        """
-        if not file_info:
-            return
-
-        logger.info(f"NAV MANAGER: Processing file selection for {file_info.filename}")
-
-        try:
-            # 1. Check for unsaved changes (User interaction permitted here)
-            if self._check_unsaved_markers():
-                return
-
-            # NOTE: file_selected action is ALREADY dispatched by SignalsConnector
-            # DO NOT dispatch again here - it would clear dates that we're about to load
-
-            # 2. Perform data loading
-            skip_rows = self.services.config_manager.config.skip_rows
-            logger.info(f"NAV MANAGER: Loading dates for {file_info.filename} (skip_rows={skip_rows})")
-
-            # This is a pure data call to the service
-            new_dates = self.services.data_service.load_selected_file(file_info, skip_rows)
-
-            if new_dates:
-                logger.info(f"NAV MANAGER: Found {len(new_dates)} dates for {file_info.filename}. First date: {new_dates[0]}")
-                # 4. Dispatch DATES_LOADED to Store
-                self.store.dispatch(Actions.dates_loaded(new_dates))
-                logger.info("NAV MANAGER: Dispatched DATES_LOADED")
-            else:
-                logger.warning(f"NAV MANAGER: NO DATES FOUND for {file_info.filename} via service")
-                self.store.dispatch(Actions.dates_loaded([]))
-
-            # 5. Load auxiliary data
-            # MainWindowProtocol guarantees this method exists
-            self.main_window._load_diary_data_for_file()
-
-        except Exception as e:
-            logger.exception("NAV MANAGER: File selection failed")
-            # Using main_window as parent for dialog is acceptable (Qt parent-child relationship)
-            QMessageBox.critical(self.main_window, "File Error", f"Failed to load file:\n{e}")

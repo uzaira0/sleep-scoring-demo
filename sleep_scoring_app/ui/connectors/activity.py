@@ -88,12 +88,9 @@ class ActivityDataConnector:
         target_date = date.fromisoformat(date_str)
 
         try:
-            # Call data service DIRECTLY (not through MainWindow)
-            data_manager = self.main_window.data_service.data_manager
-            loading_service = data_manager._loading_service
-
+            # MED-005 FIX: Use public API instead of accessing private _loading_service
             # Load ALL columns in ONE query - unified data
-            unified_data = loading_service.load_unified_activity_data(
+            unified_data = self.main_window.data_service.load_unified_activity_data(
                 state.current_file,
                 target_date,
                 hours=48,
@@ -150,6 +147,8 @@ class ActivityDataConnector:
                     vector_magnitude=[],
                 )
             )
+            # HIGH-002 FIX: Dispatch error to notify user via status bar
+            self.store.dispatch_safe(Actions.error_occurred(f"Failed to load activity data: {e}"))
 
     def disconnect(self) -> None:
         """Cleanup subscription."""

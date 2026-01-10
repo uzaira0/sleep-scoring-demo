@@ -10,6 +10,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from .activity import ActivityDataConnector
+from .error import ErrorNotificationConnector
 from .file import FileListConnector, FileManagementConnector, FileSelectionLabelConnector, FileTableConnector
 from .marker import AdjacentMarkersConnector, AutoSaveConnector, MarkerModeConnector, MarkersConnector
 from .navigation import DateDropdownConnector, NavigationConnector, NavigationGuardConnector, ViewModeConnector
@@ -170,6 +171,7 @@ class StoreConnectorManager:
             CacheConnector(self.store, self.main_window),
             ConfigPersistenceConnector(self.store, self.main_window),
             WindowGeometryConnector(self.store, self.main_window),
+            ErrorNotificationConnector(self.store, self.main_window),  # Shows errors in status bar
         ]
 
         # 3. Special wiring: Connect the FileManagementConnector to the Effects handler

@@ -93,6 +93,26 @@ class UnifiedDataService:
         """Load a selected file and return available dates."""
         return self.data_manager.load_selected_file(file_info, skip_rows)
 
+    def load_unified_activity_data(self, filename: str, target_date: date, hours: int = 48) -> dict[str, list] | None:
+        """
+        Load ALL activity columns in ONE query with unified timestamps.
+
+        This is the PUBLIC API for connectors to load activity data.
+        Delegates to the internal loading service.
+
+        Args:
+            filename: Name of file to load (filename only, not full path)
+            target_date: Target date for data loading
+            hours: Number of hours to load (default 48)
+
+        Returns:
+            Dictionary with keys: 'timestamps', 'axis_y', 'axis_x', 'axis_z', 'vector_magnitude'
+            All lists have the SAME length (guaranteed).
+            Returns None if loading fails.
+        """
+        loading_service = self.data_manager._loading_service
+        return loading_service.load_unified_activity_data(filename, target_date, hours)
+
     def find_available_files(self) -> list[FileInfo]:
         """Find all available data files."""
         return self._file_service.find_available_files()

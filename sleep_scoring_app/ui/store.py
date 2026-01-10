@@ -147,6 +147,11 @@ class UIState:
     last_saved_file: str | None = None
     last_saved_date: str | None = None
 
+    # === Error Notification ===
+    # Used by connectors to show errors to the user via status bar
+    last_error_message: str | None = None
+    last_error_time: float = 0.0  # Timestamp to distinguish same-message errors
+
 
 # =============================================================================
 # Actions
@@ -212,6 +217,10 @@ class ActionType(StrEnum):
     RESET_STATE = auto()
     STATE_LOADED_FROM_SETTINGS = auto()
 
+    # Error handling
+    ERROR_OCCURRED = auto()
+    ERROR_CLEARED = auto()
+
 
 @dataclass(frozen=True)
 class Action:
@@ -269,6 +278,19 @@ class Actions:
     def reset_state() -> Action:
         """Create action for resetting all state to defaults."""
         return Action(type=ActionType.RESET_STATE)
+
+    @staticmethod
+    def error_occurred(message: str) -> Action:
+        """Create action for when an error occurs that should be shown to the user."""
+        return Action(
+            type=ActionType.ERROR_OCCURRED,
+            payload={"message": message, "timestamp": time.time()},
+        )
+
+    @staticmethod
+    def error_cleared() -> Action:
+        """Create action for clearing the error message."""
+        return Action(type=ActionType.ERROR_CLEARED)
 
     @staticmethod
     def dates_loaded(dates: list) -> Action:
@@ -779,6 +801,21 @@ def ui_reducer(state: UIState, action: Action) -> UIState:
 
         case ActionType.RESET_STATE:
             return UIState()  # Return fresh default state
+
+        case ActionType.ERROR_OCCURRED:
+            if action.payload is None:
+                return state
+            return replace(
+                state,
+                last_error_message=action.payload["message"],
+                last_error_time=action.payload["timestamp"],
+            )
+
+        case ActionType.ERROR_CLEARED:
+            return replace(
+                state,
+                last_error_message=None,
+            )
 
         case _:
             logger.warning("Unknown action type: %s", action.type)

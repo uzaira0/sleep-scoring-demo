@@ -492,7 +492,7 @@ class DataLoadingService:
                     filtered_activity.append(max(0, activity_data[i]))  # Ensure non-negative
 
             if len(filtered_timestamps) == 0:
-                logger.debug("No data found in time range %s to %s", start_time, end_time)
+                logger.warning("No data found in time range %s to %s (check file import status)", start_time, end_time)
                 return None, None
 
             logger.debug("Loaded %s data points from %s to %s", len(filtered_timestamps), filtered_timestamps[0], filtered_timestamps[-1])

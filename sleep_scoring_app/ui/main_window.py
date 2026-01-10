@@ -212,13 +212,6 @@ class SleepScoringMainWindow(QMainWindow):
         # max_memory_mb=500: Each 48h dataset ~20-30MB, allows ~15-20 cached datasets
         self.current_date_48h_cache = BoundedCache(max_size=20, max_memory_mb=500)
 
-        # Table update throttling
-        self._pending_markers = None
-        self._table_update_timer = QTimer(self)
-        self._table_update_timer.setSingleShot(True)
-        self._table_update_timer.timeout.connect(self._on_table_update_timer)
-        self._last_table_update_time = 0.0
-
         # Initialize autosave coordinator (subscribes to Redux store)
         from sleep_scoring_app.ui.coordinators import AutosaveCoordinator
 
@@ -995,7 +988,7 @@ class SleepScoringMainWindow(QMainWindow):
         if markers_dirty and self.store.state.auto_save_enabled:
             logger.info("Forcing immediate save before navigation (autosave enabled, markers dirty)")
             # Force the autosave coordinator to save immediately (bypasses debounce timer)
-            if hasattr(self, "autosave_coordinator") and self.autosave_coordinator:
+            if self.autosave_coordinator is not None:
                 self.autosave_coordinator.force_save()
             else:
                 # Fallback to direct save if coordinator not available
@@ -1354,47 +1347,6 @@ class SleepScoringMainWindow(QMainWindow):
     def update_marker_tables(self, onset_data, offset_data) -> None:
         """Update the data tables with surrounding marker information."""
         self.table_manager.update_marker_tables(onset_data, offset_data)
-
-    def _on_table_update_timer(self) -> None:
-        """
-        Handle delayed table update after marker drag ends.
-
-        Only updates tables in SLEEP mode - nonwear mode updates are handled by
-        handle_nonwear_marker_selected signal handler.
-        """
-        if self._pending_markers is None:
-            return
-
-        # Only update tables in SLEEP mode
-        from sleep_scoring_app.core.constants import MarkerCategory
-
-        if self.store.state.marker_mode != MarkerCategory.SLEEP:
-            return
-
-        # Get the currently selected period for final update
-        selected_period = getattr(self.plot_widget, "get_selected_marker_period", lambda: None)()
-        if selected_period and selected_period.is_complete:
-            onset_idx = self._marker_index_cache.get(selected_period.onset_timestamp)
-            offset_idx = self._marker_index_cache.get(selected_period.offset_timestamp)
-
-            onset_data = self._get_marker_data_cached(selected_period.onset_timestamp, onset_idx)
-            offset_data = self._get_marker_data_cached(selected_period.offset_timestamp, offset_idx)
-
-            if onset_data or offset_data:
-                self.update_marker_tables(onset_data, offset_data)
-        else:
-            # Fallback to first complete period
-            complete_periods = self._pending_markers.get_complete_periods()
-            if complete_periods:
-                first_period = complete_periods[0]
-                onset_idx = self._marker_index_cache.get(first_period.onset_timestamp)
-                offset_idx = self._marker_index_cache.get(first_period.offset_timestamp)
-
-                onset_data = self._get_marker_data_cached(first_period.onset_timestamp, onset_idx)
-                offset_data = self._get_marker_data_cached(first_period.offset_timestamp, offset_idx)
-
-                if onset_data or offset_data:
-                    self.update_marker_tables(onset_data, offset_data)
 
     def _connect_table_click_handlers(self) -> None:
         """Connect click handlers for marker tables to enable row click to move marker."""
@@ -2288,12 +2240,6 @@ class SleepScoringMainWindow(QMainWindow):
     def _cleanup_resources(self) -> None:
         """Clean up resources before shutdown."""
         try:
-            # Stop and cleanup timers
-            if self._table_update_timer:
-                self._table_update_timer.stop()
-                self._table_update_timer.deleteLater()
-                self._table_update_timer = None
-
             # Disconnect store connectors
             if self._store_connector_manager is not None:
                 self._store_connector_manager.disconnect_all()

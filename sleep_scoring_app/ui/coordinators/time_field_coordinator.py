@@ -15,6 +15,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Delay before triggering update after focus-out event (milliseconds).
+# This allows the field value to be fully committed before notifying listeners.
+# Too short causes race conditions; too long feels sluggish to users.
+FOCUS_OUT_UPDATE_DELAY_MS = 50
+
 
 class TimeFieldFocusHandler(QObject):
     """Handle focus events for time fields."""
@@ -37,7 +42,7 @@ class TimeFieldFocusHandler(QObject):
             # Check if value changed when focus lost
             if isinstance(obj, QLineEdit) and obj.text() != self.initial_value:
                 # Trigger update via callback
-                QTimer.singleShot(50, self.parent_coordinator.trigger_update)
+                QTimer.singleShot(FOCUS_OUT_UPDATE_DELAY_MS, self.parent_coordinator.trigger_update)
         return False  # Don't consume the event
 
 

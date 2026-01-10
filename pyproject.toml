@@ -50,6 +50,7 @@ web = [
     "uvicorn[standard]>=0.32.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
+    "global-pass-honor-username-auth>=0.1.0",
     "sqlalchemy[asyncio]>=2.0.0",
     "asyncpg>=0.29.0",
     "python-jose[cryptography]>=3.3.0",
@@ -58,12 +59,24 @@ web = [
     "aiofiles>=23.0.0",
     "watchdog>=4.0.0",
     "polars>=0.20.0",
+    # Monorepo shared packages
+    "deploy-toolkit>=0.1.0",
+    "db-toolkit>=0.1.0",
+    "fastapi-errors>=0.1.0",
+    "fastapi-pagination>=0.1.0",
+    "fastapi-logging>=0.1.0",
+    "fastapi-ratelimit>=0.1.0",
+    "fastapi-files>=0.1.0",
+    "fastapi-tasks>=0.1.0",
 ]
 # Development dependencies - testing and code quality tools
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "pytest-qt>=4.2.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.27.0",
+    "aiosqlite>=0.19.0",
     "ruff>=0.1.0",
     "basedpyright>=1.18.0",
     "pre-commit>=3.0.0",
@@ -261,6 +274,17 @@ reportPrivateUsage = false  # Intentional _method access across layers
 reportUnsupportedDunderAll = false  # __all__ with re-exports
 include = ["sleep_scoring_app"]
 exclude = ["tests", "**/__pycache__", "main.py"]
+
+[tool.uv.sources]
+global-pass-honor-username-auth = { path = "../../packages/global-pass-honor-username-auth", editable = true }
+deploy-toolkit = { path = "../../packages/deploy-toolkit", editable = true }
+db-toolkit = { path = "../../packages/db-toolkit", editable = true }
+fastapi-errors = { path = "../../packages/fastapi-errors", editable = true }
+fastapi-pagination = { path = "../../packages/fastapi-pagination", editable = true }
+fastapi-logging = { path = "../../packages/fastapi-logging", editable = true }
+fastapi-ratelimit = { path = "../../packages/fastapi-ratelimit", editable = true }
+fastapi-files = { path = "../../packages/fastapi-files", editable = true }
+fastapi-tasks = { path = "../../packages/fastapi-tasks", editable = true }
 
 
 

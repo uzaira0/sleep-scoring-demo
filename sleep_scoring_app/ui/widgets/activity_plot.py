@@ -575,7 +575,7 @@ class ActivityPlotWidget(pg.PlotWidget):
             self.main_48h_sadeh_timestamps = None  # Must clear alongside sadeh_results
             self._cached_48h_vm_data = None
             # Also clear algorithm manager's caches
-            if hasattr(self, "algorithm_manager") and self.algorithm_manager:
+            if self.algorithm_manager is not None:
                 self.algorithm_manager._algorithm_cache.clear()
             logger.debug("Stored 48hr main data: %d timestamps, cleared all algorithm caches", len(timestamps) if timestamps else 0)
 
